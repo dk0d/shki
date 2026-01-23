@@ -2,12 +2,11 @@
 <img src="/assets/shki-logo.png" alt='shki-logo' style="width: 50%; border-radius: 0.5rem; filter: drop-shadow(0 4px);"/>
 </p>
 
-
 # shki
 
-A declarative database schema management and migration tool for Rust.
+A drizzle-orm inspired database schema management and migration tool using Lua and Rust.
 
-`shki` allows you to define your database schema declaratively in Rust code,
+`shki` allows you to define your database schema declaratively in Lua (or Rust) code,
 then automatically generate migrations to transition from the current database
 state to your desired schema state.
 
@@ -23,3 +22,36 @@ state to your desired schema state.
 - **Database Introspection**: Pull existing database schemas into Rust code
 - **Type-Safe**: Leverage Rust's type system for schema definitions
 
+## Use Patterns
+
+### Lua + CLI
+
+1. Create a `shki` db project in your repo
+
+```bash
+shki init db -l lua 
+```
+
+This creates a new project with the below structure
+
+```bash
+db
+├── migrations
+│   └── _meta
+├── schema
+│   ├── .luacats       # lua language server bindings for autocomplete
+│   ├── .luarc.json    # lua language server config
+│   ├── .selene.toml   # selene linter config
+│   ├── init.lua       # main schema entry file
+│   └── shki.yml       # selene standard lib support
+└── shki.toml
+```
+
+The main entry point of the schema is `schema.lua`.
+
+
+### Rust Lib
+
+Write your schema as a Rust binary...
+
+...more coming soon
