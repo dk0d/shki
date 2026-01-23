@@ -2,5 +2,10 @@
 name = "shki"
 version = "0.1.0"
 edition = "2024"
+description = "Declarative database schema management and migration tool for Rust"
+license = "MIT"
+repository = "https://github.com/dk0d/shki"
+keywords = ["database", "schema", "migration", "postgresql", "mysql", "sqlite"]
+categories = ["database", "command-line-utilities"]
 
 [dependencies]

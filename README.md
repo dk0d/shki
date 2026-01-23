@@ -1,0 +1,25 @@
+<p align="center">
+<img src="/assets/shki-logo.png" alt='shki-logo' style="width: 50%; border-radius: 0.5rem; filter: drop-shadow(0 4px);"/>
+</p>
+
+
+# shki
+
+A declarative database schema management and migration tool for Rust.
+
+`shki` allows you to define your database schema declaratively in Rust code,
+then automatically generate migrations to transition from the current database
+state to your desired schema state.
+
+## Features
+
+- **Declarative Schema Definition**: Define tables, columns, indexes, and constraints in Lua or Rust
+  - type completions 
+- **Automatic Migration Generation**: Diff your schema against the database and generate migrations
+- **Multi-Dialect Support**: 
+    - [ ] PostgreSQL
+    - [ ] MySQL
+    - [ ] SQLite
+- **Database Introspection**: Pull existing database schemas into Rust code
+- **Type-Safe**: Leverage Rust's type system for schema definitions
+
