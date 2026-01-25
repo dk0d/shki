@@ -3,6 +3,7 @@
 //! This module provides the command-line interface for the shki tool.
 
 pub mod commands;
+use clap::builder::styling::{AnsiColor, Color, Style};
 pub use commands::run;
 pub mod constants;
 pub mod templates;
@@ -12,21 +13,51 @@ use std::path::PathBuf;
 
 use crate::schema::SchemaDialect;
 
+pub fn get_styles() -> clap::builder::Styles {
+    clap::builder::Styles::styled()
+        .usage(
+            Style::new()
+                .bold()
+                .underline()
+                .fg_color(Some(AnsiColor::Yellow.into())),
+        )
+        .header(
+            Style::new()
+                .bold()
+                .underline()
+                .fg_color(Some(AnsiColor::Blue.into())),
+        )
+        .literal(Style::new().fg_color(Some(AnsiColor::Green.into())))
+        .invalid(
+            Style::new()
+                .bold()
+                .fg_color(Some(Color::Ansi(AnsiColor::Red))),
+        )
+        .error(Style::new().bold().fg_color(Some(AnsiColor::Red.into())))
+        .valid(
+            Style::new()
+                .bold()
+                .underline()
+                .fg_color(Some(AnsiColor::Green.into())),
+        )
+        .placeholder(Style::new().fg_color(Some(AnsiColor::White.into())))
+}
+
 /// Shki - Declarative database schema management
 #[derive(Parser, Debug)]
 #[command(name = "shki")]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, styles=get_styles())]
 pub struct Cli {
     /// Path to configuration file
     #[arg(short, long, global = true, default_value = "shki.toml")]
     pub config: PathBuf,
 
     /// Database dialect
-    #[arg(long, global = true, value_enum)]
+    #[arg(long, short = 'l', global = true, value_enum)]
     pub dialect: Option<DialectArg>,
 
     /// Database connection URL
-    #[arg(long, global = true, env = "DATABASE_URL")]
+    #[arg(long, short = 'u', global = true, env = "DATABASE_URL")]
     pub database_url: Option<String>,
 
     /// Output directory for migrations
@@ -107,7 +138,7 @@ pub enum Commands {
     /// Apply pending migrations to the database
     Migrate {
         /// Only show what would be applied
-        #[arg(long)]
+        #[arg(long, short)]
         dry_run: bool,
     },
 
