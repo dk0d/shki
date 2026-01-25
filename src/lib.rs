@@ -1,3 +1,5 @@
+pub mod migration;
+pub use migration::*;
 pub mod config;
 pub use config::*;
 pub mod cli;
@@ -6,3 +8,5 @@ pub mod error;
 pub use error::*;
 pub mod schema;
 pub use schema::*;
+pub mod snapshot;
+pub use snapshot::*;
