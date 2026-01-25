@@ -23,12 +23,16 @@ clap = { version = "4.5.54", features = ["derive", "string", "env"] }
 colored = "3.1.1"
 figment = { version = "0.10.19", features = ["env", "toml", "serde_json"] }
 indexmap = { version = "2.13.0", features = ["serde"] }
+thiserror = "2.0.18"
+
+# Serialization and Deserialization
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-sqlx = { version = "0.8.6", features = ["runtime-tokio"] }
-thiserror = "2.0.18"
-tokio = { version = "1.49.0", features = ["full"] }
 toml = "0.9.11"
+
+# Database Drivers
+sqlx = { version = "0.8.6", features = ["runtime-tokio"] }
+tokio = { version = "1.49.0", features = ["full"] }
 uuid = { version = "1.20.0", features = ["v4", "v7", "serde"] }
 
 [dev-dependencies]
