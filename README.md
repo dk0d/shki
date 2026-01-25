@@ -39,15 +39,15 @@ This creates a new project with the below structure
 
 ```bash
 db
-├── migrations
+├── migrations     # where your migrations live
 │   └── _meta
-├── schema
-│   ├── .luacats       # lua language server bindings for autocomplete
-│   ├── .luarc.json    # lua language server config
-│   ├── .selene.toml   # selene linter config
-│   ├── init.lua       # main schema entry file
-│   └── shki.yml       # selene standard lib support
-└── shki.toml
+├── schema         # your lua schema def files
+│   └── init.lua   # main schema entry file
+├── .luacats       # lua language server bindings for autocomplete
+├── .luarc.json    # lua language server config
+├── .selene.toml   # selene linter config
+├── shki.yml       # selene standard lib support
+└── shki.toml      # shki project configuration
 ```
 
 The main entry point of the schema is `init.lua`.
