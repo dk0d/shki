@@ -2,6 +2,9 @@
 <img src="/assets/shki-logo.png" alt='shki-logo' style="width: 50%; border-radius: 0.5rem; filter: drop-shadow(0 4px);"/>
 </p>
 
+> [!WARNING]
+> This is currently a work-in-progress and planned features may not be fully finished or entirely missing
+
 # shki
 
 A drizzle-orm inspired database schema management and migration tool using Lua and Rust.
@@ -47,7 +50,7 @@ db
 └── shki.toml
 ```
 
-The main entry point of the schema is `schema.lua`.
+The main entry point of the schema is `init.lua`.
 
 
 ### Rust Lib

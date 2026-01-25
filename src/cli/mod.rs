@@ -3,6 +3,7 @@
 //! This module provides the command-line interface for the shki tool.
 
 pub mod commands;
+pub use commands::run;
 pub mod constants;
 pub mod templates;
 

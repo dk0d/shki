@@ -6,7 +6,7 @@ use crate::cli::templates::lua_schema_template;
 use crate::config::Config;
 use crate::schema::SchemaDialect;
 
-use super::SchemaLanguage;
+use super::{Cli, SchemaLanguage};
 use crate::cli::constants::LUACATS_SHKI_TYPES;
 
 /// Initialize a new shki project
@@ -41,5 +41,15 @@ async fn cmd_init(
 
 /// Initialize a Lua-based shki project
 async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<()> {
+    todo!();
+}
+
+pub async fn run(cli: Cli) -> Result<()> {
+    // Load config
+    let mut config = if cli.config.exists() {
+        Config::load(&cli.config)?
+    } else {
+        Config::default()
+    };
     todo!();
 }

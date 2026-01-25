@@ -1,10 +1,13 @@
-pub mod config;
-pub use config::*;
-pub mod cli;
-pub mod error;
-pub use error::*;
-pub mod schema;
+use clap::Parser;
 
-fn main() {
-    println!("Hello, world!");
+use shki::cli::{Cli, run};
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+
+    if let Err(e) = run(cli).await {
+        eprintln!("\x1b[31mError:\x1b[0m {}", e);
+        std::process::exit(1);
+    }
 }
