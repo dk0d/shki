@@ -908,10 +908,12 @@ mod tests {
 
     #[test]
     fn test_list_migrations_empty_dir() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
 
-        let migrations = manager.list_migrations().unwrap();
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations");
         assert!(migrations.is_empty());
     }
 
@@ -919,13 +921,15 @@ mod tests {
     fn test_list_migrations_nonexistent_dir() {
         let manager = MigrationManager::new("/nonexistent/path", SchemaDialect::Postgres);
 
-        let migrations = manager.list_migrations().unwrap();
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations");
         assert!(migrations.is_empty());
     }
 
     #[test]
     fn test_list_migrations_arbitrary_sql_files() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         // Create arbitrary SQL migration files (like from another tool)
@@ -933,27 +937,34 @@ mod tests {
             dir_path.join("001_create_users.sql"),
             "CREATE TABLE users (id INT);",
         )
-        .unwrap();
+        .expect("failed to write 001_create_users.sql");
         fs::write(
             dir_path.join("002_add_email.sql"),
             "ALTER TABLE users ADD COLUMN email TEXT;",
         )
-        .unwrap();
+        .expect("failed to write 002_add_email.sql");
         fs::write(
             dir_path.join("003_create_posts.sql"),
             "CREATE TABLE posts (id INT);",
         )
-        .unwrap();
+        .expect("failed to write 003_create_posts.sql");
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres);
-        let migrations = manager.list_migrations().unwrap();
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations");
 
         assert_eq!(migrations.len(), 3);
 
         // Verify they are sorted
         let names: Vec<_> = migrations
             .iter()
-            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .map(|p| {
+                p.file_name()
+                    .expect("migration path missing filename")
+                    .to_str()
+                    .expect("filename contains invalid UTF-8")
+            })
             .collect();
         assert_eq!(
             names,
@@ -967,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_list_migrations_excludes_down_files() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         // Create up and down migrations
@@ -975,40 +986,54 @@ mod tests {
             dir_path.join("001_initial.sql"),
             "CREATE TABLE users (id INT);",
         )
-        .unwrap();
-        fs::write(dir_path.join("001_initial.down.sql"), "DROP TABLE users;").unwrap();
+        .expect("failed to write 001_initial.sql");
+        fs::write(dir_path.join("001_initial.down.sql"), "DROP TABLE users;")
+            .expect("failed to write 001_initial.down.sql");
         fs::write(
             dir_path.join("002_add_email.sql"),
             "ALTER TABLE users ADD COLUMN email TEXT;",
         )
-        .unwrap();
+        .expect("failed to write 002_add_email.sql");
         fs::write(
             dir_path.join("002_add_email.down.sql"),
             "ALTER TABLE users DROP COLUMN email;",
         )
-        .unwrap();
+        .expect("failed to write 002_add_email.down.sql");
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres);
-        let up_migrations = manager.list_up_migrations().unwrap();
-        let down_migrations = manager.list_down_migrations().unwrap();
+        let up_migrations = manager
+            .list_up_migrations()
+            .expect("failed to list up migrations");
+        let down_migrations = manager
+            .list_down_migrations()
+            .expect("failed to list down migrations");
 
         assert_eq!(up_migrations.len(), 2);
         assert_eq!(down_migrations.len(), 2);
 
         // Verify up migrations don't include .down.sql files
         for path in &up_migrations {
-            assert!(!path.to_str().unwrap().ends_with(".down.sql"));
+            assert!(
+                !path
+                    .to_str()
+                    .expect("path contains invalid UTF-8")
+                    .ends_with(".down.sql")
+            );
         }
 
         // Verify down migrations only include .down.sql files
         for path in &down_migrations {
-            assert!(path.to_str().unwrap().ends_with(".down.sql"));
+            assert!(
+                path.to_str()
+                    .expect("path contains invalid UTF-8")
+                    .ends_with(".down.sql")
+            );
         }
     }
 
     #[test]
     fn test_list_migrations_ignores_non_sql_files() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         // Create various files
@@ -1016,41 +1041,50 @@ mod tests {
             dir_path.join("001_migration.sql"),
             "CREATE TABLE t1 (id INT);",
         )
-        .unwrap();
-        fs::write(dir_path.join("README.md"), "# Migrations").unwrap();
-        fs::write(dir_path.join("config.json"), "{}").unwrap();
-        fs::write(dir_path.join(".gitkeep"), "").unwrap();
-        fs::create_dir(dir_path.join("_meta")).unwrap();
-        fs::write(dir_path.join("_meta/snapshot.json"), "{}").unwrap();
+        .expect("failed to write 001_migration.sql");
+        fs::write(dir_path.join("README.md"), "# Migrations").expect("failed to write README.md");
+        fs::write(dir_path.join("config.json"), "{}").expect("failed to write config.json");
+        fs::write(dir_path.join(".gitkeep"), "").expect("failed to write .gitkeep");
+        fs::create_dir(dir_path.join("_meta")).expect("failed to create _meta directory");
+        fs::write(dir_path.join("_meta/snapshot.json"), "{}")
+            .expect("failed to write _meta/snapshot.json");
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres);
-        let migrations = manager.list_migrations().unwrap();
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations");
 
         // Only the .sql file should be listed
         assert_eq!(migrations.len(), 1);
         assert!(
             migrations[0]
                 .file_name()
-                .unwrap()
+                .expect("migration path missing filename")
                 .to_str()
-                .unwrap()
+                .expect("filename contains invalid UTF-8")
                 .ends_with(".sql")
         );
     }
 
     #[test]
     fn test_list_migrations_various_naming_formats() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         // Test various naming conventions from different tools
-        fs::write(dir_path.join("20231215120000_initial.sql"), "SELECT 1;").unwrap(); // Timestamp prefix
-        fs::write(dir_path.join("V1__initial.sql"), "SELECT 2;").unwrap(); // Flyway style
-        fs::write(dir_path.join("0001_first.sql"), "SELECT 3;").unwrap(); // Index prefix
-        fs::write(dir_path.join("custom_migration.sql"), "SELECT 4;").unwrap(); // No prefix
+        fs::write(dir_path.join("20231215120000_initial.sql"), "SELECT 1;")
+            .expect("failed to write timestamp-prefixed migration");
+        fs::write(dir_path.join("V1__initial.sql"), "SELECT 2;")
+            .expect("failed to write flyway-style migration");
+        fs::write(dir_path.join("0001_first.sql"), "SELECT 3;")
+            .expect("failed to write index-prefixed migration");
+        fs::write(dir_path.join("custom_migration.sql"), "SELECT 4;")
+            .expect("failed to write custom migration");
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres);
-        let migrations = manager.list_migrations().unwrap();
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations");
 
         // All should be listed and sorted alphabetically
         assert_eq!(migrations.len(), 4);
@@ -1068,12 +1102,15 @@ mod tests {
 
     #[test]
     fn test_has_down_migration() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
-        fs::write(dir_path.join("001_with_down.sql"), "CREATE TABLE t;").unwrap();
-        fs::write(dir_path.join("001_with_down.down.sql"), "DROP TABLE t;").unwrap();
-        fs::write(dir_path.join("002_without_down.sql"), "CREATE TABLE t2;").unwrap();
+        fs::write(dir_path.join("001_with_down.sql"), "CREATE TABLE t;")
+            .expect("failed to write 001_with_down.sql");
+        fs::write(dir_path.join("001_with_down.down.sql"), "DROP TABLE t;")
+            .expect("failed to write 001_with_down.down.sql");
+        fs::write(dir_path.join("002_without_down.sql"), "CREATE TABLE t2;")
+            .expect("failed to write 002_without_down.sql");
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres);
 
@@ -1083,49 +1120,63 @@ mod tests {
 
     #[test]
     fn test_next_migration_with_prefix_index() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres)
             .with_prefix(MigrationPrefix::Index);
 
         // First migration should be 0000
-        let name = manager.next_migration_name("initial").unwrap();
+        let name = manager
+            .next_migration_name("initial")
+            .expect("failed to get next migration name");
         assert_eq!(name, "0000_initial");
 
         // Add a migration file
-        fs::write(dir_path.join("0000_initial.sql"), "SELECT 1;").unwrap();
+        fs::write(dir_path.join("0000_initial.sql"), "SELECT 1;")
+            .expect("failed to write 0000_initial.sql");
 
         // Next should be 0001
-        let name = manager.next_migration_name("add_users").unwrap();
+        let name = manager
+            .next_migration_name("add_users")
+            .expect("failed to get next migration name");
         assert_eq!(name, "0001_add_users");
     }
 
     #[test]
     fn test_next_migration_with_prefix_timestamp() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
 
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres)
             .with_prefix(MigrationPrefix::Timestamp);
 
-        let name = manager.next_migration_name("initial").unwrap();
+        let name = manager
+            .next_migration_name("initial")
+            .expect("failed to get next migration name");
 
         // e.g. (20260125155257, "initial")
-        let (date, file_name) = name.split_once('_').unwrap();
+        let (date, file_name) = name
+            .split_once('_')
+            .expect("migration name missing underscore separator");
 
         // Verify date is a valid timestamp
         let init_date = NaiveDateTime::parse_from_str(date, "%Y%m%d%H%M%S")
-            .expect("Failed to parse initial timestamp");
+            .expect("failed to parse initial timestamp");
         assert_eq!(file_name, "initial");
 
-        fs::write(dir_path.join(format!("{}_initial.sql", date)), "SELECT 1;").unwrap();
+        fs::write(dir_path.join(format!("{}_initial.sql", date)), "SELECT 1;")
+            .expect("failed to write initial migration file");
 
         // Next should be a new date after or equal the previous one (only 1 second resolution)
-        let name = manager.next_migration_name("add_users").unwrap();
-        let (next_date, file_name) = name.split_once('_').unwrap();
+        let name = manager
+            .next_migration_name("add_users")
+            .expect("failed to get next migration name");
+        let (next_date, file_name) = name
+            .split_once('_')
+            .expect("migration name missing underscore separator");
         let next_date = NaiveDateTime::parse_from_str(next_date, "%Y%m%d%H%M%S")
-            .expect("Failed to parse next timestamp");
+            .expect("failed to parse next timestamp");
 
         // check for equality here because of test speed and don't want to rely on sleep
         assert!(next_date >= init_date);
@@ -1134,90 +1185,114 @@ mod tests {
 
     #[test]
     fn test_next_migration_with_prefix_unix() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let dir_path = temp_dir.path();
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres)
             .with_prefix(MigrationPrefix::Unix);
-        let name = manager.next_migration_name("initial").unwrap();
-        let (date, file_name) = name.split_once('_').unwrap();
-        let init_date =
-            DateTime::from_timestamp(date.parse::<i64>().expect("Should be valid number"), 0)
-                .expect("Failed to parse initial timestamp");
+        let name = manager
+            .next_migration_name("initial")
+            .expect("failed to get next migration name");
+        let (date, file_name) = name
+            .split_once('_')
+            .expect("migration name missing underscore separator");
+        let init_date = DateTime::from_timestamp(
+            date.parse::<i64>()
+                .expect("timestamp should be valid number"),
+            0,
+        )
+        .expect("failed to parse initial timestamp");
         assert_eq!(file_name, "initial");
 
-        fs::write(dir_path.join(format!("{}_initial.sql", date)), "SELECT 1;").unwrap();
-        let name = manager.next_migration_name("add_users").unwrap();
-        let (next_date, file_name) = name.split_once('_').unwrap();
-        let next_date =
-            DateTime::from_timestamp(next_date.parse::<i64>().expect("Should be valid number"), 0)
-                .expect("Failed to parse next timestamp");
+        fs::write(dir_path.join(format!("{}_initial.sql", date)), "SELECT 1;")
+            .expect("failed to write initial migration file");
+        let name = manager
+            .next_migration_name("add_users")
+            .expect("failed to get next migration name");
+        let (next_date, file_name) = name
+            .split_once('_')
+            .expect("migration name missing underscore separator");
+        let next_date = DateTime::from_timestamp(
+            next_date
+                .parse::<i64>()
+                .expect("timestamp should be valid number"),
+            0,
+        )
+        .expect("failed to parse next timestamp");
         assert!(next_date >= init_date);
         assert_eq!(file_name, "add_users");
     }
 
     #[test]
     fn test_create_blank_migration() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
 
-        let path = manager.create_blank_migration("add_index").unwrap();
+        let path = manager
+            .create_blank_migration("add_index")
+            .expect("failed to create blank migration");
 
         assert!(path.exists());
         assert!(
             path.file_name()
-                .unwrap()
+                .expect("migration path missing filename")
                 .to_str()
-                .unwrap()
+                .expect("filename contains invalid UTF-8")
                 .contains("add-index")
         );
         assert!(
             path.file_name()
-                .unwrap()
+                .expect("migration path missing filename")
                 .to_str()
-                .unwrap()
+                .expect("filename contains invalid UTF-8")
                 .ends_with(".sql")
         );
 
-        let content = fs::read_to_string(&path).unwrap();
+        let content = fs::read_to_string(&path).expect("failed to read migration file");
         assert!(content.contains("Migration:"));
         assert!(content.contains("manual"));
     }
 
     #[test]
     fn test_create_blank_migration_with_down() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
 
         let (up_path, down_path) = manager
             .create_blank_migration_with_down("add_column", true)
-            .unwrap();
+            .expect("failed to create migration with down file");
 
         assert!(up_path.exists());
         assert!(down_path.is_some());
-        assert!(down_path.as_ref().unwrap().exists());
+        assert!(
+            down_path
+                .as_ref()
+                .expect("down path should be Some")
+                .exists()
+        );
 
-        let down_content = fs::read_to_string(down_path.unwrap()).unwrap();
+        let down_content = fs::read_to_string(down_path.expect("down path should be Some"))
+            .expect("failed to read down migration file");
         assert!(down_content.contains("down"));
         assert!(down_content.contains("reverses"));
     }
 
     #[test]
     fn test_create_blank_migration_with_content() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
 
         let initial_sql = "CREATE INDEX idx_users_email ON users(email);";
         let path = manager
             .create_blank_migration_with_content("add_index", Some(initial_sql))
-            .unwrap();
+            .expect("failed to create migration with content");
 
-        let content = fs::read_to_string(&path).unwrap();
+        let content = fs::read_to_string(&path).expect("failed to read migration file");
         assert!(content.contains(initial_sql));
     }
 
     #[test]
     fn test_read_migration() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let path = temp_dir.path().join("001_test.sql");
 
         let content = r#"-- Migration: 001_test
@@ -1227,9 +1302,9 @@ mod tests {
 CREATE TABLE users (id INT);
 ALTER TABLE users ADD COLUMN name TEXT;
 "#;
-        fs::write(&path, content).unwrap();
+        fs::write(&path, content).expect("failed to write test migration file");
 
-        let sql = read_migration(&path).unwrap();
+        let sql = read_migration(&path).expect("failed to read migration");
 
         // Should skip header comments
         assert!(sql.contains("CREATE TABLE"));
@@ -1299,14 +1374,18 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_migration_name_special_characters() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
 
         // Special characters should be sanitized
         let path = manager
             .create_blank_migration("Add User's Email Index!!!")
-            .unwrap();
-        let filename = path.file_name().unwrap().to_str().unwrap();
+            .expect("failed to create migration with special characters");
+        let filename = path
+            .file_name()
+            .expect("migration path missing filename")
+            .to_str()
+            .expect("filename contains invalid UTF-8");
 
         // Should not contain special characters
         assert!(!filename.contains("'"));
@@ -1315,11 +1394,13 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_ensure_dir_creates_directories() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
         let migrations_path = temp_dir.path().join("nested/migrations");
 
         let manager = MigrationManager::new(&migrations_path, SchemaDialect::Postgres);
-        manager.ensure_dir().unwrap();
+        manager
+            .ensure_dir()
+            .expect("failed to ensure migrations directory");
 
         assert!(migrations_path.exists());
         assert!(migrations_path.join("_meta").exists());

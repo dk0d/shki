@@ -258,10 +258,15 @@ mod tests {
         let mut table = Table::new("users");
         table.column(Column::new("id", DataType::Serial));
 
-        let col = table.column_mut("id").unwrap();
+        let col = table.column_mut("id").expect("column 'id' not found");
         col.nullable = false;
 
-        assert!(!table.get_column("id").unwrap().nullable);
+        assert!(
+            !table
+                .get_column("id")
+                .expect("column 'id' not found")
+                .nullable
+        );
     }
 
     #[test]
@@ -300,7 +305,7 @@ mod tests {
         let table = Table::new("events").partition_by(PartitionMethod::Range, vec!["created_at"]);
 
         assert!(table.partition.is_some());
-        let partition = table.partition.unwrap();
+        let partition = table.partition.expect("partition config not set");
         assert_eq!(partition.method, PartitionMethod::Range);
         assert_eq!(partition.columns, vec!["created_at"]);
     }
@@ -352,8 +357,20 @@ mod tests {
             .build();
 
         assert_eq!(table.columns.len(), 2);
-        assert!(table.columns.get("id").unwrap().primary_key);
-        assert!(!table.columns.get("name").unwrap().nullable);
+        assert!(
+            table
+                .columns
+                .get("id")
+                .expect("column 'id' not found")
+                .primary_key
+        );
+        assert!(
+            !table
+                .columns
+                .get("name")
+                .expect("column 'name' not found")
+                .nullable
+        );
     }
 
     #[test]
@@ -362,7 +379,10 @@ mod tests {
             .column_fn("email", DataType::Text, |c| c.not_null().unique())
             .build();
 
-        let email_col = table.columns.get("email").unwrap();
+        let email_col = table
+            .columns
+            .get("email")
+            .expect("column 'email' not found");
         assert!(!email_col.nullable);
         assert!(email_col.unique);
     }
@@ -511,7 +531,13 @@ mod tests {
             .build();
 
         assert!(table.indexes.contains_key("users_email_idx"));
-        assert!(!table.indexes.get("users_email_idx").unwrap().unique);
+        assert!(
+            !table
+                .indexes
+                .get("users_email_idx")
+                .expect("index 'users_email_idx' not found")
+                .unique
+        );
     }
 
     #[test]
@@ -520,7 +546,13 @@ mod tests {
             .unique_index("users_email_unique", vec!["email"])
             .build();
 
-        assert!(table.indexes.get("users_email_unique").unwrap().unique);
+        assert!(
+            table
+                .indexes
+                .get("users_email_unique")
+                .expect("index 'users_email_unique' not found")
+                .unique
+        );
     }
 
     #[test]
@@ -531,7 +563,10 @@ mod tests {
             })
             .build();
 
-        let index = table.indexes.get("users_search_idx").unwrap();
+        let index = table
+            .indexes
+            .get("users_search_idx")
+            .expect("index 'users_search_idx' not found");
         assert_eq!(index.method, IndexMethod::Gin);
         assert_eq!(index.columns.len(), 2);
     }

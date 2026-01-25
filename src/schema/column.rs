@@ -574,7 +574,7 @@ mod tests {
             .generated_as("first_name || ' ' || last_name", true);
 
         assert!(col.generated.is_some());
-        let generated = col.generated.unwrap();
+        let generated = col.generated.expect("generated spec not set");
         assert_eq!(generated.expression, "first_name || ' ' || last_name");
         assert!(generated.stored);
     }
@@ -595,7 +595,7 @@ mod tests {
     fn test_column_identity() {
         let col = Column::new("id", DataType::Integer).identity(true);
         assert!(col.identity.is_some());
-        assert!(col.identity.unwrap().always);
+        assert!(col.identity.expect("identity spec not set").always);
     }
 
     #[test]
@@ -603,7 +603,7 @@ mod tests {
         let col = Column::new("user_id", DataType::Integer).references_column("users", "id");
 
         assert!(col.references.is_some());
-        let refs = col.references.unwrap();
+        let refs = col.references.expect("column reference not set");
         assert_eq!(refs.table, "users");
         assert_eq!(refs.column, "id");
     }
@@ -616,7 +616,7 @@ mod tests {
             ReferenceAction::Cascade,
         );
 
-        let refs = col.references.unwrap();
+        let refs = col.references.expect("column reference not set");
         assert_eq!(refs.on_delete, ReferenceAction::Cascade);
     }
 
@@ -914,7 +914,7 @@ mod tests {
             .build();
 
         assert!(col.references.is_some());
-        let refs = col.references.unwrap();
+        let refs = col.references.expect("column reference not set");
         assert_eq!(refs.table, "users");
         assert_eq!(refs.column, "id");
     }
@@ -925,7 +925,7 @@ mod tests {
             .references_on_delete("users", "id", ReferenceAction::Cascade)
             .build();
 
-        let refs = col.references.unwrap();
+        let refs = col.references.expect("column reference not set");
         assert_eq!(refs.on_delete, ReferenceAction::Cascade);
     }
 
@@ -991,7 +991,13 @@ mod tests {
             }),
         };
         assert!(!spec.always);
-        assert_eq!(spec.sequence_options.as_ref().unwrap().start, Some(100));
+        assert_eq!(
+            spec.sequence_options
+                .as_ref()
+                .expect("sequence options not set")
+                .start,
+            Some(100)
+        );
     }
 
     // ==================== ColumnReference Tests ====================

@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(schema.enums.len(), 1);
         assert!(schema.enums.contains_key("status"));
 
-        let enum_type = schema.enums.get("status").unwrap();
+        let enum_type = schema.enums.get("status").expect("enum 'status' not found");
         assert_eq!(enum_type.schema, Some("public".to_string()));
     }
 
@@ -361,7 +361,7 @@ mod tests {
         let custom_enum = EnumType::new("status").in_schema("custom");
         schema.enum_type(custom_enum);
 
-        let enum_type = schema.enums.get("status").unwrap();
+        let enum_type = schema.enums.get("status").expect("enum 'status' not found");
         assert_eq!(enum_type.schema, Some("custom".to_string()));
     }
 
@@ -400,11 +400,16 @@ mod tests {
         let table = Table::new("users");
         schema.add_table(table);
 
-        let table_mut = schema.get_table_mut("users").unwrap();
+        let table_mut = schema
+            .get_table_mut("users")
+            .expect("table 'users' not found");
         table_mut.comment = Some("Modified".to_string());
 
         assert_eq!(
-            schema.table("users").unwrap().comment,
+            schema
+                .table("users")
+                .expect("table 'users' not found")
+                .comment,
             Some("Modified".to_string())
         );
     }
@@ -435,7 +440,11 @@ mod tests {
 
         assert!(schema.enums.contains_key("status"));
         assert_eq!(
-            schema.enums.get("status").unwrap().values,
+            schema
+                .enums
+                .get("status")
+                .expect("enum 'status' not found")
+                .values,
             vec!["active", "inactive"]
         );
     }
@@ -462,7 +471,7 @@ mod tests {
             schema
                 .tables
                 .get("users")
-                .unwrap()
+                .expect("table 'users' not found")
                 .columns
                 .contains_key("id")
         );
