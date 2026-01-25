@@ -3,6 +3,8 @@
 //! This module provides the command-line interface for the shki tool.
 
 pub mod commands;
+pub mod constants;
+pub mod templates;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -61,7 +63,7 @@ impl From<DialectArg> for SchemaDialect {
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum SchemaLanguage {
     /// Define schemas using Rust code
-    Rust,
+    // Rust,
 
     /// Define schemas using Lua scripts
     #[default]
