@@ -1,0 +1,23 @@
+version: 3
+
+tasks:
+  default:
+    cmd: task --list-all
+    
+  up:
+    cmd: docker compose -p shki up -d 
+
+  down:
+    cmd: docker compose -p shki down
+
+  test:rebuild: 
+    cmds: 
+      - docker compose -p shki down
+      - docker compose -p shki up -d 
+      - pg_isready -U postgres -h localhost
+      - task: test
+      - docker compose -p shki down
+      
+  test:
+    cmds: 
+      - cargo nextest run
