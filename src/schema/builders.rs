@@ -24,7 +24,7 @@ impl SchemaBuilder {
     ) -> Self {
         let builder = TableBuilder::new(name);
         let builder = f(builder);
-        self.schema.add_table(builder.build());
+        self.schema.table(builder.build());
         self
     }
 
@@ -187,7 +187,7 @@ impl TableBuilder {
 
     /// Add an index
     pub fn index(mut self, name: impl Into<String>, columns: Vec<impl Into<String>>) -> Self {
-        self.table.add_index(Index::new(name, columns));
+        self.table.index(Index::new(name, columns));
         self
     }
 
@@ -197,7 +197,7 @@ impl TableBuilder {
         name: impl Into<String>,
         columns: Vec<impl Into<String>>,
     ) -> Self {
-        self.table.add_index(Index::new(name, columns).unique());
+        self.table.index(Index::new(name, columns).unique());
         self
     }
 
@@ -209,7 +209,7 @@ impl TableBuilder {
     ) -> Self {
         let builder = IndexBuilder::new(name);
         let builder = f(builder);
-        self.table.add_index(builder.build());
+        self.table.index(builder.build());
         self
     }
 

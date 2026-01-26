@@ -1,17 +1,18 @@
 use colored::Colorize;
+
 use std::path::Path;
 
+use crate::Result;
 use crate::cli::templates::lua_schema_template;
 use crate::config::Config;
 use crate::constants::{LUARC_CONFIG, SELENE_CONFIG, SELENE_SHKI_STD};
 use crate::schema::SchemaDialect;
-use crate::{Commands, MigrationManager, Result, ShkiError};
 
-use super::{Cli, SchemaLanguage};
+use super::SchemaLanguage;
 use crate::cli::constants::LUACATS_SHKI_TYPES;
 
 /// Initialize a new shki project
-async fn cmd_init(
+pub async fn cmd_init(
     target_dir: &Path,
     dialect: Option<SchemaDialect>,
     language: SchemaLanguage,
@@ -115,86 +116,4 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
     );
 
     Ok(())
-}
-
-async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
-    let db_url = config
-        .database_url
-        .as_ref()
-        .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))?;
-
-    let pool = sqlx::AnyPool::connect(db_url).await?;
-
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
-        .with_table_name(&config.migrations.table)
-        .with_prefix(config.migrations.prefix);
-
-    let pending = migration_manager.get_pending_migrations(&pool).await?;
-
-    if pending.is_empty() {
-        println!("\n{}\n", "No pending migrations".green());
-        return Ok(());
-    }
-
-    println!(
-        "{} pending migration(s):",
-        pending.len().to_string().yellow()
-    );
-    for path in &pending {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        println!("  - {}", name);
-    }
-
-    if dry_run {
-        println!("\n{}", "(dry run - no changes applied)".cyan());
-        return Ok(());
-    }
-
-    println!();
-    let applied = migration_manager.apply_all(&pool).await?;
-
-    println!(
-        "{} migration(s) applied:",
-        applied.len().to_string().green()
-    );
-    for name in &applied {
-        println!("  - {}", name);
-    }
-
-    Ok(())
-}
-
-pub async fn run(cli: Cli) -> Result<()> {
-    // Load config
-    let mut config = if cli.config.exists() {
-        Config::load(&cli.config)?
-    } else {
-        Config::default()
-    };
-
-    // Override with CLI args
-    if let Some(dialect) = cli.dialect {
-        config.dialect = dialect.into();
-    }
-    if let Some(url) = cli.database_url {
-        config.database_url = Some(url);
-    }
-    if let Some(out) = cli.out {
-        config.out = out;
-    }
-
-    config.verbose = cli.verbose;
-
-    match cli.command {
-        Commands::Init {
-            path,
-            dialect,
-            language,
-        } => cmd_init(&path, dialect.map(Into::into), language).await,
-        Commands::Migrate { dry_run } => cmd_migrate(&config, dry_run).await,
-        _ => todo!(),
-    }
 }

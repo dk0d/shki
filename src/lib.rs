@@ -10,3 +10,5 @@ pub mod schema;
 pub use schema::*;
 pub mod snapshot;
 pub use snapshot::*;
+pub mod lua;
+pub use lua::*;

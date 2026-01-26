@@ -98,7 +98,7 @@ impl Schema {
     }
 
     /// Add a table to the schema
-    pub fn add_table(&mut self, table: Table) -> &mut Self {
+    pub fn table(&mut self, table: Table) -> &mut Self {
         self.tables.insert(table.name.clone(), table);
         self
     }
@@ -135,7 +135,7 @@ impl Schema {
     }
 
     /// Get a table by name
-    pub fn table(&self, name: &str) -> Option<&Table> {
+    pub fn get_table(&self, name: &str) -> Option<&Table> {
         self.tables.get(name)
     }
 
@@ -369,7 +369,7 @@ mod tests {
     fn test_schema_add_table() {
         let mut schema = Schema::postgres("public");
         let table = Table::new("users");
-        schema.add_table(table);
+        schema.table(table);
 
         assert_eq!(schema.tables.len(), 1);
         assert!(schema.tables.contains_key("users"));
@@ -388,17 +388,17 @@ mod tests {
     fn test_schema_table_lookup() {
         let mut schema = Schema::postgres("public");
         let table = Table::new("users");
-        schema.add_table(table);
+        schema.table(table);
 
-        assert!(schema.table("users").is_some());
-        assert!(schema.table("nonexistent").is_none());
+        assert!(schema.get_table("users").is_some());
+        assert!(schema.get_table("nonexistent").is_none());
     }
 
     #[test]
     fn test_schema_table_mut() {
         let mut schema = Schema::postgres("public");
         let table = Table::new("users");
-        schema.add_table(table);
+        schema.table(table);
 
         let table_mut = schema
             .get_table_mut("users")
@@ -407,7 +407,7 @@ mod tests {
 
         assert_eq!(
             schema
-                .table("users")
+                .get_table("users")
                 .expect("table 'users' not found")
                 .comment,
             Some("Modified".to_string())

@@ -114,7 +114,7 @@ impl Table {
     }
 
     /// Add an index to the table
-    pub fn add_index(&mut self, index: Index) -> &mut Self {
+    pub fn index(&mut self, index: Index) -> &mut Self {
         self.indexes.insert(index.name.clone(), index);
         self
     }
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn test_table_add_index() {
         let mut table = Table::new("users");
-        table.add_index(Index::new("users_email_idx", vec!["email"]));
+        table.index(Index::new("users_email_idx", vec!["email"]));
 
         assert_eq!(table.indexes.len(), 1);
         assert!(table.indexes.contains_key("users_email_idx"));
