@@ -24,6 +24,8 @@ state to your desired schema state.
     - [ ] SQLite
 - **Database Introspection**: Pull existing database schemas into Rust code
 - **Type-Safe**: Leverage Rust's type system for schema definitions
+- **Code Gen** : Generate Rust structs/enums to work with DB.
+    - [ ] support custom derives etc. to support sqlx, Diesel, SeaORM.
 
 ## Use Patterns
 
