@@ -43,11 +43,12 @@ This creates a new project with the below structure
 db
 ├── migrations     # where your migrations live
 │   └── _meta
-├── schema         # your lua schema def files
-│   └── init.lua   # main schema entry file
+├── lua            # your lua schema def files
+│   └── *.lua      # supporting lua files
 ├── .luacats       # lua language server bindings for autocomplete
 ├── .luarc.json    # lua language server config
 ├── .selene.toml   # selene linter config
+├── init.lua       # main entry to schema
 ├── shki.yml       # selene standard lib support
 └── shki.toml      # shki project configuration
 ```

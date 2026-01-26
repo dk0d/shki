@@ -22,33 +22,42 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "{} pending migration(s):",
-        pending.len().to_string().yellow()
-    );
-    for path in &pending {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        println!("  - {}", name);
-    }
+    display_pending_migrations(&pending);
 
     if dry_run {
         println!("\n{}", "(dry run - no changes applied)".cyan());
         return Ok(());
     }
 
-    println!();
     let applied = migration_manager.apply_all(&pool).await?;
 
-    println!(
-        "{} migration(s) applied:",
-        applied.len().to_string().green()
-    );
-    for name in &applied {
-        println!("  - {}", name);
-    }
+    display_applied_migrations(&applied);
 
     Ok(())
+}
+
+fn display_pending_migrations(pending: &[std::path::PathBuf]) {
+    println!(
+        "\n\n{} pending migration(s):",
+        pending.len().to_string().yellow()
+    );
+
+    for path in pending {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        println!("  - {}", name);
+    }
+}
+
+fn display_applied_migrations(applied: &[String]) {
+    println!(
+        "\n\n{} migration(s) applied:",
+        applied.len().to_string().green()
+    );
+
+    for name in applied {
+        println!("  - {}", name);
+    }
 }

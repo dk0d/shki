@@ -44,14 +44,14 @@ pub async fn cmd_init(
 /// Initialize a Lua-based shki project
 async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<()> {
     let config_path = target_dir.join("shki.toml");
-    let schema_dir = target_dir.join("schema");
+    let lua_dir = target_dir.join("lua");
     let types_dir = target_dir.join(".luacats");
     let migrations_dir = target_dir.join("migrations");
-    let schema_file = schema_dir.join("init.lua");
+    let schema_file = target_dir.join("init.lua");
 
     let config = Config {
         dialect,
-        schema: vec!["./schema/init.lua".to_string()],
+        schema: vec!["./init.lua".to_string(), "./lua/**/*.lua".to_string()],
         ..Config::default()
     };
 
@@ -60,7 +60,7 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
     // Create directories
     std::fs::create_dir_all(&migrations_dir)?;
     std::fs::create_dir_all(migrations_dir.join("_meta"))?;
-    std::fs::create_dir_all(&schema_dir)?;
+    std::fs::create_dir_all(&lua_dir)?;
     std::fs::create_dir_all(&types_dir)?;
 
     // Create schema.lua with starter template

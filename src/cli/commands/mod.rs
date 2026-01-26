@@ -1,3 +1,4 @@
+mod create;
 mod init;
 mod migrate;
 
@@ -33,6 +34,23 @@ pub async fn run(cli: Cli) -> Result<()> {
             dialect,
             language,
         } => init::cmd_init(&path, dialect.map(Into::into), language).await,
+        Commands::Create {
+            name,
+            sql,
+            sql_file,
+            with_down,
+            edit,
+        } => {
+            create::cmd_create(
+                &config,
+                &name,
+                sql.as_deref(),
+                sql_file.as_deref(),
+                with_down,
+                edit,
+            )
+            .await
+        }
         Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
         _ => todo!(),
     }
