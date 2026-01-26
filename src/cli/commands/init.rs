@@ -92,7 +92,9 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
     #[rustfmt::skip]
     println!("    migrations/      - {}", "Migrations directory".dimmed());
     #[rustfmt::skip]
-    println!("    schema/init.lua  - {}", "Schema definition".dimmed());
+    println!("    lua/             - {}", "Supporting lua files".dimmed());
+    #[rustfmt::skip]
+    println!("    init.lua         - {}", "Schema definition".dimmed());
     #[rustfmt::skip]
     println!("    .luacats         - {}", "LuaCATS type definitions".dimmed());
     #[rustfmt::skip]

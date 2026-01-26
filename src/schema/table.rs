@@ -194,7 +194,6 @@ impl From<ColumnBuilder> for Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::SchemaDialect;
     use crate::schema::TableBuilder;
     use crate::schema::constraint::PrimaryKeyConstraint;
     use crate::schema::index::IndexMethod;

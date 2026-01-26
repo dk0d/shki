@@ -367,7 +367,7 @@ impl ColumnSnapshot {
 
         let default = column.default.as_ref().map(|d| match d {
             crate::schema::DefaultValue::Literal(v) => format!("'{}'", v),
-            crate::schema::DefaultValue::Expression(e) => e.clone(),
+            crate::schema::DefaultValue::Sql(e) => e.clone(),
             crate::schema::DefaultValue::Null => "NULL".to_string(),
             crate::schema::DefaultValue::Sequence(s) => format!("nextval('{}')", s),
             crate::schema::DefaultValue::Identity { always } => {

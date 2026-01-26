@@ -370,9 +370,45 @@ impl UserData for LuaColumnBuilder {
             Ok(this.clone())
         });
 
-        // default_expression(expr) -> self
-        methods.add_method("default_expression", |_, this, expr: String| {
-            this.inner.borrow_mut().default = Some(DefaultValue::Expression(expr));
+        // default_sql(expr) -> self
+        methods.add_method("default_sql", |_, this, expr: String| {
+            this.inner.borrow_mut().default = Some(DefaultValue::Sql(expr));
+            Ok(this.clone())
+        });
+
+        // default_null() -> self
+        methods.add_method("default_null", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::Literal("NULL".to_string()));
+            Ok(this.clone())
+        });
+
+        // default_current_timestamp() -> self
+        methods.add_method("default_current_timestamp", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::current_timestamp());
+            Ok(this.clone())
+        });
+
+        // default_uuid_generate_v4() -> self
+        methods.add_method("default_uuid_generate_v4", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::uuid_generate_v4());
+            Ok(this.clone())
+        });
+
+        // default_gen_random_uuid() -> self
+        methods.add_method("default_gen_random_uuid", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::gen_random_uuid());
+            Ok(this.clone())
+        });
+
+        // default_uuidv7() -> self
+        methods.add_method("default_uuidv7", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::uuidv7());
+            Ok(this.clone())
+        });
+
+        // default_uuidv4() -> self
+        methods.add_method("default_uuidv4", |_, this, ()| {
+            this.inner.borrow_mut().default = Some(DefaultValue::uuidv4());
             Ok(this.clone())
         });
 

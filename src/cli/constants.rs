@@ -370,7 +370,31 @@ function ColumnBuilder:default_now() end
 --- Set a default expression
 ---@param expr string SQL expression for default
 ---@return ColumnBuilder self
-function ColumnBuilder:default_expression(expr) end
+function ColumnBuilder:default_sql(expr) end
+
+--- Set default to NULL
+---@return ColumnBuilder self
+function ColumnBuilder:default_null() end
+
+--- Set default to CURRENT_TIMESTAMP
+---@return ColumnBuilder self
+function ColumnBuilder:default_current_timestamp() end
+
+--- Set default to uuid_generate_v4() (requires uuid-ossp extension)
+---@return ColumnBuilder self
+function ColumnBuilder:default_uuid_generate_v4() end
+
+--- Set default to gen_random_uuid() (PostgreSQL 13+)
+---@return ColumnBuilder self
+function ColumnBuilder:default_gen_random_uuid() end
+
+--- Set default to uuidv7() (PostgreSQL 18+)
+---@return ColumnBuilder self
+function ColumnBuilder:default_uuidv7() end
+
+--- Set default to uuidv4() (PostgreSQL 18+)
+---@return ColumnBuilder self
+function ColumnBuilder:default_uuidv4() end
 
 --- Set the description/comment for the column
 ---@param desc string Description text (supports markdown)

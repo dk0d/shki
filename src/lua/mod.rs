@@ -599,4 +599,116 @@ mod tests {
         let posts = schema.tables.get("posts").unwrap();
         assert!(posts.indexes.contains_key("posts_author_idx"));
     }
+
+    #[test]
+    fn test_lua_column_default_values() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("test_defaults")
+                    :column(ColumnBuilder.text("col_literal"):default_value("'hello'"))
+                    :column(ColumnBuilder.timestamptz("col_now"):default_now())
+                    :column(ColumnBuilder.timestamptz("col_timestamp"):default_current_timestamp())
+                    :column(ColumnBuilder.text("col_expr"):default_sql("upper('test')"))
+                    :column(ColumnBuilder.text("col_null"):default_null())
+                    :column(ColumnBuilder.uuid("col_uuid_v4"):default_uuid_generate_v4())
+                    :column(ColumnBuilder.uuid("col_random_uuid"):default_gen_random_uuid())
+                    :column(ColumnBuilder.uuid("col_uuidv7"):default_uuidv7())
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").expect("failed to load schema");
+        let table = schema
+            .tables
+            .get("test_defaults")
+            .expect("test_defaults table not found");
+
+        // Check col_literal has literal default
+        let col_literal = table
+            .columns
+            .get("col_literal")
+            .expect("col_literal not found");
+        assert_eq!(
+            col_literal.default,
+            Some(crate::schema::types::DefaultValue::Literal(
+                "'hello'".to_string()
+            ))
+        );
+
+        // Check col_now has now() expression
+        let col_now = table.columns.get("col_now").expect("col_now not found");
+        assert_eq!(
+            col_now.default,
+            Some(crate::schema::types::DefaultValue::Sql("now()".to_string()))
+        );
+
+        // Check col_timestamp has CURRENT_TIMESTAMP expression
+        let col_timestamp = table
+            .columns
+            .get("col_timestamp")
+            .expect("col_timestamp not found");
+        assert_eq!(
+            col_timestamp.default,
+            Some(crate::schema::types::DefaultValue::Sql(
+                "CURRENT_TIMESTAMP".to_string()
+            ))
+        );
+
+        // Check col_expr has custom expression
+        let col_expr = table.columns.get("col_expr").expect("col_expr not found");
+        assert_eq!(
+            col_expr.default,
+            Some(crate::schema::types::DefaultValue::Sql(
+                "upper('test')".to_string()
+            ))
+        );
+
+        // Check col_null has NULL literal
+        let col_null = table.columns.get("col_null").expect("col_null not found");
+        assert_eq!(
+            col_null.default,
+            Some(crate::schema::types::DefaultValue::Literal(
+                "NULL".to_string()
+            ))
+        );
+
+        // Check col_uuid_v4 has uuid_generate_v4() expression
+        let col_uuid_v4 = table
+            .columns
+            .get("col_uuid_v4")
+            .expect("col_uuid_v4 not found");
+        assert_eq!(
+            col_uuid_v4.default,
+            Some(crate::schema::types::DefaultValue::Sql(
+                "uuid_generate_v4()".to_string()
+            ))
+        );
+
+        // Check col_random_uuid has gen_random_uuid() expression
+        let col_random_uuid = table
+            .columns
+            .get("col_random_uuid")
+            .expect("col_random_uuid not found");
+        assert_eq!(
+            col_random_uuid.default,
+            Some(crate::schema::types::DefaultValue::Sql(
+                "gen_random_uuid()".to_string()
+            ))
+        );
+
+        // Check col_uuidv7 has uuidv7() expression
+        let col_uuidv7 = table
+            .columns
+            .get("col_uuidv7")
+            .expect("col_uuidv7 not found");
+        assert_eq!(
+            col_uuidv7.default,
+            Some(crate::schema::types::DefaultValue::Sql(
+                "uuidv7()".to_string()
+            ))
+        );
+    }
 }

@@ -565,7 +565,7 @@ mod tests {
             },
         )
         .default_now();
-        assert!(matches!(col.default, Some(DefaultValue::Expression(s)) if s == "now()"));
+        assert!(matches!(col.default, Some(DefaultValue::Sql(s)) if s == "now()"));
     }
 
     #[test]
@@ -854,7 +854,7 @@ mod tests {
         let col = ColumnBuilder::timestamptz("created_at")
             .default_now()
             .build();
-        assert!(matches!(col.default, Some(DefaultValue::Expression(s)) if s == "now()"));
+        assert!(matches!(col.default, Some(DefaultValue::Sql(s)) if s == "now()"));
     }
 
     #[test]

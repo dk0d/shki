@@ -416,7 +416,7 @@ pub enum DefaultValue {
     /// Literal value
     Literal(String),
     /// SQL expression (e.g., CURRENT_TIMESTAMP)
-    Expression(String),
+    Sql(String),
     /// NULL
     Null,
     /// Sequence/auto-increment
@@ -433,39 +433,39 @@ impl DefaultValue {
 
     /// Create an expression default value
     pub fn expression(expr: impl Into<String>) -> Self {
-        DefaultValue::Expression(expr.into())
+        DefaultValue::Sql(expr.into())
     }
 
     /// Create a CURRENT_TIMESTAMP default
     pub fn current_timestamp() -> Self {
-        DefaultValue::Expression("CURRENT_TIMESTAMP".to_string())
+        DefaultValue::Sql("CURRENT_TIMESTAMP".to_string())
     }
 
     /// Create a now() default (PostgreSQL)
     pub fn now() -> Self {
-        DefaultValue::Expression("now()".to_string())
+        DefaultValue::Sql("now()".to_string())
     }
 
     /// Create a UUID generation default
     pub fn uuid_generate_v4() -> Self {
-        DefaultValue::Expression("uuid_generate_v4()".to_string())
+        DefaultValue::Sql("uuid_generate_v4()".to_string())
     }
 
     /// Create a uuidv7() default (PostgreSQL 18+)
     pub fn uuidv7() -> Self {
-        DefaultValue::Expression("uuidv7()".to_string())
+        DefaultValue::Sql("uuidv7()".to_string())
     }
 
     /// Create a `uuidv7()` default (PostgreSQL 18+)
     ///
     /// _Alias for `uuid_generate_v4()` in PostgreSQL 18+_
     pub fn uuidv4() -> Self {
-        DefaultValue::Expression("uuidv7()".to_string())
+        DefaultValue::Sql("uuidv7()".to_string())
     }
 
     /// Create a gen_random_uuid() default (PostgreSQL)
     pub fn gen_random_uuid() -> Self {
-        DefaultValue::Expression("gen_random_uuid()".to_string())
+        DefaultValue::Sql("gen_random_uuid()".to_string())
     }
 }
 
