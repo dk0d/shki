@@ -51,7 +51,6 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
 
     let config = Config {
         dialect,
-        schema: vec!["./init.lua".to_string(), "./lua/**/*.lua".to_string()],
         ..Config::default()
     };
 

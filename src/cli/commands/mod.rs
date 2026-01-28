@@ -1,4 +1,7 @@
+use colored::Colorize;
+
 mod create;
+mod generate;
 mod init;
 mod migrate;
 
@@ -52,6 +55,15 @@ pub async fn run(cli: Cli) -> Result<()> {
             .await
         }
         Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
-        _ => todo!(),
+
+        Commands::Generate {
+            name,
+            schema,
+            dry_run,
+        } => generate::cmd_generate_sql(&config, name, schema, dry_run),
+        _ => {
+            println!("{}", "Command not implemented yet.".red());
+            Ok(())
+        }
     }
 }

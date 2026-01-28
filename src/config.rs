@@ -19,7 +19,7 @@ pub struct Config {
 
     /// Path to schema files (glob pattern)
     #[serde(default)]
-    pub schema: Vec<String>,
+    pub schema: String,
 
     /// Output directory for migrations
     #[serde(default = "default_out")]
@@ -32,14 +32,6 @@ pub struct Config {
     /// Whether to add breakpoints between SQL statements
     #[serde(default = "default_true")]
     pub breakpoints: bool,
-
-    /// Table filter (glob patterns)
-    #[serde(default)]
-    pub tables_filter: Vec<String>,
-
-    /// Schema filter (for PostgreSQL)
-    #[serde(default)]
-    pub schema_filter: Vec<String>,
 
     /// Verbose output
     #[serde(default)]
@@ -143,12 +135,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             dialect: SchemaDialect::Postgres,
-            schema: vec!["./schema/**/*.lua".to_string()],
+            schema: "init.lua".to_string(),
             out: default_out(),
             database_url: None,
             breakpoints: true,
-            tables_filter: Vec::new(),
-            schema_filter: Vec::new(),
             verbose: false,
             strict: false,
             migrations: MigrationConfig::default(),

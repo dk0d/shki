@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use petname::Generator;
 use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
 
@@ -12,6 +13,23 @@ use crate::config::MigrationPrefix;
 use crate::schema::SchemaDialect;
 use crate::snapshot::Snapshot;
 use crate::{Result, ShkiError};
+
+pub const MIGRATION_SPLIT_MARKER: &str = "--> +statement";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum MigrationDirection {
+    Up,
+    Down,
+}
+
+impl std::fmt::Display for MigrationDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MigrationDirection::Up => write!(f, "up"),
+            MigrationDirection::Down => write!(f, "down"),
+        }
+    }
+}
 
 /// A migration file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,8 +108,16 @@ impl MigrationManager {
     }
 
     /// Generate the next migration name
-    pub fn next_migration_name(&self, suffix: &str) -> Result<String> {
+    pub fn next_migration_name(&self, suffix: Option<impl ToString>) -> Result<String> {
         let existing = self.list_migrations()?;
+
+        let suffix = match suffix {
+            Some(s) => s.to_string(),
+            None => petname::Petnames::default()
+                .generate_one(2, "-")
+                .expect("no names available")
+                .to_lowercase(),
+        };
 
         match self.prefix {
             MigrationPrefix::Index => {
@@ -173,11 +199,12 @@ impl MigrationManager {
     /// Create a new migration (up only)
     pub fn create_migration(
         &self,
+        name: Option<String>,
         sql: &str,
         from_snapshot: Option<&Snapshot>,
         to_snapshot: &Snapshot,
     ) -> Result<PathBuf> {
-        self.create_migration_with_down(sql, None, from_snapshot, to_snapshot)
+        self.create_migration_with_down(name, sql, None, from_snapshot, to_snapshot)
             .map(|(up_path, _)| up_path)
     }
 
@@ -186,6 +213,7 @@ impl MigrationManager {
     /// Returns a tuple of (up_migration_path, Option<down_migration_path>)
     pub fn create_migration_with_down(
         &self,
+        name: Option<String>,
         up_sql: &str,
         down_sql: Option<&str>,
         from_snapshot: Option<&Snapshot>,
@@ -194,7 +222,7 @@ impl MigrationManager {
         self.ensure_dir()?;
 
         // Generate migration name
-        let name = self.next_migration_name("migration")?;
+        let name = self.next_migration_name(name)?;
         let up_path = self.out_dir.join(format!("{}.sql", name));
 
         // Write up migration SQL file
@@ -328,9 +356,9 @@ impl MigrationManager {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
 
-        // Parse statements - split by statement breakpoint, then by semicolon
+        // Parse statements - split by statement split, then by semicolon
         let statements: Vec<&str> = sql
-            .split("--> statement-breakpoint")
+            .split(MIGRATION_SPLIT_MARKER)
             .flat_map(|s| s.split(';'))
             .map(|s| s.trim())
             .filter(|s| !s.is_empty() && !s.starts_with("--"))
@@ -451,7 +479,7 @@ impl MigrationManager {
 
         // Parse statements
         let statements: Vec<&str> = sql
-            .split("--> statement-breakpoint")
+            .split(MIGRATION_SPLIT_MARKER)
             .flat_map(|s| s.split(';'))
             .map(|s| s.trim())
             .filter(|s| !s.is_empty() && !s.starts_with("--"))
@@ -597,7 +625,7 @@ impl MigrationManager {
         let sanitized_name = sanitize_migration_name(name);
 
         // Generate migration name with prefix
-        let migration_name = self.next_migration_name(&sanitized_name)?;
+        let migration_name = self.next_migration_name(Some(&sanitized_name))?;
         let up_path = self.out_dir.join(format!("{}.sql", migration_name));
 
         // Create up migration template content
@@ -637,6 +665,40 @@ impl MigrationManager {
             .map(|(up_path, _)| up_path)
     }
 
+    /// Generate migration file content with header and optional SQL
+    fn migration_content(
+        &self,
+        migration_name: &str,
+        sql_content: Option<&str>,
+        direction: MigrationDirection,
+    ) -> String {
+        let mut content = String::new();
+        content.push_str(&format!(
+            "-- Migration: {} ({})\n",
+            migration_name, direction
+        ));
+        content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
+        content.push_str("-- Type: manual\n");
+        content.push_str("--\n");
+        content.push_str("-- This migration was created for manual editing.\n");
+        content.push_str("-- The entire migration runs in a single transaction.\n");
+        content.push_str("--\n");
+        content.push_str(&format!(
+            "-- Use '{}' to visually separate statements.\n",
+            MIGRATION_SPLIT_MARKER
+        ));
+        content.push('\n');
+
+        if let Some(sql) = sql_content {
+            content.push_str(sql);
+            if !sql.ends_with('\n') {
+                content.push('\n');
+            }
+        }
+
+        content
+    }
+
     /// Create a blank migration with custom content for both up and down
     ///
     /// # Arguments
@@ -655,50 +717,19 @@ impl MigrationManager {
         self.ensure_dir()?;
 
         let sanitized_name = sanitize_migration_name(name);
-        let migration_name = self.next_migration_name(&sanitized_name)?;
+        let migration_name = self.next_migration_name(Some(&sanitized_name))?;
         let up_path = self.out_dir.join(format!("{}.sql", migration_name));
 
         // Write up migration
-        let mut up_content = String::new();
-        up_content.push_str(&format!("-- Migration: {} (up)\n", migration_name));
-        up_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
-        up_content.push_str("-- Type: manual\n");
-        up_content.push_str("--\n");
-        up_content.push_str("-- This migration was created for manual editing.\n");
-        up_content.push_str("-- The entire migration runs in a single transaction.\n");
-        up_content.push_str("--\n");
-        up_content.push_str("-- Use '--> statement-breakpoint' to visually separate statements.\n");
-        up_content.push('\n');
-
-        if let Some(sql) = up_sql {
-            up_content.push_str(sql);
-            if !sql.ends_with('\n') {
-                up_content.push('\n');
-            }
-        }
+        let up_content = self.migration_content(&migration_name, up_sql, MigrationDirection::Up);
 
         std::fs::write(&up_path, up_content)?;
 
         // Write down migration if provided
         let down_path = if let Some(down) = down_sql {
             let path = self.out_dir.join(format!("{}.down.sql", migration_name));
-
-            let mut down_content = String::new();
-            down_content.push_str(&format!("-- Migration: {} (down)\n", migration_name));
-            down_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
-            down_content.push_str("-- Type: manual\n");
-            down_content.push_str("--\n");
-            down_content
-                .push_str("-- This migration reverses the changes made by the up migration.\n");
-            down_content.push_str("-- The entire migration runs in a single transaction.\n");
-            down_content.push_str("--\n");
-            down_content
-                .push_str("-- Use '--> statement-breakpoint' to visually separate statements.\n");
-            down_content.push('\n');
-            down_content.push_str(down);
-            if !down.ends_with('\n') {
-                down_content.push('\n');
-            }
+            let down_content =
+                self.migration_content(&migration_name, Some(down), MigrationDirection::Down);
 
             std::fs::write(&path, down_content)?;
             Some(path)
@@ -761,7 +792,10 @@ fn generate_blank_migration_template(
     content.push_str("-- Tips:\n");
     content.push_str("-- - The entire migration runs in a single transaction\n");
     content.push_str("-- - If any statement fails, all changes are rolled back\n");
-    content.push_str("-- - Use '--> statement-breakpoint' to visually separate statements\n");
+    content.push_str(&format!(
+        "-- - Use '{}' to visually separate statements\n",
+        MIGRATION_SPLIT_MARKER
+    ));
     content.push_str("-- - Remove these comments before committing\n");
     content.push_str("--\n");
 
@@ -772,23 +806,23 @@ fn generate_blank_migration_template(
                 content.push_str("-- Example PostgreSQL rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX CONCURRENTLY IF EXISTS idx_users_email;\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- ALTER TABLE posts DROP COLUMN IF EXISTS view_count;\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- DROP TYPE IF EXISTS status_type;\n");
             }
             SchemaDialect::Mysql => {
                 content.push_str("-- Example MySQL rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX idx_users_email ON users;\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- ALTER TABLE posts DROP COLUMN view_count;\n");
             }
             SchemaDialect::Sqlite => {
                 content.push_str("-- Example SQLite rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX IF EXISTS idx_users_email;\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- Note: SQLite doesn't support DROP COLUMN directly.\n");
                 content.push_str("-- You may need to recreate the table without the column.\n");
             }
@@ -799,23 +833,23 @@ fn generate_blank_migration_template(
                 content.push_str("-- Example PostgreSQL statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX CONCURRENTLY idx_users_email ON users(email);\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0;\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- CREATE TYPE status_type AS ENUM ('active', 'inactive');\n");
             }
             SchemaDialect::Mysql => {
                 content.push_str("-- Example MySQL statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX idx_users_email ON users(email);\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INT DEFAULT 0;\n");
             }
             SchemaDialect::Sqlite => {
                 content.push_str("-- Example SQLite statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX idx_users_email ON users(email);\n");
-                content.push_str("-- --> statement-breakpoint\n");
+                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0;\n");
             }
         }
@@ -1128,7 +1162,7 @@ mod tests {
 
         // First migration should be 0000
         let name = manager
-            .next_migration_name("initial")
+            .next_migration_name(Some("initial"))
             .expect("failed to get next migration name");
         assert_eq!(name, "0000_initial");
 
@@ -1138,7 +1172,7 @@ mod tests {
 
         // Next should be 0001
         let name = manager
-            .next_migration_name("add_users")
+            .next_migration_name(Some("add_users"))
             .expect("failed to get next migration name");
         assert_eq!(name, "0001_add_users");
     }
@@ -1152,7 +1186,7 @@ mod tests {
             .with_prefix(MigrationPrefix::Timestamp);
 
         let name = manager
-            .next_migration_name("initial")
+            .next_migration_name(Some("initial"))
             .expect("failed to get next migration name");
 
         // e.g. (20260125155257, "initial")
@@ -1170,7 +1204,7 @@ mod tests {
 
         // Next should be a new date after or equal the previous one (only 1 second resolution)
         let name = manager
-            .next_migration_name("add_users")
+            .next_migration_name(Some("add_users"))
             .expect("failed to get next migration name");
         let (next_date, file_name) = name
             .split_once('_')
@@ -1190,7 +1224,7 @@ mod tests {
         let manager = MigrationManager::new(dir_path, SchemaDialect::Postgres)
             .with_prefix(MigrationPrefix::Unix);
         let name = manager
-            .next_migration_name("initial")
+            .next_migration_name(Some("initial"))
             .expect("failed to get next migration name");
         let (date, file_name) = name
             .split_once('_')
@@ -1206,7 +1240,7 @@ mod tests {
         fs::write(dir_path.join(format!("{}_initial.sql", date)), "SELECT 1;")
             .expect("failed to write initial migration file");
         let name = manager
-            .next_migration_name("add_users")
+            .next_migration_name(Some("add_users"))
             .expect("failed to get next migration name");
         let (next_date, file_name) = name
             .split_once('_')

@@ -123,8 +123,8 @@ pub enum Commands {
     /// Generate a migration from schema changes
     Generate {
         /// Migration name/suffix
-        #[arg(short, long, default_value = "migration")]
-        name: String,
+        #[arg(short, long)]
+        name: Option<String>,
 
         /// Path to schema file(s) or directory
         #[arg(short, long)]

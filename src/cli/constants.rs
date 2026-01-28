@@ -518,7 +518,7 @@ pub const LUARC_CONFIG: &str = r#"{
 pub const SELENE_CONFIG: &str = r#"# Selene linter configuration for shki
 # https://kampfkarren.github.io/selene/
 
-std = "lua54+shki"
+std = "shki"
 
 [lints]
 # Customize lint levels as needed
