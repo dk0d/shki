@@ -76,7 +76,7 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
     std::fs::write(&luarc_path, LUARC_CONFIG)?;
 
     // Create Selene linter configuration
-    let selene_toml_path = target_dir.join(".selene.toml");
+    let selene_toml_path = target_dir.join("selene.toml");
     std::fs::write(&selene_toml_path, SELENE_CONFIG)?;
 
     // Create Selene standard library definition for shki
