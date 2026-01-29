@@ -49,11 +49,29 @@ db
 ├── .luarc.json    # lua language server config
 ├── .selene.toml   # selene linter config
 ├── init.lua       # main entry to schema
-├── shki.yml       # selene standard lib support
+├── shki.yml       # lua standard lib definition for shki
 └── shki.toml      # shki project configuration
 ```
 
 The main entry point of the schema is `init.lua`.
+
+Example schema
+
+```lua
+
+local schema = pg.schema("public")
+local T = TableBuilder
+local C = ColumnBuilder
+
+schema.table(
+    T::new("users")
+    :column(C.new("id").primary_key().uuid().default(DefaultValue::uuidv7()))
+)
+
+
+
+
+```
 
 
 ### Rust Lib
