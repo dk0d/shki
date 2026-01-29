@@ -2,6 +2,7 @@ use crate::config::Config;
 
 use crate::{MigrationManager, Result, ShkiError};
 use colored::Colorize;
+use sqlx::any::AnyPoolOptions;
 
 pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
     let db_url = config
@@ -9,7 +10,12 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
         .as_ref()
         .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))?;
 
-    let pool = sqlx::AnyPool::connect(db_url).await?;
+    sqlx::any::install_default_drivers();
+
+    let pool = AnyPoolOptions::new()
+        .max_connections(5)
+        .connect(db_url)
+        .await?;
 
     let migration_manager = MigrationManager::new(&config.out, config.dialect)
         .with_table_name(&config.migrations.table)

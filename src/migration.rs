@@ -356,14 +356,6 @@ impl MigrationManager {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
 
-        // Parse statements - split by statement split, then by semicolon
-        let statements: Vec<&str> = sql
-            .split(MIGRATION_SPLIT_MARKER)
-            .flat_map(|s| s.split(';'))
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty() && !s.starts_with("--"))
-            .collect();
-
         // Build the SQL for recording the migration
         let table_name = match &self.table_schema {
             Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
@@ -382,16 +374,14 @@ impl MigrationManager {
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;
 
-        for stmt in &statements {
-            sqlx::query(stmt).execute(&mut *tx).await.map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                    name,
-                    e,
-                    truncate_sql(stmt, 200)
-                ))
-            })?;
-        }
+        sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                name,
+                e,
+                truncate_sql(&sql, 200)
+            ))
+        })?;
 
         // Record the migration within the same transaction
         sqlx::query(&insert_sql)
@@ -477,14 +467,6 @@ impl MigrationManager {
             .strip_suffix(".down.sql")
             .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
 
-        // Parse statements
-        let statements: Vec<&str> = sql
-            .split(MIGRATION_SPLIT_MARKER)
-            .flat_map(|s| s.split(';'))
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty() && !s.starts_with("--"))
-            .collect();
-
         // Build the SQL for removing the migration record
         let table_name = match &self.table_schema {
             Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
@@ -503,16 +485,14 @@ impl MigrationManager {
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;
 
-        for stmt in &statements {
-            sqlx::query(stmt).execute(&mut *tx).await.map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to execute statement in down migration '{}': {}\nStatement: {}",
-                    name,
-                    e,
-                    truncate_sql(stmt, 200)
-                ))
-            })?;
-        }
+        sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to execute statement in down migration '{}': {}\nStatement: {}",
+                name,
+                e,
+                truncate_sql(&sql, 200)
+            ))
+        })?;
 
         // Remove the migration record within the same transaction
         sqlx::query(&delete_sql)
