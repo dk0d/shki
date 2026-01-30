@@ -11,22 +11,56 @@ use crate::snapshot::*;
 
 /// Introspect a PostgreSQL database
 pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {
+    introspect_postgres_impl(pool, None).await
+}
+
+/// Introspect a specific schema in a PostgreSQL database
+///
+/// This function is useful for schema-isolated integration tests where you want
+/// to introspect only the objects in a specific schema without interference from
+/// other schemas that may exist in the database.
+pub async fn introspect_postgres_schema(
+    pool: &Pool<Postgres>,
+    schema_name: &str,
+) -> Result<Snapshot> {
+    introspect_postgres_impl(pool, Some(schema_name)).await
+}
+
+async fn introspect_postgres_impl(
+    pool: &Pool<Postgres>,
+    target_schema: Option<&str>,
+) -> Result<Snapshot> {
     let mut snapshot = Snapshot::new(SchemaDialect::Postgres);
 
     // Get schemas
-    let schemas: Vec<String> = sqlx::query_scalar(
-        r#"
-        SELECT schema_name 
-        FROM information_schema.schemata 
-        WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-        ORDER BY schema_name
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    let schemas: Vec<String> = if let Some(schema) = target_schema {
+        // Only include the target schema if it exists
+        let exists: Option<String> = sqlx::query_scalar(
+            r#"
+            SELECT schema_name 
+            FROM information_schema.schemata 
+            WHERE schema_name = $1
+            "#,
+        )
+        .bind(schema)
+        .fetch_optional(pool)
+        .await?;
+        exists.into_iter().collect()
+    } else {
+        sqlx::query_scalar(
+            r#"
+            SELECT schema_name 
+            FROM information_schema.schemata 
+            WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+            ORDER BY schema_name
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+    };
     snapshot.schemas = schemas;
 
-    // Get extensions
+    // Get extensions (always get all extensions as they are database-wide)
     let extensions: Vec<String> = sqlx::query_scalar(
         "SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname",
     )
@@ -35,22 +69,42 @@ pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {
     snapshot.extensions = extensions;
 
     // Get enums
-    let enum_rows = sqlx::query(
-        r#"
-        SELECT 
-            n.nspname AS schema,
-            t.typname AS name,
-            array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
-        FROM pg_type t
-        JOIN pg_enum e ON t.oid = e.enumtypid
-        JOIN pg_namespace n ON n.oid = t.typnamespace
-        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-        GROUP BY n.nspname, t.typname
-        ORDER BY n.nspname, t.typname
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    let enum_rows = if let Some(schema) = target_schema {
+        sqlx::query(
+            r#"
+            SELECT 
+                n.nspname AS schema,
+                t.typname AS name,
+                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+            FROM pg_type t
+            JOIN pg_enum e ON t.oid = e.enumtypid
+            JOIN pg_namespace n ON n.oid = t.typnamespace
+            WHERE n.nspname = $1
+            GROUP BY n.nspname, t.typname
+            ORDER BY n.nspname, t.typname
+            "#,
+        )
+        .bind(schema)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT 
+                n.nspname AS schema,
+                t.typname AS name,
+                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+            FROM pg_type t
+            JOIN pg_enum e ON t.oid = e.enumtypid
+            JOIN pg_namespace n ON n.oid = t.typnamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+            GROUP BY n.nspname, t.typname
+            ORDER BY n.nspname, t.typname
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+    };
 
     for row in enum_rows {
         let schema: String = row.get("schema");
@@ -69,19 +123,36 @@ pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {
     }
 
     // Get tables
-    let table_rows = sqlx::query(
-        r#"
-        SELECT 
-            t.table_schema,
-            t.table_name
-        FROM information_schema.tables t
-        WHERE t.table_type = 'BASE TABLE'
-            AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-        ORDER BY t.table_schema, t.table_name
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    let table_rows = if let Some(schema) = target_schema {
+        sqlx::query(
+            r#"
+            SELECT 
+                t.table_schema,
+                t.table_name
+            FROM information_schema.tables t
+            WHERE t.table_type = 'BASE TABLE'
+                AND t.table_schema = $1
+            ORDER BY t.table_schema, t.table_name
+            "#,
+        )
+        .bind(schema)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT 
+                t.table_schema,
+                t.table_name
+            FROM information_schema.tables t
+            WHERE t.table_type = 'BASE TABLE'
+                AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY t.table_schema, t.table_name
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+    };
 
     for row in table_rows {
         let schema: String = row.get("table_schema");

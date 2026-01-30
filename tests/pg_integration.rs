@@ -4,8 +4,10 @@
 //! Use `docker compose up -d postgres` to start the test database.
 //!
 //! Connection URL: postgresql://postgres:postgres@localhost:5432/shki_test
+//!
+//! Run these tests with: `cargo test --test pg_integration -- --ignored`
 
-use shki::introspect::introspect_postgres;
+use shki::introspect::introspect_postgres_schema;
 use shki::migration::MigrationManager;
 use shki::schema::SchemaDialect;
 use shki::snapshot::ConstraintType;
@@ -21,24 +23,74 @@ fn get_database_url() -> String {
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/shki".into())
 }
 
-/// Create a connection pool for testing
+/// Create a connection pool for testing with retries
 async fn create_pool() -> Pool<Postgres> {
     let url = get_database_url();
-    PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&url)
-        .await
-        .expect("Failed to connect to PostgreSQL. Is the database running? Use `docker compose up -d postgres`")
+    let max_retries = 5;
+    let retry_delay = Duration::from_secs(2);
+
+    for attempt in 1..=max_retries {
+        match PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(Duration::from_secs(10))
+            .connect(&url)
+            .await
+        {
+            Ok(pool) => return pool,
+            Err(e) if attempt < max_retries => {
+                eprintln!(
+                    "Connection attempt {}/{} failed: {}. Retrying in {:?}...",
+                    attempt, max_retries, e, retry_delay
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to connect to PostgreSQL after {} attempts. \
+                     Is the database running? Use `docker compose up -d postgres`. \
+                     Error: {}",
+                    max_retries, e
+                );
+            }
+        }
+    }
+    unreachable!()
 }
 
-/// Create an AnyPool for migration manager tests
+/// Create an AnyPool for migration manager tests with retries
 async fn create_any_pool() -> AnyPool {
     let url = get_database_url();
     sqlx::any::install_default_drivers();
-    AnyPool::connect(&url)
-        .await
-        .expect("Failed to connect to PostgreSQL with AnyPool")
+
+    let max_retries = 5;
+    let retry_delay = Duration::from_secs(2);
+
+    for attempt in 1..=max_retries {
+        match sqlx::any::AnyPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(Duration::from_secs(10))
+            .connect(&url)
+            .await
+        {
+            Ok(pool) => return pool,
+            Err(e) if attempt < max_retries => {
+                eprintln!(
+                    "AnyPool connection attempt {}/{} failed: {}. Retrying in {:?}...",
+                    attempt, max_retries, e, retry_delay
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to connect to PostgreSQL with AnyPool after {} attempts. \
+                     Is the database running? Use `docker compose up -d postgres`. \
+                     Error: {}",
+                    max_retries, e
+                );
+            }
+        }
+    }
+    unreachable!()
 }
 
 /// Generate a unique schema name for test isolation
@@ -73,29 +125,28 @@ mod introspection {
     use super::*;
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL: `cargo test --test pg_integration -- --ignored`
     async fn test_introspect_empty_database() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("empty");
 
         setup_test_schema(&pool, &schema_name).await;
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         // Should have the test schema
         assert!(snapshot.schemas.contains(&schema_name));
 
         // Should have no tables in our test schema
-        let tables_in_schema: Vec<_> = snapshot
-            .tables
-            .values()
-            .filter(|t| t.schema.as_deref() == Some(&schema_name))
-            .collect();
-        assert!(tables_in_schema.is_empty());
+        assert!(snapshot.tables.is_empty());
 
         cleanup_test_schema(&pool, &schema_name).await;
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_simple_table() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("simple");
@@ -124,7 +175,9 @@ mod introspection {
         .await
         .expect("Failed to create table");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         // Find the table
         let users_table = snapshot
@@ -187,6 +240,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_foreign_key() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("fk");
@@ -219,7 +273,9 @@ mod introspection {
         .await
         .expect("Failed to create tables");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         let posts = snapshot
             .tables
@@ -247,6 +303,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_indexes() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("idx");
@@ -278,7 +335,9 @@ mod introspection {
         .await
         .expect("Failed to create table and indexes");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         let products = snapshot
             .tables
@@ -311,6 +370,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_enum_type() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("enum");
@@ -339,7 +399,9 @@ mod introspection {
         .await
         .expect("Failed to create enum and table");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         // Check enum was introspected
         let status_enum = snapshot
@@ -358,6 +420,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_check_constraint() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("check");
@@ -384,7 +447,9 @@ mod introspection {
         .await
         .expect("Failed to create table");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         let employees = snapshot
             .tables
@@ -408,6 +473,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_column_types() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("types");
@@ -450,7 +516,9 @@ mod introspection {
         .await
         .expect("Failed to create table");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         let type_test = snapshot
             .tables
@@ -531,6 +599,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_identity_column() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("identity");
@@ -555,7 +624,9 @@ mod introspection {
         .await
         .expect("Failed to create table");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         let table = snapshot
             .tables
@@ -570,6 +641,7 @@ mod introspection {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_introspect_complex_schema() {
         let pool = create_pool().await;
         let schema_name = unique_schema_name("complex");
@@ -643,7 +715,9 @@ mod introspection {
         .await
         .expect("Failed to create complex schema");
 
-        let snapshot = introspect_postgres(&pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pool, &schema_name)
+            .await
+            .unwrap();
 
         // Verify all tables were introspected
         assert!(snapshot.tables.contains_key(&format!("users_{}", suffix)));
@@ -709,9 +783,11 @@ mod introspection {
 // ============================================================================
 
 mod migrations {
+
     use super::*;
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_apply_simple() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -753,7 +829,9 @@ mod migrations {
             .unwrap();
 
         // Verify the table was created
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(snapshot.tables.contains_key(&table_name));
 
         // Verify migration was recorded
@@ -764,6 +842,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_apply_all_pending() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -778,19 +857,13 @@ mod migrations {
 
         // Create multiple migration files
         let migration1 = format!(
-            "CREATE TABLE \"{schema}\".users_{s} (id SERIAL PRIMARY KEY, name VARCHAR(255));",
-            schema = schema_name,
-            s = suffix
+            "CREATE TABLE \"{schema_name}\".users_{suffix} (id SERIAL PRIMARY KEY, name VARCHAR(255));",
         );
         let migration2 = format!(
-            "CREATE TABLE \"{schema}\".posts_{s} (id SERIAL PRIMARY KEY, title VARCHAR(255), user_id INTEGER REFERENCES \"{schema}\".users_{s}(id));",
-            schema = schema_name,
-            s = suffix
+            "CREATE TABLE \"{schema_name}\".posts_{suffix} (id SERIAL PRIMARY KEY, title VARCHAR(255), user_id INTEGER REFERENCES \"{schema_name}\".users_{suffix}(id));",
         );
         let migration3 = format!(
-            "CREATE INDEX idx_posts_{s}_user_id ON \"{schema}\".posts_{s}(user_id);",
-            schema = schema_name,
-            s = suffix
+            "CREATE INDEX idx_posts_{suffix}_user_id ON \"{schema_name}\".posts_{suffix}(user_id);",
         );
 
         std::fs::write(temp_dir.path().join("0001_create_users.sql"), &migration1).unwrap();
@@ -806,7 +879,9 @@ mod migrations {
         assert!(applied.contains(&"0003_add_index".to_string()));
 
         // Verify tables exist
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(snapshot.tables.contains_key(&format!("users_{}", suffix)));
         assert!(snapshot.tables.contains_key(&format!("posts_{}", suffix)));
 
@@ -814,6 +889,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_single() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -855,7 +931,9 @@ mod migrations {
             .unwrap();
 
         // Verify table exists
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(snapshot.tables.contains_key(&table_name));
 
         // Rollback the migration
@@ -865,7 +943,9 @@ mod migrations {
             .unwrap();
 
         // Verify table was dropped
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(!snapshot.tables.contains_key(&table_name));
 
         // Verify migration record was removed
@@ -876,6 +956,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_all() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -931,7 +1012,9 @@ mod migrations {
         manager.apply_all(&pool).await.unwrap();
 
         // Verify both tables exist
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(snapshot.tables.contains_key(&format!("users_{}", suffix)));
         assert!(snapshot.tables.contains_key(&format!("posts_{}", suffix)));
 
@@ -944,7 +1027,9 @@ mod migrations {
         assert_eq!(rolled_back[1], "0001_create_users");
 
         // Verify tables were dropped
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(!snapshot.tables.contains_key(&format!("users_{}", suffix)));
         assert!(!snapshot.tables.contains_key(&format!("posts_{}", suffix)));
 
@@ -952,6 +1037,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_count() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -1001,7 +1087,9 @@ mod migrations {
         assert_eq!(rolled_back.len(), 2);
 
         // Only tbl1 should remain
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(snapshot.tables.contains_key(&format!("tbl1_{}", suffix)));
         assert!(!snapshot.tables.contains_key(&format!("tbl2_{}", suffix)));
         assert!(!snapshot.tables.contains_key(&format!("tbl3_{}", suffix)));
@@ -1010,6 +1098,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_pending_detection() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -1063,6 +1152,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_transaction_rollback_on_error() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -1099,7 +1189,9 @@ mod migrations {
         assert!(result.is_err());
 
         // The first table should NOT exist due to transaction rollback
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(!snapshot.tables.contains_key(&table_name));
 
         // Migration should not be recorded
@@ -1110,6 +1202,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_alter_table() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -1177,8 +1270,14 @@ mod migrations {
         manager.apply_all(&pool).await.unwrap();
 
         // Verify the schema
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
-        let users = snapshot.tables.get(&table_name).unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .expect("Failed to introspect");
+
+        let users = snapshot
+            .tables
+            .get(&table_name)
+            .expect("Users table not found");
 
         assert!(users.columns.contains_key("email"));
         assert!(
@@ -1192,7 +1291,9 @@ mod migrations {
         // Rollback the unique constraint
         manager.rollback_count(&pool, 1).await.unwrap();
 
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         let users = snapshot.tables.get(&table_name).unwrap();
 
         // Unique constraint should be gone but email column remains
@@ -1207,7 +1308,9 @@ mod migrations {
         // Rollback the email column
         manager.rollback_count(&pool, 1).await.unwrap();
 
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         let users = snapshot.tables.get(&table_name).unwrap();
 
         // Email column should be gone
@@ -1217,6 +1320,7 @@ mod migrations {
     }
 
     #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_with_enum_type() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;
@@ -1262,7 +1366,9 @@ mod migrations {
         manager.apply_all(&pool).await.unwrap();
 
         // Verify enum and table exist
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(
             snapshot
                 .enums
@@ -1274,7 +1380,9 @@ mod migrations {
         manager.rollback_all(&pool).await.unwrap();
 
         // Verify both are gone
-        let snapshot = introspect_postgres(&pg_pool).await.unwrap();
+        let snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .unwrap();
         assert!(
             !snapshot
                 .enums

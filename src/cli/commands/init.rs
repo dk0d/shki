@@ -109,6 +109,8 @@ async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<(
     println!("    - lua-language-server: autocomplete, type checking, hover docs");
     println!("    - selene: linting with shki globals recognized");
     println!();
+    println!("init.lua must return a schema definition.");
+    println!();
     println!("  {}", "Next steps:".cyan());
     println!("    1. Edit schema/init.lua to define your schema");
     #[rustfmt::skip]
