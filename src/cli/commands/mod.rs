@@ -1,5 +1,3 @@
-use colored::Colorize;
-
 mod create;
 mod generate;
 mod init;
@@ -61,9 +59,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
             dry_run,
         } => generate::cmd_generate_sql(&config, name, schema, dry_run),
-        _ => {
-            println!("{}", "Command not implemented yet.".red());
-            Ok(())
-        }
+        // _ => {
+        //     println!("{}", "Command not implemented yet.".red());
+        //     Ok(())
+        // }
     }
 }

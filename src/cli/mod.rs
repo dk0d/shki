@@ -142,66 +142,6 @@ pub enum Commands {
         dry_run: bool,
     },
 
-    /// Push schema changes directly to the database (no migration files)
-    Push {
-        /// Path to schema file(s) or directory
-        #[arg(short, long)]
-        schema: Option<PathBuf>,
-
-        /// Skip confirmation for destructive changes
-        #[arg(long)]
-        force: bool,
-
-        /// Only show what would be executed
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Pull (introspect) the database schema
-    Pull {
-        /// Output format (json, sql, rust)
-        #[arg(short, long, default_value = "json")]
-        format: String,
-
-        /// Output file (defaults to stdout)
-        #[arg(long)]
-        output: Option<PathBuf>,
-    },
-
-    /// Show the diff between schema and database
-    Diff {
-        /// Path to schema file(s) or directory
-        #[arg(short, long)]
-        schema: Option<PathBuf>,
-
-        /// Output as SQL instead of summary
-        #[arg(long)]
-        sql: bool,
-    },
-
-    /// List migrations and their status
-    Status,
-
-    /// Check migration files for consistency
-    Check,
-
-    /// Drop a migration file
-    Drop {
-        /// Migration name or index to drop
-        migration: String,
-    },
-
-    /// Export schema as SQL
-    Export {
-        /// Path to schema file(s) or directory
-        #[arg(short, long)]
-        schema: Option<PathBuf>,
-
-        /// Output file (defaults to stdout)
-        #[arg(long)]
-        output: Option<PathBuf>,
-    },
-
     /// Create a blank migration file for manual SQL editing
     Create {
         /// Migration name (e.g., "add_user_index", "create_audit_table")
@@ -223,15 +163,71 @@ pub enum Commands {
         #[arg(short, long)]
         edit: bool,
     },
+    // Push schema changes directly to the database (no migration files)
+    // Push {
+    //     /// Path to schema file(s) or directory
+    //     #[arg(short, long)]
+    //     schema: Option<PathBuf>,
+    //
+    //     /// Skip confirmation for destructive changes
+    //     #[arg(long)]
+    //     force: bool,
+    //
+    //     /// Only show what would be executed
+    //     #[arg(long)]
+    //     dry_run: bool,
+    // },
+    // Pull (introspect) the database schema
+    // Pull {
+    //     /// Output format (json, sql, rust)
+    //     #[arg(short, long, default_value = "json")]
+    //     format: String,
+    //
+    //     /// Output file (defaults to stdout)
+    //     #[arg(long)]
+    //     output: Option<PathBuf>,
+    // },
 
-    /// Rollback (undo) applied migrations using down migration files
-    Down {
-        /// Number of migrations to rollback (default: all available)
-        #[arg(short = 'n', long)]
-        count: Option<usize>,
+    // Show the diff between schema and database
+    // Diff {
+    //     /// Path to schema file(s) or directory
+    //     #[arg(short, long)]
+    //     schema: Option<PathBuf>,
+    //
+    //     /// Output as SQL instead of summary
+    //     #[arg(long)]
+    //     sql: bool,
+    // },
 
-        /// Only show what would be rolled back
-        #[arg(long)]
-        dry_run: bool,
-    },
+    // List migrations and their status
+    // Status,
+
+    // Check migration files for consistency
+    // Check,
+    // Drop a migration file
+    // Drop {
+    //     /// Migration name or index to drop
+    //     migration: String,
+    // },
+
+    // Export schema as SQL
+    // Export {
+    //     /// Path to schema file(s) or directory
+    //     #[arg(short, long)]
+    //     schema: Option<PathBuf>,
+    //
+    //     /// Output file (defaults to stdout)
+    //     #[arg(long)]
+    //     output: Option<PathBuf>,
+    // },
+    // Rollback (undo) applied migrations using down migration files
+    // Down {
+    //     /// Number of migrations to rollback (default: all available)
+    //     #[arg(short = 'n', long)]
+    //     count: Option<usize>,
+    //
+    //     /// Only show what would be rolled back
+    //     #[arg(long)]
+    //     dry_run: bool,
+    // },
 }
