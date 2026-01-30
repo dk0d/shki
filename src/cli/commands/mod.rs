@@ -2,6 +2,7 @@ mod create;
 mod generate;
 mod init;
 mod migrate;
+mod status;
 
 use crate::config::Config;
 use crate::{Commands, Result};
@@ -59,6 +60,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
             dry_run,
         } => generate::cmd_generate_sql(&config, name, schema, dry_run),
+
+        Commands::Status => status::cmd_status(&config).await,
         // _ => {
         //     println!("{}", "Command not implemented yet.".red());
         //     Ok(())

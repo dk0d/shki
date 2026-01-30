@@ -198,10 +198,8 @@ pub enum Commands {
     //     #[arg(long)]
     //     sql: bool,
     // },
-
-    // List migrations and their status
-    // Status,
-
+    /// List migrations and their status
+    Status,
     // Check migration files for consistency
     // Check,
     // Drop a migration file

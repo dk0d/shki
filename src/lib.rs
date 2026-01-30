@@ -18,3 +18,5 @@ pub mod diff;
 pub use diff::*;
 pub mod sql;
 pub use sql::*;
+pub mod pool;
+pub use pool::*;

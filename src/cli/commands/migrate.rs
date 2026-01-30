@@ -1,8 +1,9 @@
 use crate::config::Config;
 
-use crate::{MigrationManager, Result, ShkiError};
+use crate::{MigrationManager, Result, ShkiError, create_any_pool};
 use colored::Colorize;
-use sqlx::any::AnyPoolOptions;
+
+use sqlx::AnyPool;
 
 pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
     let db_url = config
@@ -12,10 +13,7 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
 
     sqlx::any::install_default_drivers();
 
-    let pool = AnyPoolOptions::new()
-        .max_connections(5)
-        .connect(db_url)
-        .await?;
+    let pool: AnyPool = create_any_pool(db_url).await;
 
     let migration_manager = MigrationManager::new(&config.out, config.dialect)
         .with_table_name(&config.migrations.table)

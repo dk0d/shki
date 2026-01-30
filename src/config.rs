@@ -48,6 +48,14 @@ pub struct Config {
     /// Introspection settings
     #[serde(default)]
     pub introspect: IntrospectConfig,
+
+    /// Database connection timeout in seconds
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_timeout() -> u64 {
+    2
 }
 
 fn default_out() -> PathBuf {
@@ -143,6 +151,7 @@ impl Default for Config {
             strict: false,
             migrations: MigrationConfig::default(),
             introspect: IntrospectConfig::default(),
+            timeout_seconds: default_timeout(),
         }
     }
 }
