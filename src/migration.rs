@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use petname::Generator;
+use sea_query::PostgresQueryBuilder;
 use serde::{Deserialize, Serialize};
-use sqlx::AnyPool;
+use sqlx::prelude::FromRow;
+use sqlx::{AnyPool, Row};
 
 use crate::config::MigrationPrefix;
 use crate::schema::SchemaDialect;
@@ -68,6 +70,13 @@ pub struct MigrationManager {
 
     /// Database dialect
     pub dialect: SchemaDialect,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct MigrationRow {
+    pub id: i64,
+    pub name: String,
+    pub applied_at: String,
 }
 
 impl MigrationManager {
@@ -269,13 +278,15 @@ impl MigrationManager {
             None => format!("\"{}\"", self.table_name),
         };
 
+        // use text for `applied_at` for simplicity across dialects
+        // allows us to use AnyPool more easily
         let create_sql = match self.dialect {
             SchemaDialect::Postgres => format!(
                 r#"
                 CREATE TABLE IF NOT EXISTS {} (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 "#,
                 table_name
@@ -285,7 +296,7 @@ impl MigrationManager {
                 CREATE TABLE IF NOT EXISTS {} (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 "#,
                 table_name
@@ -307,7 +318,7 @@ impl MigrationManager {
     }
 
     /// Get list of applied migrations from the database
-    pub async fn get_applied_migrations(&self, pool: &AnyPool) -> Result<Vec<String>> {
+    pub async fn get_applied_migrations(&self, pool: &AnyPool) -> Result<Vec<MigrationRow>> {
         self.ensure_migrations_table(pool).await?;
 
         let table_name = match &self.table_schema {
@@ -315,12 +326,21 @@ impl MigrationManager {
             None => format!("\"{}\"", self.table_name),
         };
 
-        let query = format!("SELECT name FROM {} ORDER BY id", table_name);
+        let query = sea_query::Query::select()
+            .from(table_name)
+            .columns(vec!["id", "name", "applied_at"])
+            .order_by("id", sea_query::Order::Asc)
+            .to_owned();
 
-        let rows = sqlx::query_scalar::<_, String>(&query)
+        let query = match self.dialect {
+            SchemaDialect::Postgres => query.to_string(sea_query::PostgresQueryBuilder),
+            SchemaDialect::Mysql => query.to_string(sea_query::MysqlQueryBuilder),
+            SchemaDialect::Sqlite => query.to_string(sea_query::SqliteQueryBuilder),
+        };
+
+        let rows = sqlx::query_as::<_, MigrationRow>(&query)
             .fetch_all(pool)
             .await?;
-
         Ok(rows)
     }
 
@@ -329,7 +349,8 @@ impl MigrationManager {
         let all_migrations = self.list_migrations()?;
         let applied = self.get_applied_migrations(pool).await?;
 
-        let applied_set: std::collections::HashSet<String> = applied.into_iter().collect();
+        let applied_set: std::collections::HashSet<String> =
+            applied.into_iter().map(|m| m.name).collect();
 
         let pending: Vec<PathBuf> = all_migrations
             .into_iter()
@@ -361,6 +382,12 @@ impl MigrationManager {
             Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
             None => format!("\"{}\"", self.table_name),
         };
+
+        let query = sea_query::Query::insert()
+            .into_table(table_name)
+            .columns(vec!["name"])
+            .values_panic(vec![name])
+            .to_owned();
 
         let insert_sql = match self.dialect {
             SchemaDialect::Postgres | SchemaDialect::Sqlite => {
@@ -432,8 +459,8 @@ impl MigrationManager {
         let rollback_migrations: Vec<PathBuf> = applied
             .into_iter()
             .rev() // Most recent first
-            .filter_map(|name| {
-                let down_path = self.out_dir.join(format!("{}.down.sql", name));
+            .filter_map(|m| {
+                let down_path = self.out_dir.join(format!("{}.down.sql", m.name));
                 if down_path.exists() {
                     Some(down_path)
                 } else {

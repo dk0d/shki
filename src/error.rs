@@ -56,6 +56,10 @@ impl ShkiError {
         ShkiError::Config(msg.into())
     }
 
+    pub fn database(e: sqlx::Error) -> Self {
+        ShkiError::Database(e)
+    }
+
     pub fn schema(msg: impl Into<String>) -> Self {
         ShkiError::Schema(msg.into())
     }
