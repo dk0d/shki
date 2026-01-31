@@ -1,29 +1,27 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::MigrationManager;
 use crate::Result;
 use crate::config::Config;
-use crate::create_any_pool_opts;
 use colored::Colorize;
-use tabled::Tabled;
-use tabled::settings::Color;
-use tabled::settings::object::Columns;
-use tabled::{Table, settings::Style};
+use tabled::{
+    Table, Tabled,
+    settings::{Color, Style, object::Columns},
+};
+
+use crate::create_any_pool_opts;
 
 #[derive(Debug, Tabled)]
-struct Migration {
+pub struct MigrationState {
     status: String,
     name: String,
     down: String,
+    applied_at: String,
 }
 
-/// Show migration status
-pub async fn cmd_status(config: &Config) -> Result<()> {
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
-        .with_table_name(&config.migrations.table);
-
-    let all_migrations = migration_manager.list_migrations()?;
-
+pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> Result<()> {
+    let all_migrations = manager.list_migrations()?;
     if all_migrations.is_empty() {
         println!("{}", "No migrations found".yellow());
         return Ok(());
@@ -32,17 +30,21 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     // Try to get applied migrations if database URL is available
     let applied = if let Some(db_url) = config.database_url.as_ref() {
         let pool = create_any_pool_opts()
-            .max_connections(3)
+            .max_connections(2)
             .acquire_timeout(Duration::from_secs(config.timeout_seconds))
             .connect(db_url)
             .await?;
-        migration_manager.get_applied_migrations(&pool).await.ok()
+        let migrations = manager.get_applied_migrations(&pool).await?;
+        Some(migrations)
     } else {
         None
     };
 
-    let applied_set: std::collections::HashSet<String> =
-        applied.unwrap_or_default().into_iter().collect();
+    let applied_set: std::collections::HashSet<String> = if let Some(a) = applied.as_ref() {
+        a.iter().map(|m| m.name.clone()).collect()
+    } else {
+        HashSet::new()
+    };
 
     println!("\n{}\n", "Migration Status".cyan());
 
@@ -61,16 +63,23 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
             };
 
             // Check if down migration exists
-            let has_down = migration_manager.has_down_migration(path);
+            let has_down = manager.has_down_migration(path);
 
-            // println!("  [{}] {}{}", status, name, down_indicator.cyan());
-            Migration {
+            MigrationState {
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
                 down: if has_down {
                     " ↓".cyan().to_string()
                 } else {
                     " x".red().to_string()
+                },
+                applied_at: if let Some(a) = applied.as_ref() {
+                    a.iter()
+                        .find(|m| m.name == name)
+                        .map(|m| m.applied_at.clone())
+                        .unwrap_or_default()
+                } else {
+                    "".to_string()
                 },
             }
         })
@@ -83,10 +92,19 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
     println!("{}", table);
 
+    // TODO: use verbose flag to show these types of things
     // Show legend
     println!();
     println!("  {} = down migration available", "↓".cyan());
     println!("  {} = down migration not available", "x".red());
 
     Ok(())
+}
+
+/// Show migration status
+pub async fn cmd_status(config: &Config) -> Result<()> {
+    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+        .with_table_name(&config.migrations.table);
+
+    display_migrations(&migration_manager, config).await
 }

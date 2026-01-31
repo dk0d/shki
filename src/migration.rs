@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use petname::Generator;
-use sea_query::PostgresQueryBuilder;
 use serde::{Deserialize, Serialize};
+use sqlx::AnyPool;
 use sqlx::prelude::FromRow;
-use sqlx::{AnyPool, Row};
 
 use crate::config::MigrationPrefix;
 use crate::schema::SchemaDialect;
@@ -313,7 +312,12 @@ impl MigrationManager {
             ),
         };
 
-        sqlx::query(&create_sql).execute(pool).await?;
+        sqlx::query(&create_sql).execute(pool).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to create migrations table '{}': {}",
+                table_name, e
+            ))
+        })?;
         Ok(())
     }
 
@@ -326,16 +330,20 @@ impl MigrationManager {
             None => format!("\"{}\"", self.table_name),
         };
 
-        let query = sea_query::Query::select()
-            .from(table_name)
-            .columns(vec!["id", "name", "applied_at"])
-            .order_by("id", sea_query::Order::Asc)
-            .to_owned();
-
         let query = match self.dialect {
-            SchemaDialect::Postgres => query.to_string(sea_query::PostgresQueryBuilder),
-            SchemaDialect::Mysql => query.to_string(sea_query::MysqlQueryBuilder),
-            SchemaDialect::Sqlite => query.to_string(sea_query::SqliteQueryBuilder),
+            SchemaDialect::Postgres => format!(
+                "SELECT id, name, applied_at from {} ORDER BY id",
+                table_name
+            ),
+            SchemaDialect::Mysql => format!(
+                "SELECT id, name, applied_at from {} ORDER BY id",
+                table_name
+            ),
+
+            SchemaDialect::Sqlite => format!(
+                "SELECT id, name, applied_at from {} ORDER BY id",
+                table_name
+            ),
         };
 
         let rows = sqlx::query_as::<_, MigrationRow>(&query)
@@ -377,27 +385,6 @@ impl MigrationManager {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
 
-        // Build the SQL for recording the migration
-        let table_name = match &self.table_schema {
-            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
-            None => format!("\"{}\"", self.table_name),
-        };
-
-        let query = sea_query::Query::insert()
-            .into_table(table_name)
-            .columns(vec!["name"])
-            .values_panic(vec![name])
-            .to_owned();
-
-        let insert_sql = match self.dialect {
-            SchemaDialect::Postgres | SchemaDialect::Sqlite => {
-                format!("INSERT INTO {} (name) VALUES ($1)", table_name)
-            }
-            SchemaDialect::Mysql => {
-                format!("INSERT INTO {} (name) VALUES (?)", table_name)
-            }
-        };
-
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;
 
@@ -409,6 +396,24 @@ impl MigrationManager {
                 truncate_sql(&sql, 200)
             ))
         })?;
+
+        // Build the SQL for recording the migration
+        let table_name = match &self.table_schema {
+            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
+            None => format!("\"{}\"", self.table_name),
+        };
+
+        let insert_sql = match self.dialect {
+            SchemaDialect::Postgres => {
+                format!("INSERT INTO {} (name) VALUES ($1)", table_name)
+            }
+            SchemaDialect::Mysql => {
+                format!("INSERT INTO {} (name) VALUES (?)", table_name)
+            }
+            SchemaDialect::Sqlite => {
+                format!("INSERT INTO {} (name) VALUES (?)", table_name)
+            }
+        };
 
         // Record the migration within the same transaction
         sqlx::query(&insert_sql)
