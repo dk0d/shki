@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::{MigrationManager, Result, ShkiError, create_any_pool};
 use colored::Colorize;
 
+use crate::cli::commands::status::display_migrations;
 use sqlx::AnyPool;
 
 pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
@@ -19,14 +20,7 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 
-    let pending = migration_manager.get_pending_migrations(&pool).await?;
-
-    if pending.is_empty() {
-        println!("\n{}\n", "No pending migrations".green());
-        return Ok(());
-    }
-
-    display_pending_migrations(&pending);
+    display_migrations(&migration_manager, config).await?;
 
     if dry_run {
         println!("\n{}", "(dry run - no changes applied)".cyan());
@@ -35,33 +29,18 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
 
     let applied = migration_manager.apply_all(&pool).await?;
 
-    display_applied_migrations(&applied);
+    println!(
+        "\n\n{} migration(s) applied\n\n",
+        applied.len().to_string().green()
+    );
+
+    display_migrations(&migration_manager, config).await?;
 
     Ok(())
 }
 
-fn display_pending_migrations(pending: &[std::path::PathBuf]) {
-    println!(
-        "\n\n{} pending migration(s):",
-        pending.len().to_string().yellow()
-    );
-
-    for path in pending {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        println!("  - {}", name);
-    }
-}
-
 fn display_applied_migrations(applied: &[String]) {
-    println!(
-        "\n\n{} migration(s) applied:",
-        applied.len().to_string().green()
-    );
-
-    for name in applied {
-        println!("  - {}", name);
-    }
+    let mut table = tabled::Table::new(applied.iter().map(|name| ("applied", name)));
+    table.with(tabled::settings::Style::psql());
+    println!("{}", table);
 }

@@ -836,7 +836,13 @@ mod migrations {
 
         // Verify migration was recorded
         let applied = manager.get_applied_migrations(&pool).await.unwrap();
-        assert!(applied.contains(&"0001_create_test_table".to_string()));
+        assert!(
+            applied
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<String>>()
+                .contains(&"0001_create_test_table".to_string())
+        );
 
         cleanup_test_schema(&pg_pool, &schema_name).await;
     }
@@ -950,7 +956,13 @@ mod migrations {
 
         // Verify migration record was removed
         let applied = manager.get_applied_migrations(&pool).await.unwrap();
-        assert!(!applied.contains(&"0001_create_table".to_string()));
+        assert!(
+            !applied
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<String>>()
+                .contains(&"0001_create_table".to_string())
+        );
 
         cleanup_test_schema(&pg_pool, &schema_name).await;
     }
@@ -1196,7 +1208,13 @@ mod migrations {
 
         // Migration should not be recorded
         let applied = manager.get_applied_migrations(&pool).await.unwrap();
-        assert!(!applied.contains(&"0001_bad_migration".to_string()));
+        assert!(
+            !applied
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<String>>()
+                .contains(&"0001_bad_migration".to_string())
+        );
 
         cleanup_test_schema(&pg_pool, &schema_name).await;
     }
