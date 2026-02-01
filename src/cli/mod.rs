@@ -218,6 +218,7 @@ pub enum Commands {
     //     #[arg(long)]
     //     output: Option<PathBuf>,
     // },
+    
     // Rollback (undo) applied migrations using down migration files
     // Down {
     //     /// Number of migrations to rollback (default: all available)
