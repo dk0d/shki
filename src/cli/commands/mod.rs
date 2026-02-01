@@ -1,7 +1,10 @@
 mod create;
+mod diff;
 mod generate;
 mod init;
+pub mod introspect;
 mod migrate;
+mod pull;
 mod status;
 
 use crate::config::Config;
@@ -62,6 +65,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => generate::cmd_generate_sql(&config, name, schema, dry_run),
 
         Commands::Status => status::cmd_status(&config).await,
+
+        Commands::Pull {
+            format,
+            output,
+            with_migration_table,
+        } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
+
+        Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         // _ => {
         //     println!("{}", "Command not implemented yet.".red());
         //     Ok(())
