@@ -1411,3 +1411,56 @@ mod migrations {
         cleanup_test_schema(&pg_pool, &schema_name).await;
     }
 }
+
+mod db_pool {
+    use shki::{Config, SchemaDialect};
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_pool() {
+        let config = Config {
+            dialect: SchemaDialect::Postgres,
+            database_url: Some("postgres://postgres:postgres@localhost/shki".to_string()),
+            ..Default::default()
+        };
+        let _ = shki::db::create_pool(&config)
+            .await
+            .expect("Failed to create pool");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_transaction_raw_sql() {
+        let config = Config {
+            dialect: SchemaDialect::Postgres,
+            database_url: Some("postgres://postgres:postgres@localhost/shki".to_string()),
+            ..Default::default()
+        };
+        let pool = shki::db::create_pool(&config)
+            .await
+            .expect("Failed to create pool");
+        let mut tx = pool.begin().await.expect("Failed to begin transaction");
+        tx.raw_sql("SELECT 1 + 1")
+            .await
+            .expect("Failed to execute query");
+        tx.commit().await.expect("Failed to commit transaction");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_transaction_query() {
+        let config = Config {
+            dialect: SchemaDialect::Postgres,
+            database_url: Some("postgres://postgres:postgres@localhost/shki".to_string()),
+            ..Default::default()
+        };
+        let pool = shki::db::create_pool(&config)
+            .await
+            .expect("Failed to create pool");
+        let mut tx = pool.begin().await.expect("Failed to begin transaction");
+        tx.query("SELECT 1 + 1")
+            .await
+            .expect("Failed to execute query");
+        tx.commit().await.expect("Failed to commit transaction");
+    }
+}

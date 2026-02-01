@@ -65,7 +65,6 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
             // Check if down migration exists
             let has_down = manager.has_down_migration(path);
 
-            // println!("  [{}] {}{}", status, name, down_indicator.cyan());
             MigrationState {
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
@@ -93,6 +92,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
 
     println!("{}", table);
 
+    // TODO: use verbose flag to show these types of things
     // Show legend
     println!();
     println!("  {} = down migration available", "↓".cyan());

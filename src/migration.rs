@@ -376,7 +376,7 @@ impl MigrationManager {
     /// The entire migration (all statements) is executed within a single transaction.
     /// If any statement fails, the entire migration is rolled back.
     ///
-    /// Note: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
+    /// IMPORTANT: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
     /// run inside a transaction. For such cases, use separate migration files.
     pub async fn apply_migration(&self, pool: &AnyPool, migration_path: &Path) -> Result<()> {
         let sql = std::fs::read_to_string(migration_path)?;
