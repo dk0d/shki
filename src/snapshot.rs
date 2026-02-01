@@ -53,6 +53,12 @@ pub struct Snapshot {
     pub extensions: Vec<String>,
 }
 
+impl From<Schema> for Snapshot {
+    fn from(schema: Schema) -> Self {
+        Snapshot::from_schema(&schema)
+    }
+}
+
 /// Snapshot of a table
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSnapshot {

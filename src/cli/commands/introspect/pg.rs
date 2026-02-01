@@ -1,13 +1,9 @@
-//! Database introspection
-//!
-//! This module reads the current database schema and converts it to a snapshot.
-//!
+use crate::{
+    ColumnSnapshot, ConstraintSnapshot, ConstraintType, EnumSnapshot, ForeignKeyReference,
+    IndexSnapshot, Result, Snapshot, TableSnapshot, schema::SchemaDialect,
+};
 use indexmap::IndexMap;
 use sqlx::{Pool, Postgres, Row};
-
-use crate::Result;
-use crate::schema::SchemaDialect;
-use crate::snapshot::*;
 
 /// Introspect a PostgreSQL database
 pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {

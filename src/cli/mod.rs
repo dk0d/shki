@@ -68,6 +68,7 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
+    /// Subcommand to execute
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -163,41 +164,32 @@ pub enum Commands {
         #[arg(short, long)]
         edit: bool,
     },
-    // Push schema changes directly to the database (no migration files)
-    // Push {
-    //     /// Path to schema file(s) or directory
-    //     #[arg(short, long)]
-    //     schema: Option<PathBuf>,
-    //
-    //     /// Skip confirmation for destructive changes
-    //     #[arg(long)]
-    //     force: bool,
-    //
-    //     /// Only show what would be executed
-    //     #[arg(long)]
-    //     dry_run: bool,
-    // },
-    // Pull (introspect) the database schema
-    // Pull {
-    //     /// Output format (json, sql, rust)
-    //     #[arg(short, long, default_value = "json")]
-    //     format: String,
-    //
-    //     /// Output file (defaults to stdout)
-    //     #[arg(long)]
-    //     output: Option<PathBuf>,
-    // },
 
-    // Show the diff between schema and database
-    // Diff {
-    //     /// Path to schema file(s) or directory
-    //     #[arg(short, long)]
-    //     schema: Option<PathBuf>,
-    //
-    //     /// Output as SQL instead of summary
-    //     #[arg(long)]
-    //     sql: bool,
-    // },
+    /// Pull (introspect) the database schema
+    Pull {
+        /// Output format (json, sql, rust)
+        #[arg(short, long, default_value = "sql")]
+        format: String,
+
+        /// Output file (defaults to stdout)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        #[arg(long, short, default_value_t = false)]
+        with_migration_table: bool,
+    },
+
+    /// Show the diff between schema and database
+    Diff {
+        /// Path to schema file(s) or directory
+        #[arg(short, long)]
+        schema: Option<PathBuf>,
+
+        /// Output as SQL instead of summary
+        #[arg(long)]
+        sql: bool,
+    },
+
     /// List migrations and their status
     Status,
     // Check migration files for consistency
@@ -207,7 +199,6 @@ pub enum Commands {
     //     /// Migration name or index to drop
     //     migration: String,
     // },
-
     // Export schema as SQL
     // Export {
     //     /// Path to schema file(s) or directory
