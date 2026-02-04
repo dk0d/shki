@@ -1,4 +1,5 @@
 mod dialect;
+
 use crate::{Config, Result, SchemaDialect, ShkiError};
 use dialect::{mysql, pg, sqlite};
 use sqlx::{Pool, mysql::MySql, postgres::Postgres, sqlite::Sqlite};
@@ -279,5 +280,66 @@ pub async fn create_pool(config: &Config) -> Result<DatabasePool> {
             let pool = sqlite::create_pool(config).await?;
             Ok(DatabasePool::Sqlite(pool))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::MigrationRow;
+
+    use sqlx::Row;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_database_pool() {
+        let config = crate::Config::default();
+        let db_pool = create_pool(&config).await.unwrap();
+        let tx = db_pool.begin().await.unwrap();
+
+        let rows = match tx {
+            Transaction::Postgres(mut tx) => {
+                let rows = sqlx::query("SELECT * from __shki_migrations;")
+                    .fetch_all(&mut *tx)
+                    .await
+                    .unwrap();
+                rows.iter()
+                    .map(|row| MigrationRow {
+                        id: row.get("id"),
+                        name: row.get("name"),
+                        applied_at: row.get("applied_at"),
+                    })
+                    .collect::<Vec<_>>()
+            }
+            Transaction::Mysql(mut tx) => {
+                let rows = sqlx::query("SELECT * from __shki_migrations;")
+                    .fetch_all(&mut *tx)
+                    .await
+                    .unwrap();
+                rows.iter()
+                    .map(|row| MigrationRow {
+                        id: row.get("id"),
+                        name: row.get("name"),
+                        applied_at: row.get("applied_at"),
+                    })
+                    .collect::<Vec<MigrationRow>>()
+            }
+            Transaction::Sqlite(mut tx) => {
+                let rows = sqlx::query("SELECT * from __shki_migrations;")
+                    .fetch_all(&mut *tx)
+                    .await
+                    .unwrap();
+                rows.iter()
+                    .map(|row| MigrationRow {
+                        id: row.get("id"),
+                        name: row.get("name"),
+                        applied_at: row.get("applied_at"),
+                    })
+                    .collect::<Vec<MigrationRow>>()
+            }
+        };
+
+        tx.commit().await.unwrap();
     }
 }
