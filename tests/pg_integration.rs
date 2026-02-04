@@ -7,7 +7,7 @@
 //!
 //! Run these tests with: `cargo test --test pg_integration -- --ignored`
 
-use shki::introspect::introspect_postgres_schema;
+use shki::cli::commands::introspect::pg::introspect_postgres_schema;
 use shki::migration::MigrationManager;
 use shki::schema::SchemaDialect;
 use shki::snapshot::ConstraintType;

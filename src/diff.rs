@@ -842,7 +842,8 @@ impl SchemaDiff {
                 DiffStatement::AlterView(_) => summary.views_altered += 1,
                 DiffStatement::CreateExtension(_) => summary.extensions_created += 1,
                 DiffStatement::DropExtension(_) => summary.extensions_dropped += 1,
-                _ => {}
+                DiffStatement::RenameSchema(_) => summary.schemas_renamed += 1,
+                DiffStatement::RenameEnum(_) => summary.enums_renamed += 1,
             }
         }
 
@@ -859,6 +860,7 @@ pub struct DiffSummary {
     pub enums_dropped: usize,
     pub enums_altered: usize,
     pub enum_values_added: usize,
+    pub enums_renamed: usize,
     pub sequences_created: usize,
     pub sequences_dropped: usize,
     pub sequences_altered: usize,
@@ -879,6 +881,7 @@ pub struct DiffSummary {
     pub views_altered: usize,
     pub extensions_created: usize,
     pub extensions_dropped: usize,
+    pub schemas_renamed: usize,
 }
 
 impl std::fmt::Display for DiffSummary {
@@ -886,58 +889,58 @@ impl std::fmt::Display for DiffSummary {
         let mut parts = Vec::new();
 
         if self.tables_created > 0 {
-            parts.push(format!("{} table(s) created", self.tables_created));
+            parts.push(format!("- {} table(s) created", self.tables_created));
         }
         if self.tables_dropped > 0 {
-            parts.push(format!("{} table(s) dropped", self.tables_dropped));
+            parts.push(format!("- {} table(s) dropped", self.tables_dropped));
         }
         if self.tables_altered > 0 {
-            parts.push(format!("{} table(s) altered", self.tables_altered));
+            parts.push(format!("- {} table(s) altered", self.tables_altered));
         }
         if self.columns_added > 0 {
-            parts.push(format!("{} column(s) added", self.columns_added));
+            parts.push(format!("- {} column(s) added", self.columns_added));
         }
         if self.columns_dropped > 0 {
-            parts.push(format!("{} column(s) dropped", self.columns_dropped));
+            parts.push(format!("- {} column(s) dropped", self.columns_dropped));
         }
         if self.columns_altered > 0 {
-            parts.push(format!("{} column(s) altered", self.columns_altered));
+            parts.push(format!("- {} column(s) altered", self.columns_altered));
         }
         if self.indexes_created > 0 {
-            parts.push(format!("{} index(es) created", self.indexes_created));
+            parts.push(format!("- {} index(es) created", self.indexes_created));
         }
         if self.indexes_dropped > 0 {
-            parts.push(format!("{} index(es) dropped", self.indexes_dropped));
+            parts.push(format!("- {} index(es) dropped", self.indexes_dropped));
         }
         if self.constraints_added > 0 {
-            parts.push(format!("{} constraint(s) added", self.constraints_added));
+            parts.push(format!("- {} constraint(s) added", self.constraints_added));
         }
         if self.constraints_dropped > 0 {
             parts.push(format!(
-                "{} constraint(s) dropped",
+                "- {} constraint(s) dropped",
                 self.constraints_dropped
             ));
         }
         if self.enums_created > 0 {
-            parts.push(format!("{} enum(s) created", self.enums_created));
+            parts.push(format!("- {} enum(s) created", self.enums_created));
         }
         if self.enums_dropped > 0 {
-            parts.push(format!("{} enum(s) dropped", self.enums_dropped));
+            parts.push(format!("- {} enum(s) dropped", self.enums_dropped));
         }
         if self.enums_altered > 0 {
-            parts.push(format!("{} enum(s) altered", self.enums_altered));
+            parts.push(format!("- {} enum(s) altered", self.enums_altered));
         }
         if self.views_created > 0 {
-            parts.push(format!("{} view(s) created", self.views_created));
+            parts.push(format!("- {} view(s) created", self.views_created));
         }
         if self.views_dropped > 0 {
-            parts.push(format!("{} view(s) dropped", self.views_dropped));
+            parts.push(format!("- {} view(s) dropped", self.views_dropped));
         }
 
         if parts.is_empty() {
             write!(f, "No changes")
         } else {
-            write!(f, "{}", parts.join(", "))
+            write!(f, "{}", parts.join("\n"))
         }
     }
 }
