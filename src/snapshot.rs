@@ -3,10 +3,14 @@
 //! Snapshots are JSON representations of the database schema at a point in time.
 //! They are used to compute diffs between schema versions.
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
+use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::ShkiError;
 use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
 
 /// A snapshot of a database schema
@@ -268,6 +272,46 @@ impl Snapshot {
     /// Save snapshot to JSON
     pub fn to_json(&self) -> crate::Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    /// Load schema from config.schema path(s)
+    ///
+    /// This function resolves the glob patterns in config.schema and loads/merges
+    /// all matching schema files into a single Snapshot.
+    pub fn from_config(config: &crate::config::Config) -> crate::Result<Self> {
+        if config.schema.is_empty() {
+            return Err(ShkiError::config(
+                "No schema files found. Either:\n  \
+                     - Provide a schema path with --schema <path>\n  \
+                     - Configure schema patterns in shki.toml under 'schema'",
+            ));
+        }
+        let path = PathBuf::from(&config.schema);
+        Self::from_path(&path)
+    }
+
+    /// Load a schema snapshot from a file path
+    ///
+    /// Supports:
+    /// - `.lua` files (requires `lua` feature)
+    /// - `.json` files (snapshot format)
+    pub fn from_path(path: &std::path::Path) -> crate::Result<Self> {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        match extension {
+            "lua" => {
+                println!("{} {}", "Loading Lua schema:".cyan(), path.display());
+                let schema = crate::lua::load_schema_from_file(path)?;
+                Ok(Snapshot::from_schema(&schema))
+            }
+            "json" => {
+                let content = std::fs::read_to_string(path)?;
+                Snapshot::from_json(&content)
+            }
+            _ => Err(ShkiError::config(format!(
+                "Unsupported schema file extension: '{}'. Supported: .lua, .json",
+                extension
+            ))),
+        }
     }
 
     /// Load the latest snapshot from a directory

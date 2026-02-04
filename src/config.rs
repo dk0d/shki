@@ -9,7 +9,7 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{ShkiError, schema::SchemaDialect};
+use crate::{ShkiError, commands::codegen::CodegenConfig, schema::SchemaDialect};
 
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +48,9 @@ pub struct Config {
     /// Introspection settings
     #[serde(default)]
     pub introspect: IntrospectConfig,
+
+    #[serde(default)]
+    pub codegen: CodegenConfig,
 
     /// Database connection timeout in seconds
     #[serde(default = "default_timeout")]
@@ -149,6 +152,7 @@ impl Default for Config {
             breakpoints: true,
             verbose: false,
             strict: false,
+            codegen: CodegenConfig::default(),
             migrations: MigrationConfig::default(),
             introspect: IntrospectConfig::default(),
             timeout_seconds: default_timeout(),

@@ -9,11 +9,11 @@ use std::path::PathBuf;
 pub struct CodegenConfig {
     /// Output directory for generated code
     #[serde(default)]
-    pub output_dir: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 
     /// Output mode: single file or module directory
     #[serde(default)]
-    pub output_mode: OutputMode,
+    pub mode: OutputMode,
 
     /// Derives to add to generated structs
     #[serde(default = "default_struct_derives")]
@@ -59,20 +59,68 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub exclude_tables: Vec<String>,
 
-    /// Whether to generate a mod.rs file (for module output mode)
-    #[serde(default = "default_true")]
-    pub generate_mod_file: bool,
+    /// Enable verbose output
+    /// Will print the generated code to stdout as well as writing to files
+    #[serde(default)]
+    pub verbose: bool,
+
+    /// The name to use for the `impl_[model].rs` file in module output mode
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impl_file_name: Option<String>,
 }
 
 /// Output mode for generated code
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputMode {
     /// Generate a single file with all structs and enums
+    ///
+    ///
+    /// e.g. `user`, `product` table:
+    /// `out_dir/models.rs`
+    ///
+    /// This is the default mode and always overwrites any existing
+    /// files in the output directory.
     #[default]
+    #[value(name = "single")]
+    #[serde(rename = "single")]
     SingleFile,
-    /// Generate a module directory with one file per struct/enum
-    Module,
+
+    /// Generate a single module with separate files for each struct/enum
+    ///
+    ///
+    /// e.g. `user`, `product` table:
+    /// `out_dir/mod.rs`
+    /// `out_dir/user.rs`
+    /// `out_dir/product.rs`
+    ///
+    /// This is the default mode and always overwrites any existing
+    /// files in the output directory.
+    SingleModule,
+
+    /// Generate a module directory for each struct/enum with
+    /// separate files for the struct/enum if not already present,
+    /// an impl file and a mod.rs file to re-export them.
+    ///
+    /// e.g. for a table `user`, generate:
+    /// ```bash
+    /// user/
+    /// ├── mod.rs
+    /// ├── user.rs (struct definition)
+    /// ├── impl_user.rs (impl block)
+    /// ├── ...
+    /// └── ...
+    /// ```
+    ///
+    /// The struct/enum file is _always_ generated and overwritten.
+    /// The impl file is only generated if it does not already exist
+    /// And the mod.rs file is only generated if not already present.
+    /// i.e. if you want to add custom methods, or other supporting code,
+    /// you can create the impl_[model-name].rs or other files manually.
+    ///
+    /// This can be useful when re-generating code, and want to keep
+    /// custom methods or other code in the impl_[model-name].rs file.
+    Modules,
 }
 
 fn default_struct_derives() -> Vec<String> {
@@ -99,8 +147,8 @@ fn default_true() -> bool {
 impl Default for CodegenConfig {
     fn default() -> Self {
         Self {
-            output_dir: None,
-            output_mode: OutputMode::SingleFile,
+            output: None,
+            mode: OutputMode::SingleFile,
             struct_derives: default_struct_derives(),
             struct_attributes: Vec::new(),
             enum_derives: default_enum_derives(),
@@ -110,9 +158,10 @@ impl Default for CodegenConfig {
             type_overrides: IndexMap::new(),
             serde: false,
             sqlx: true,
+            verbose: false,
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
-            generate_mod_file: true,
+            impl_file_name: None,
         }
     }
 }
@@ -124,20 +173,33 @@ impl CodegenConfig {
     }
 
     /// Set the output directory
-    pub fn output_dir(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.output_dir = Some(dir.into());
+    pub fn output_dir(mut self, dir: Option<impl Into<PathBuf>>) -> Self {
+        if let Some(d) = dir {
+            self.output = Some(d.into());
+        }
         self
     }
 
     /// Set single file output mode
     pub fn single_file(mut self) -> Self {
-        self.output_mode = OutputMode::SingleFile;
+        self.mode = OutputMode::SingleFile;
+        self
+    }
+
+    /// Set single module output mode
+    pub fn single_module(mut self) -> Self {
+        self.mode = OutputMode::SingleModule;
         self
     }
 
     /// Set module output mode
-    pub fn module(mut self) -> Self {
-        self.output_mode = OutputMode::Module;
+    pub fn modules(mut self) -> Self {
+        self.mode = OutputMode::Modules;
+        self
+    }
+
+    pub fn mode(mut self, mode: Option<OutputMode>) -> Self {
+        self.mode = mode.unwrap_or(self.mode);
         self
     }
 
@@ -174,6 +236,11 @@ impl CodegenConfig {
     /// Add an enum attribute
     pub fn enum_attribute(mut self, attr: impl Into<String>) -> Self {
         self.enum_attributes.push(attr.into());
+        self
+    }
+
+    pub fn verbose(mut self, verbose: Option<bool>) -> Self {
+        self.verbose = verbose.unwrap_or(self.verbose);
         self
     }
 

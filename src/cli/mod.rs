@@ -13,6 +13,8 @@ use std::path::PathBuf;
 
 use crate::schema::SchemaDialect;
 
+use self::commands::codegen::OutputMode;
+
 pub fn get_styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
         .usage(
@@ -192,6 +194,27 @@ pub enum Commands {
 
     /// List migrations and their status
     Status,
+
+    ///
+    /// Generate Rust structs/enums from database schema
+    Codegen {
+        /// Path to output directory
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+
+        /// Path to schema file(s) or directory
+        #[arg(short, long)]
+        schema: Option<PathBuf>,
+
+        /// Output mode (module or single file)
+        #[arg(long, short)]
+        mode: Option<OutputMode>,
+
+        /// Enable verbose output
+        /// Will print the generated code to stdout as well as writing to files
+        #[arg(short, long, default_value_t = false)]
+        verbose: bool,
+    },
     // Check migration files for consistency
     // Check,
     // Drop a migration file
@@ -209,7 +232,7 @@ pub enum Commands {
     //     #[arg(long)]
     //     output: Option<PathBuf>,
     // },
-    
+
     // Rollback (undo) applied migrations using down migration files
     // Down {
     //     /// Number of migrations to rollback (default: all available)

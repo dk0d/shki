@@ -18,5 +18,3 @@ pub mod sql;
 pub use sql::*;
 pub mod pool;
 pub use pool::*;
-pub mod codegen;
-pub use codegen::*;

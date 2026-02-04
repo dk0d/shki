@@ -1,15 +1,5 @@
-//! Rust code generation from schema definitions
-//!
-//! This module generates Rust structs and enums from database schema definitions,
-//! compatible with sqlx and other database libraries.
-
-mod config;
-mod types;
-mod writer;
-
-pub use config::*;
-pub use types::*;
-pub use writer::*;
+pub use super::config::*;
+pub use super::types::*;
 
 use crate::Result;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};

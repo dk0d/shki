@@ -1,3 +1,4 @@
+pub mod codegen;
 mod create;
 mod diff;
 mod generate;
@@ -73,9 +74,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
 
         Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
-        // _ => {
-        //     println!("{}", "Command not implemented yet.".red());
-        //     Ok(())
-        // }
+
+        Commands::Codegen {
+            out,
+            mode,
+            schema,
+            verbose,
+        } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose)),
     }
 }
