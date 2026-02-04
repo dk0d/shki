@@ -38,9 +38,3 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
 
     Ok(())
 }
-
-// fn display_applied_migrations(applied: &[String]) {
-//     let mut table = tabled::Table::new(applied.iter().map(|name| ("applied", name)));
-//     table.with(tabled::settings::Style::psql());
-//     println!("{}", table);
-// }
