@@ -8,7 +8,7 @@ async fn main() {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli).await {
-        println!("{}: {}", "Error".red(), e);
+        println!("\n{}: {}", "Error".red(), e);
         std::process::exit(1);
     }
 }

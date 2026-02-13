@@ -251,7 +251,7 @@ impl MigrationManager {
         // Write down migration if provided
         let down_path = if let Some(down) = down_sql {
             let path = self.out_dir.join(format!("{}.down.sql", name));
-
+            
             let mut down_content = String::new();
             down_content.push_str(&format!("-- Migration: {} (down)\n", name));
             down_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));

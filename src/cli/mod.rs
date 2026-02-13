@@ -78,6 +78,7 @@ pub struct Cli {
 /// Dialect argument for CLI
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum DialectArg {
+    Pg,
     Postgres,
     Postgresql,
     Mysql,
@@ -87,7 +88,9 @@ pub enum DialectArg {
 impl From<DialectArg> for SchemaDialect {
     fn from(arg: DialectArg) -> Self {
         match arg {
-            DialectArg::Postgres | DialectArg::Postgresql => SchemaDialect::Postgres,
+            DialectArg::Pg | DialectArg::Postgres | DialectArg::Postgresql => {
+                SchemaDialect::Postgres
+            }
             DialectArg::Mysql => SchemaDialect::Mysql,
             DialectArg::Sqlite => SchemaDialect::Sqlite,
         }
@@ -195,7 +198,6 @@ pub enum Commands {
     /// List migrations and their status
     Status,
 
-    ///
     /// Generate Rust structs/enums from database schema
     Codegen {
         /// Path to output directory
@@ -215,6 +217,7 @@ pub enum Commands {
         #[arg(short, long, default_value_t = false)]
         verbose: bool,
     },
+
     // Check migration files for consistency
     // Check,
     // Drop a migration file
@@ -233,14 +236,14 @@ pub enum Commands {
     //     output: Option<PathBuf>,
     // },
 
-    // Rollback (undo) applied migrations using down migration files
-    // Down {
-    //     /// Number of migrations to rollback (default: all available)
-    //     #[arg(short = 'n', long)]
-    //     count: Option<usize>,
-    //
-    //     /// Only show what would be rolled back
-    //     #[arg(long)]
-    //     dry_run: bool,
-    // },
+    /// Rollback (undo) applied migrations using down migration files
+    Down {
+        /// Number of migrations to rollback (default: all available)
+        #[arg(short = 'n', long)]
+        count: Option<usize>,
+
+        /// Only show what would be rolled back
+        #[arg(long)]
+        dry_run: bool,
+    },
 }

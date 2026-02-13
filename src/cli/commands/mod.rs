@@ -1,6 +1,7 @@
 pub mod codegen;
 mod create;
 mod diff;
+mod down;
 mod generate;
 mod init;
 pub mod introspect;
@@ -81,5 +82,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
             verbose,
         } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose)),
+
+        Commands::Down { count, dry_run } => down::cmd_down(&config, count, dry_run).await,
     }
 }
