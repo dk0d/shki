@@ -124,6 +124,10 @@ pub enum Commands {
         /// Schema definition language (lua or rust)
         #[arg(short, long, value_enum, default_value = "lua")]
         language: SchemaLanguage,
+
+        /// Only create a default config file
+        #[arg(short, long, default_value_t = false)]
+        simple: bool,
     },
 
     /// Generate a migration from schema changes
@@ -162,7 +166,7 @@ pub enum Commands {
         sql_file: Option<PathBuf>,
 
         /// Also create a down migration file (.down.sql)
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         with_down: bool,
 
         /// Open the created file in the default editor
@@ -235,7 +239,6 @@ pub enum Commands {
     //     #[arg(long)]
     //     output: Option<PathBuf>,
     // },
-
     /// Rollback (undo) applied migrations using down migration files
     Down {
         /// Number of migrations to rollback (default: all available)

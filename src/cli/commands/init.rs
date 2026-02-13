@@ -16,6 +16,7 @@ pub async fn cmd_init(
     target_dir: &Path,
     dialect: Option<SchemaDialect>,
     language: SchemaLanguage,
+    simple: bool,
 ) -> Result<()> {
     // Create target directory if it doesn't exist
     if !target_dir.exists() {
@@ -26,35 +27,45 @@ pub async fn cmd_init(
 
     if config_path.exists() {
         println!(
-            "{} {}",
-            "shki.toml already exists in".yellow(),
+            "\n{} already exists in {}",
+            "shki.toml".yellow(),
             target_dir.display()
         );
         return Ok(());
     }
 
     let dialect = dialect.unwrap_or(SchemaDialect::Postgres);
-
-    match language {
-        // SchemaLanguage::Rust => init_rust_project(target_dir, dialect).await,
-        SchemaLanguage::Lua => init_lua_project(target_dir, dialect).await,
-    }
-}
-
-/// Initialize a Lua-based shki project
-async fn init_lua_project(target_dir: &Path, dialect: SchemaDialect) -> Result<()> {
-    let config_path = target_dir.join("shki.toml");
-    let lua_dir = target_dir.join("lua");
-    let types_dir = target_dir.join(".luacats");
-    let migrations_dir = target_dir.join("migrations");
-    let schema_file = target_dir.join("init.lua");
-
     let config = Config {
         dialect,
         ..Config::default()
     };
 
     config.save(&config_path)?;
+
+    if simple {
+        // only init the default config and exit
+        println!("{}", "Initialized shki project config".green());
+        println!("  {}", "Created files:".cyan());
+        println!(
+            "    shki.toml        - {}",
+            "project configuration".dimmed()
+        );
+        return Ok(());
+    }
+
+    match language {
+        // SchemaLanguage::Rust => init_rust_project(target_dir, dialect).await,
+        SchemaLanguage::Lua => init_lua_project(target_dir, &config).await,
+    }
+}
+
+/// Initialize a Lua-based shki project
+async fn init_lua_project(target_dir: &Path, config: &Config) -> Result<()> {
+    let dialect = config.dialect;
+    let lua_dir = target_dir.join("lua");
+    let types_dir = target_dir.join(".luacats");
+    let migrations_dir = target_dir.join("migrations");
+    let schema_file = target_dir.join("init.lua");
 
     // Create directories
     std::fs::create_dir_all(&migrations_dir)?;

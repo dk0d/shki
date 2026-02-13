@@ -40,7 +40,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             path,
             dialect,
             language,
-        } => init::cmd_init(&path, dialect.map(Into::into), language).await,
+            simple,
+        } => init::cmd_init(&path, dialect.map(Into::into), language, simple).await,
         Commands::Create {
             name,
             sql,
