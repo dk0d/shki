@@ -15,11 +15,12 @@ state to your desired schema state.
 
 ## Features
 
-- **Declarative Schema Definition**: Define tables, columns, indexes, and constraints in Lua or Rust
-  - type completions 
+- **Declarative Schema Definition**: Define tables, columns, indexes, and constraints
+  - [x] Lua type completions 
+  - [ ] Rust-based binary project
 - **Automatic Migration Generation**: Diff your schema against the database and generate migrations
 - **Multi-Dialect Support**: 
-    - [ ] PostgreSQL
+    - [x] PostgreSQL
     - [ ] MySQL
     - [ ] SQLite
 - **Database Introspection**: Pull existing database schemas into Rust code
@@ -28,6 +29,38 @@ state to your desired schema state.
     - [ ] support custom derives etc. to support sqlx, Diesel, SeaORM.
 
 ## Use Patterns
+
+### Pure migration runner
+
+Create a default config file
+
+```bash
+shki init --simple
+```
+
+Create empty up and down migration files
+
+```bash
+shki create --with-down init # or `shki new`
+```
+
+Edit your sql files manually and run migrations
+
+```bash
+shki migrate # or `shki up`
+```
+
+Rollback
+
+```bash
+shki down
+```
+
+Status
+
+```bash 
+shki status
+```
 
 ### Lua + CLI
 
