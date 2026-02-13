@@ -49,6 +49,7 @@ pub fn get_styles() -> clap::builder::Styles {
 #[derive(Parser, Debug)]
 #[command(name = "shki")]
 #[command(author, version, about, long_about = None, styles=get_styles())]
+#[command(propagate_version = true)]
 pub struct Cli {
     /// Path to configuration file
     #[arg(short, long, global = true, default_value = "shki.toml")]
@@ -112,6 +113,8 @@ pub enum SchemaLanguage {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Initialize a new shki project
+    ///
+    #[command(visible_alias = "i")]
     Init {
         /// Target directory (defaults to current directory)
         #[arg(default_value = ".")]
@@ -121,16 +124,16 @@ pub enum Commands {
         #[arg(long, value_enum)]
         dialect: Option<DialectArg>,
 
-        /// Schema definition language (lua or rust)
-        #[arg(short, long, value_enum, default_value = "lua")]
-        language: SchemaLanguage,
-
+        // Schema definition language (lua or rust)
+        // #[arg(short, long, value_enum, default_value = "lua", hidden)]
+        // language: SchemaLanguage,
         /// Only create a default config file
         #[arg(short, long, default_value_t = false)]
         simple: bool,
     },
 
     /// Generate a migration from schema changes
+    #[command(visible_alias = "gen")]
     Generate {
         /// Migration name/suffix
         #[arg(short, long)]
@@ -146,6 +149,7 @@ pub enum Commands {
     },
 
     /// Apply pending migrations to the database
+    #[command(visible_alias = "up")]
     Migrate {
         /// Only show what would be applied
         #[arg(long, short)]
@@ -153,6 +157,7 @@ pub enum Commands {
     },
 
     /// Create a blank migration file for manual SQL editing
+    #[command(visible_alias = "new")]
     Create {
         /// Migration name (e.g., "add_user_index", "create_audit_table")
         name: String,
@@ -200,9 +205,11 @@ pub enum Commands {
     },
 
     /// List migrations and their status
+    #[command(visible_alias = "s")]
     Status,
 
     /// Generate Rust structs/enums from database schema
+    #[command(visible_alias = "code")]
     Codegen {
         /// Path to output directory
         #[arg(short, long)]

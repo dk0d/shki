@@ -5,7 +5,6 @@ use crate::{Config, MigrationManager, Result, ShkiError, create_any_pool};
 
 // Rollback migrations using down migration files
 pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> Result<()> {
-    
     let db_url = config
         .database_url
         .as_ref()
@@ -55,8 +54,9 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
     }
 
     // Confirm rollback
+    println!();
     let confirmed = dialoguer::Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("\nAre you sure you want to rollback these migrations?")
+        .with_prompt("Are you sure you want to rollback these migrations?")
         .default(false)
         .interact()
         .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))?;
