@@ -15,6 +15,8 @@ use crate::schema::SchemaDialect;
 use crate::snapshot::Snapshot;
 use crate::{Result, ShkiError};
 
+use crate::queries;
+
 pub const MIGRATION_SPLIT_MARKER: &str = "--> +statement";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -272,50 +274,11 @@ impl MigrationManager {
 
     /// Create the migrations table if it doesn't exist
     pub async fn ensure_migrations_table(&self, pool: &AnyPool) -> Result<()> {
-        let table_name = match &self.table_schema {
-            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
-            None => format!("\"{}\"", self.table_name),
-        };
-
-        // use text for `applied_at` for simplicity across dialects
-        // allows us to use AnyPool more easily
-        let create_sql = match self.dialect {
-            SchemaDialect::Postgres => format!(
-                r#"
-                CREATE TABLE IF NOT EXISTS {} (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                "#,
-                table_name
-            ),
-            SchemaDialect::Mysql => format!(
-                r#"
-                CREATE TABLE IF NOT EXISTS {} (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                "#,
-                table_name
-            ),
-            SchemaDialect::Sqlite => format!(
-                r#"
-                CREATE TABLE IF NOT EXISTS {} (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                "#,
-                table_name
-            ),
-        };
-
-        sqlx::query(&create_sql).execute(pool).await.map_err(|e| {
+        let query = queries::ensure_migrations(&self.dialect, &self.table_schema, &self.table_name);
+        sqlx::query(&query).execute(pool).await.map_err(|e| {
             ShkiError::migration(format!(
                 "Failed to create migrations table '{}': {}",
-                table_name, e
+                self.table_name, e
             ))
         })?;
         Ok(())
@@ -324,28 +287,7 @@ impl MigrationManager {
     /// Get list of applied migrations from the database
     pub async fn get_applied_migrations(&self, pool: &AnyPool) -> Result<Vec<MigrationRow>> {
         self.ensure_migrations_table(pool).await?;
-
-        let table_name = match &self.table_schema {
-            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
-            None => format!("\"{}\"", self.table_name),
-        };
-
-        let query = match self.dialect {
-            SchemaDialect::Postgres => format!(
-                "SELECT id, name, applied_at from {} ORDER BY id",
-                table_name
-            ),
-            SchemaDialect::Mysql => format!(
-                "SELECT id, name, applied_at from {} ORDER BY id",
-                table_name
-            ),
-
-            SchemaDialect::Sqlite => format!(
-                "SELECT id, name, applied_at from {} ORDER BY id",
-                table_name
-            ),
-        };
-
+        let query = queries::select_migrations(&self.dialect, &self.table_schema, &self.table_name);
         let rows = sqlx::query_as::<_, MigrationRow>(&query)
             .fetch_all(pool)
             .await?;
@@ -398,25 +340,10 @@ impl MigrationManager {
         })?;
 
         // Build the SQL for recording the migration
-        let table_name = match &self.table_schema {
-            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
-            None => format!("\"{}\"", self.table_name),
-        };
-
-        let insert_sql = match self.dialect {
-            SchemaDialect::Postgres => {
-                format!("INSERT INTO {} (name) VALUES ($1)", table_name)
-            }
-            SchemaDialect::Mysql => {
-                format!("INSERT INTO {} (name) VALUES (?)", table_name)
-            }
-            SchemaDialect::Sqlite => {
-                format!("INSERT INTO {} (name) VALUES (?)", table_name)
-            }
-        };
+        let query = queries::insert_migration(&self.dialect, &self.table_schema, &self.table_name);
 
         // Record the migration within the same transaction
-        sqlx::query(&insert_sql)
+        sqlx::query(&query)
             .bind(name)
             .execute(&mut *tx)
             .await
@@ -500,19 +427,7 @@ impl MigrationManager {
             .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
 
         // Build the SQL for removing the migration record
-        let table_name = match &self.table_schema {
-            Some(s) => format!("\"{}\".\"{}\"", s, self.table_name),
-            None => format!("\"{}\"", self.table_name),
-        };
-
-        let delete_sql = match self.dialect {
-            SchemaDialect::Postgres | SchemaDialect::Sqlite => {
-                format!("DELETE FROM {} WHERE name = $1", table_name)
-            }
-            SchemaDialect::Mysql => {
-                format!("DELETE FROM {} WHERE name = ?", table_name)
-            }
-        };
+        let delete_sql = queries::delete_table(&self.dialect, &self.table_schema, &self.table_name);
 
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;

@@ -18,3 +18,5 @@ pub mod sql;
 pub use sql::*;
 pub mod pool;
 pub use pool::*;
+pub mod queries;
+pub use queries::*;
