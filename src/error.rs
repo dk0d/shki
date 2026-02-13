@@ -5,49 +5,49 @@ pub type Result<T> = anyhow::Result<T, ShkiError>;
 /// Main error type for Shki
 #[derive(Error, Debug)]
 pub enum ShkiError {
-    #[error("Database error: {0}")]
+    #[error("[DB] {0}")]
     Database(#[from] sqlx::Error),
 
-    #[error("IO error: {0}")]
+    #[error("[IO] {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("JSON error: {0}")]
+    #[error("[JSON] {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("TOML parse error: {0}")]
+    #[error("[TOML] {0}")]
     TomlParse(#[from] toml::de::Error),
 
-    #[error("Configuration error: {0}")]
+    #[error("[CONFIG] {0}")]
     Config(String),
 
-    #[error("Schema error: {0}")]
+    #[error("[SCHEMA] {0}")]
     Schema(String),
 
-    #[error("Migration error: {0}")]
+    #[error("[MIGRATION] {0}")]
     Migration(String),
 
-    #[error("Diff error: {0}")]
+    #[error("[DIFF] {0}")]
     Diff(String),
 
-    #[error("Introspection error: {0}")]
+    #[error("[INSPECT] {0}")]
     Introspection(String),
 
-    #[error("SQL generation error: {0}")]
+    #[error("[SQL-GEN] {0}")]
     SqlGeneration(String),
 
-    #[error("Unsupported dialect: {0}")]
+    #[error("[DIALECT] {0}")]
     UnsupportedDialect(String),
 
-    #[error("Ambiguous rename detected: {0}")]
+    #[error("[AMBIGUOUS-RENAME] {0}")]
     AmbiguousRename(String),
 
-    #[error("Connection error: {0}")]
+    #[error("[CONNECTION] {0}")]
     Connection(String),
 
-    #[error("Validation error: {0}")]
+    #[error("[VALIDATION] {0}")]
     Validation(String),
 
-    #[error("Lua error: {0}")]
+    #[error("[LUA] {0}")]
     Lua(String),
 }
 
