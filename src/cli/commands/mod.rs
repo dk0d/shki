@@ -2,6 +2,7 @@ pub mod codegen;
 mod create;
 mod diff;
 mod down;
+mod drop;
 mod generate;
 mod init;
 pub mod introspect;
@@ -76,6 +77,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
 
         Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
+
+        Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
 
         Commands::Codegen {
             out,

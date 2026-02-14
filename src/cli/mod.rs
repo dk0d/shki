@@ -49,7 +49,7 @@ pub fn get_styles() -> clap::builder::Styles {
 #[derive(Parser, Debug)]
 #[command(name = "shki")]
 #[command(author, version, about, long_about = None, styles=get_styles())]
-#[command(propagate_version = true)]
+// #[command(propagate_version = true)]
 pub struct Cli {
     /// Path to configuration file
     #[arg(short, long, global = true, default_value = "shki.toml")]
@@ -231,11 +231,14 @@ pub enum Commands {
 
     // Check migration files for consistency
     // Check,
-    // Drop a migration file
-    // Drop {
-    //     /// Migration name or index to drop
-    //     migration: String,
-    // },
+    /// Drop a migration file
+    #[command()]
+    Drop {
+        /// Migration name or index to drop
+        #[arg(default_value=None)]
+        migration: Option<String>,
+    },
+
     // Export schema as SQL
     // Export {
     //     /// Path to schema file(s) or directory

@@ -100,10 +100,6 @@ schema.table(
     T::new("users")
     :column(C.new("id").primary_key().uuid().default(DefaultValue::uuidv7()))
 )
-
-
-
-
 ```
 
 

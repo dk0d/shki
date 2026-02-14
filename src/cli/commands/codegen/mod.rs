@@ -27,12 +27,14 @@ pub fn cmd_codegen(
         Some(schema_path) => Snapshot::from_path(&schema_path)?,
         None => Snapshot::from_config(config)?,
     };
+
     let gen_config = &config
         .codegen
         .clone()
         .mode(mode)
         .verbose(verbose)
         .output_dir(output);
+    
     let generated = generate::generate_rust_code(&snapshot, gen_config).unwrap();
 
     if gen_config.verbose {
