@@ -30,6 +30,46 @@ state to your desired schema state.
 
 ## Use Patterns
 
+### Config
+
+Configuration options can be set via `shki.toml` or via environment variables prefixed with `SHKI_`.
+
+For nested properties, use `__` as a separator ( `.`).
+
+For example,
+
+```toml
+[migrations]
+table = "__shki_migarations"
+prefix = "timestamp"
+generate_down = true
+```
+
+or 
+
+```toml
+migrations.table = "__shki_migarations"
+migrations.prefix = "timestamp"
+migrations.generate_down = true
+
+```
+
+is equivalent to 
+
+```bash
+SHKI_MIGRATIONS__TABLE="__shki_migarations"
+SHKI_MIGRATIONS__PREFIX="timestamp"
+SHKI_MIGRATIONS__GENERATE_DOWN=true
+```
+
+
+`shki` will read `.env` files in the current working directory and looks for 
+`SHKI_DATABASE_URL` to connect to your database instance.
+
+You can define a default `database_url` in `shki.toml` for local dev and then override
+that value via environment variables.
+
+
 ### Pure migration runner
 
 Create a default config file

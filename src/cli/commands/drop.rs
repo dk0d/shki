@@ -66,7 +66,10 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
                 .unwrap_or("unknown");
 
             let confirmed = Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt(format!("Are you sure you want to remove migration {}?", name.red()))
+                .with_prompt(format!(
+                    "Are you sure you want to remove migration {}?",
+                    name.red()
+                ))
                 .default(false)
                 .interact()
                 .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))?;
@@ -78,7 +81,6 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
                 println!("{}", "Aborted".yellow());
             }
         }
-
         None => {
             // println!("\n{}", "Canceled".dimmed());
         }

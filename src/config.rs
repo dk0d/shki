@@ -37,10 +37,6 @@ pub struct Config {
     #[serde(default)]
     pub verbose: bool,
 
-    /// Strict mode (require confirmation for destructive changes)
-    #[serde(default)]
-    pub strict: bool,
-
     /// Migration settings
     #[serde(default)]
     pub migrations: MigrationConfig,
@@ -151,7 +147,6 @@ impl Default for Config {
             database_url: None,
             breakpoints: true,
             verbose: false,
-            strict: false,
             codegen: CodegenConfig::default(),
             migrations: MigrationConfig::default(),
             introspect: IntrospectConfig::default(),
@@ -163,10 +158,11 @@ impl Default for Config {
 impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path) -> crate::Result<Self> {
+        let _ = dotenvy::dotenv();
         // let content = std::fs::read_to_string(path)?;
         let config: Config = Figment::new()
             .merge(Toml::file(path))
-            .merge(Env::prefixed("SHKI__"))
+            .merge(Env::prefixed("SHKI_").split("__"))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         Ok(config)
