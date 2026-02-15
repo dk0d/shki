@@ -32,9 +32,26 @@
 //! return schema
 //! ```
 
-mod bindings;
+mod column_builder;
+mod enum_builder;
+mod helpers;
+mod index_builder;
+mod index_column;
+mod schema;
+mod sequence_builder;
+mod table_builder;
+mod view_builder;
 
-pub use bindings::*;
+// Re-export all types and functions from individual modules
+pub use column_builder::*;
+pub use enum_builder::*;
+pub use helpers::*;
+pub use index_builder::*;
+pub use index_column::*;
+pub use schema::*;
+pub use sequence_builder::*;
+pub use table_builder::*;
+pub use view_builder::*;
 
 use crate::schema::Schema;
 use crate::{Result, ShkiError};
@@ -99,7 +116,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     pg.set(
         "schema",
-        lua.create_function(bindings::pg_schema)
+        lua.create_function(pg_schema)
             .map_err(|e| ShkiError::lua(e.to_string()))?,
     )
     .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -114,7 +131,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     mysql
         .set(
             "schema",
-            lua.create_function(bindings::mysql_schema)
+            lua.create_function(mysql_schema)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -129,7 +146,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     sqlite
         .set(
             "schema",
-            lua.create_function(bindings::sqlite_schema)
+            lua.create_function(sqlite_schema)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -151,7 +168,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     enum_builder
         .set(
             "new",
-            lua.create_function(bindings::enum_builder_new)
+            lua.create_function(enum_builder_new)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -170,7 +187,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     table_builder
         .set(
             "new",
-            lua.create_function(bindings::table_builder_new)
+            lua.create_function(table_builder_new)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -191,182 +208,182 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     column_builder
         .set(
             "new",
-            lua.create_function(bindings::column_builder_new)
+            lua.create_function(column_builder_new)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "serial",
-            lua.create_function(bindings::column_builder_serial)
+            lua.create_function(column_builder_serial)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "bigserial",
-            lua.create_function(bindings::column_builder_bigserial)
+            lua.create_function(column_builder_bigserial)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "smallserial",
-            lua.create_function(bindings::column_builder_smallserial)
+            lua.create_function(column_builder_smallserial)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "integer",
-            lua.create_function(bindings::column_builder_integer)
+            lua.create_function(column_builder_integer)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "bigint",
-            lua.create_function(bindings::column_builder_bigint)
+            lua.create_function(column_builder_bigint)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "smallint",
-            lua.create_function(bindings::column_builder_smallint)
+            lua.create_function(column_builder_smallint)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "text",
-            lua.create_function(bindings::column_builder_text)
+            lua.create_function(column_builder_text)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "varchar",
-            lua.create_function(bindings::column_builder_varchar)
+            lua.create_function(column_builder_varchar)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "char",
-            lua.create_function(bindings::column_builder_char)
+            lua.create_function(column_builder_char)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "boolean",
-            lua.create_function(bindings::column_builder_boolean)
+            lua.create_function(column_builder_boolean)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "timestamp",
-            lua.create_function(bindings::column_builder_timestamp)
+            lua.create_function(column_builder_timestamp)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "timestamptz",
-            lua.create_function(bindings::column_builder_timestamptz)
+            lua.create_function(column_builder_timestamptz)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "date",
-            lua.create_function(bindings::column_builder_date)
+            lua.create_function(column_builder_date)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "time",
-            lua.create_function(bindings::column_builder_time)
+            lua.create_function(column_builder_time)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "uuid",
-            lua.create_function(bindings::column_builder_uuid)
+            lua.create_function(column_builder_uuid)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "json",
-            lua.create_function(bindings::column_builder_json)
+            lua.create_function(column_builder_json)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "jsonb",
-            lua.create_function(bindings::column_builder_jsonb)
+            lua.create_function(column_builder_jsonb)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "numeric",
-            lua.create_function(bindings::column_builder_numeric)
+            lua.create_function(column_builder_numeric)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "real",
-            lua.create_function(bindings::column_builder_real)
+            lua.create_function(column_builder_real)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "double_precision",
-            lua.create_function(bindings::column_builder_double_precision)
+            lua.create_function(column_builder_double_precision)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "bytea",
-            lua.create_function(bindings::column_builder_bytea)
+            lua.create_function(column_builder_bytea)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "inet",
-            lua.create_function(bindings::column_builder_inet)
+            lua.create_function(column_builder_inet)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "cidr",
-            lua.create_function(bindings::column_builder_cidr)
+            lua.create_function(column_builder_cidr)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "enum_type",
-            lua.create_function(bindings::column_builder_enum_type)
+            lua.create_function(column_builder_enum_type)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
             "array",
-            lua.create_function(bindings::column_builder_array)
+            lua.create_function(column_builder_array)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -385,7 +402,71 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
     index_builder
         .set(
             "new",
-            lua.create_function(bindings::index_builder_new)
+            lua.create_function(index_builder_new)
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+
+    // Register SequenceBuilder
+    globals
+        .set(
+            "SequenceBuilder",
+            lua.create_table()
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    let sequence_builder = globals
+        .get::<mlua::Table>("SequenceBuilder")
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    sequence_builder
+        .set(
+            "new",
+            lua.create_function(sequence_builder_new)
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+
+    // Register ViewBuilder
+    globals
+        .set(
+            "ViewBuilder",
+            lua.create_table()
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    let view_builder = globals
+        .get::<mlua::Table>("ViewBuilder")
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    view_builder
+        .set(
+            "new",
+            lua.create_function(view_builder_new)
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+
+    // Register IndexColumn
+    globals
+        .set(
+            "IndexColumn",
+            lua.create_table()
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    let index_column = globals
+        .get::<mlua::Table>("IndexColumn")
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    index_column
+        .set(
+            "column",
+            lua.create_function(index_column_column)
+                .map_err(|e| ShkiError::lua(e.to_string()))?,
+        )
+        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    index_column
+        .set(
+            "expression",
+            lua.create_function(index_column_expression)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
         .map_err(|e| ShkiError::lua(e.to_string()))?;
@@ -459,6 +540,9 @@ mod tests {
         assert!(globals.get::<mlua::Table>("TableBuilder").is_ok());
         assert!(globals.get::<mlua::Table>("ColumnBuilder").is_ok());
         assert!(globals.get::<mlua::Table>("IndexBuilder").is_ok());
+        assert!(globals.get::<mlua::Table>("SequenceBuilder").is_ok());
+        assert!(globals.get::<mlua::Table>("ViewBuilder").is_ok());
+        assert!(globals.get::<mlua::Table>("IndexColumn").is_ok());
     }
 
     #[test]
@@ -710,5 +794,395 @@ mod tests {
                 "uuidv7()".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn test_lua_schema_with_sequence() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:sequence(
+                SequenceBuilder.new("order_seq")
+                    :start(1000)
+                    :increment(1)
+                    :cache(10)
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        assert!(schema.sequences.contains_key("order_seq"));
+
+        let seq = schema.sequences.get("order_seq").unwrap();
+        assert_eq!(seq.name, "order_seq");
+        assert_eq!(seq.start, 1000);
+        assert_eq!(seq.increment, 1);
+        assert_eq!(seq.cache, 10);
+    }
+
+    #[test]
+    fn test_lua_sequence_all_options() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:sequence(
+                SequenceBuilder.new("custom_seq")
+                    :schema("myschema")
+                    :start(100)
+                    :increment(5)
+                    :min_value(1)
+                    :max_value(10000)
+                    :cache(20)
+                    :cycle()
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let seq = schema.sequences.get("custom_seq").unwrap();
+
+        assert_eq!(seq.schema, Some("myschema".to_string()));
+        assert_eq!(seq.start, 100);
+        assert_eq!(seq.increment, 5);
+        assert_eq!(seq.min_value, 1);
+        assert_eq!(seq.max_value, Some(10000));
+        assert_eq!(seq.cache, 20);
+        assert!(seq.cycle);
+    }
+
+    #[test]
+    fn test_lua_sequence_no_cycle() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:sequence(
+                SequenceBuilder.new("no_cycle_seq")
+                    :cycle()
+                    :no_cycle()
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let seq = schema.sequences.get("no_cycle_seq").unwrap();
+        assert!(!seq.cycle);
+    }
+
+    #[test]
+    fn test_lua_schema_with_view() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:view(
+                ViewBuilder.new("active_users", "SELECT * FROM users WHERE is_active = true")
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        assert!(schema.views.contains_key("active_users"));
+
+        let view = schema.views.get("active_users").unwrap();
+        assert_eq!(view.name, "active_users");
+        assert_eq!(
+            view.definition,
+            "SELECT * FROM users WHERE is_active = true"
+        );
+        assert!(!view.materialized);
+    }
+
+    #[test]
+    fn test_lua_view_materialized() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:view(
+                ViewBuilder.new("user_stats", "SELECT user_id, COUNT(*) FROM orders GROUP BY user_id")
+                    :materialized()
+                    :schema("analytics")
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let view = schema.views.get("user_stats").unwrap();
+
+        assert!(view.materialized);
+        assert_eq!(view.schema, Some("analytics".to_string()));
+    }
+
+    #[test]
+    fn test_lua_index_with_tablespace_and_options() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("users")
+                    :column(ColumnBuilder.serial("id"):primary_key())
+                    :column(ColumnBuilder.text("email"):not_null())
+                    :index_with(
+                        IndexBuilder.new("users_email_idx")
+                            :column("email")
+                            :tablespace("fast_ssd")
+                            :option("fillfactor", "90")
+                    )
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let users = schema.tables.get("users").unwrap();
+        let idx = users.indexes.get("users_email_idx").unwrap();
+
+        assert_eq!(idx.tablespace, Some("fast_ssd".to_string()));
+        assert_eq!(
+            idx.options,
+            vec![("fillfactor".to_string(), "90".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_lua_index_column_ordering() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("events")
+                    :column(ColumnBuilder.serial("id"):primary_key())
+                    :column(ColumnBuilder.timestamptz("created_at"):not_null())
+                    :column(ColumnBuilder.text("name"))
+                    :index_with(
+                        IndexBuilder.new("events_created_idx")
+                            :index_column(IndexColumn.column("created_at"):desc():nulls_last())
+                            :index_column(IndexColumn.column("name"):asc():nulls_first())
+                    )
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let events = schema.tables.get("events").unwrap();
+        let idx = events.indexes.get("events_created_idx").unwrap();
+
+        assert_eq!(idx.columns.len(), 2);
+
+        // Check first column (created_at DESC NULLS LAST)
+        if let crate::schema::index::IndexColumn::Column {
+            name, order, nulls, ..
+        } = &idx.columns[0]
+        {
+            assert_eq!(name, "created_at");
+            assert_eq!(*order, Some(crate::schema::index::SortOrder::Desc));
+            assert_eq!(*nulls, Some(crate::schema::index::NullsOrder::Last));
+        } else {
+            panic!("Expected Column variant");
+        }
+
+        // Check second column (name ASC NULLS FIRST)
+        if let crate::schema::index::IndexColumn::Column {
+            name, order, nulls, ..
+        } = &idx.columns[1]
+        {
+            assert_eq!(name, "name");
+            assert_eq!(*order, Some(crate::schema::index::SortOrder::Asc));
+            assert_eq!(*nulls, Some(crate::schema::index::NullsOrder::First));
+        } else {
+            panic!("Expected Column variant");
+        }
+    }
+
+    #[test]
+    fn test_lua_index_column_expression() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("users")
+                    :column(ColumnBuilder.serial("id"):primary_key())
+                    :column(ColumnBuilder.text("email"):not_null())
+                    :index_with(
+                        IndexBuilder.new("users_lower_email_idx")
+                            :index_column(IndexColumn.expression("lower(email)"))
+                    )
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let users = schema.tables.get("users").unwrap();
+        let idx = users.indexes.get("users_lower_email_idx").unwrap();
+
+        if let crate::schema::index::IndexColumn::Expression { expression, .. } = &idx.columns[0] {
+            assert_eq!(expression, "lower(email)");
+        } else {
+            panic!("Expected Expression variant");
+        }
+    }
+
+    #[test]
+    fn test_lua_index_column_opclass() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("documents")
+                    :column(ColumnBuilder.serial("id"):primary_key())
+                    :column(ColumnBuilder.text("content"):not_null())
+                    :index_with(
+                        IndexBuilder.new("documents_search_idx")
+                            :index_column(IndexColumn.column("content"):opclass("gin_trgm_ops"))
+                            :using("gin")
+                    )
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let docs = schema.tables.get("documents").unwrap();
+        let idx = docs.indexes.get("documents_search_idx").unwrap();
+
+        assert_eq!(idx.method, crate::schema::index::IndexMethod::Gin);
+
+        if let crate::schema::index::IndexColumn::Column { opclass, .. } = &idx.columns[0] {
+            assert_eq!(*opclass, Some("gin_trgm_ops".to_string()));
+        } else {
+            panic!("Expected Column variant");
+        }
+    }
+
+    #[test]
+    fn test_lua_parse_new_data_types() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            schema:table(
+                TableBuilder.new("test_types")
+                    :column(ColumnBuilder.new("col_citext", "citext"))
+                    :column(ColumnBuilder.new("col_money", "money"))
+                    :column(ColumnBuilder.new("col_decimal", "decimal"))
+                    :column(ColumnBuilder.new("col_interval", "interval"))
+                    :column(ColumnBuilder.new("col_macaddr", "macaddr"))
+                    :column(ColumnBuilder.new("col_point", "point"))
+                    :column(ColumnBuilder.new("col_int4range", "int4range"))
+                    :column(ColumnBuilder.new("col_daterange", "daterange"))
+                    :column(ColumnBuilder.new("col_timetz", "timetz"))
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let table = schema.tables.get("test_types").unwrap();
+
+        // Verify each column has the correct type
+        assert!(matches!(
+            table.columns.get("col_citext").unwrap().data_type,
+            crate::schema::types::DataType::Citext
+        ));
+        assert!(matches!(
+            table.columns.get("col_money").unwrap().data_type,
+            crate::schema::types::DataType::Money
+        ));
+        assert!(matches!(
+            table.columns.get("col_decimal").unwrap().data_type,
+            crate::schema::types::DataType::Decimal { .. }
+        ));
+        assert!(matches!(
+            table.columns.get("col_interval").unwrap().data_type,
+            crate::schema::types::DataType::Interval
+        ));
+        assert!(matches!(
+            table.columns.get("col_macaddr").unwrap().data_type,
+            crate::schema::types::DataType::MacAddr
+        ));
+        assert!(matches!(
+            table.columns.get("col_point").unwrap().data_type,
+            crate::schema::types::DataType::Point
+        ));
+        assert!(matches!(
+            table.columns.get("col_int4range").unwrap().data_type,
+            crate::schema::types::DataType::Int4Range
+        ));
+        assert!(matches!(
+            table.columns.get("col_daterange").unwrap().data_type,
+            crate::schema::types::DataType::DateRange
+        ));
+        assert!(matches!(
+            table.columns.get("col_timetz").unwrap().data_type,
+            crate::schema::types::DataType::Time {
+                with_timezone: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_lua_full_schema_with_all_features() {
+        let script = r#"
+            local schema = pg.schema("public")
+            
+            -- Add extension
+            schema:extension("uuid-ossp")
+            
+            -- Add enum
+            schema:enum_type(
+                EnumBuilder.new("order_status")
+                    :description("Status of an order")
+                    :values({"pending", "processing", "shipped", "delivered"})
+            )
+            
+            -- Add sequence
+            schema:sequence(
+                SequenceBuilder.new("order_number_seq")
+                    :start(1000)
+                    :increment(1)
+            )
+            
+            -- Add table with various features
+            schema:table(
+                TableBuilder.new("orders")
+                    :description("Customer orders")
+                    :column(ColumnBuilder.serial("id"):primary_key())
+                    :column(ColumnBuilder.integer("order_number"):not_null():unique())
+                    :column(ColumnBuilder.enum_type("status", "order_status"):not_null())
+                    :column(ColumnBuilder.numeric("total", 10, 2):not_null())
+                    :column(ColumnBuilder.timestamptz("created_at"):default_now())
+                    :index_with(
+                        IndexBuilder.new("orders_status_created_idx")
+                            :index_column(IndexColumn.column("status"))
+                            :index_column(IndexColumn.column("created_at"):desc())
+                    )
+            )
+            
+            -- Add view
+            schema:view(
+                ViewBuilder.new("pending_orders", "SELECT * FROM orders WHERE status = 'pending'")
+            )
+            
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+
+        // Verify all components are present
+        assert_eq!(schema.extensions, vec!["uuid-ossp"]);
+        assert!(schema.enums.contains_key("order_status"));
+        assert!(schema.sequences.contains_key("order_number_seq"));
+        assert!(schema.tables.contains_key("orders"));
+        assert!(schema.views.contains_key("pending_orders"));
+
+        // Verify table details
+        let orders = schema.tables.get("orders").unwrap();
+        assert_eq!(orders.comment, Some("Customer orders".to_string()));
+        assert!(orders.indexes.contains_key("orders_status_created_idx"));
     }
 }
