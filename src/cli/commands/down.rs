@@ -58,8 +58,9 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
     let confirmed = dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Are you sure you want to rollback these migrations?")
         .default(false)
-        .interact()
-        .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))?;
+        .interact_opt()
+        .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))?
+        .unwrap_or(false);
 
     if !confirmed {
         println!("{}", "Aborted".yellow());

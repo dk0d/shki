@@ -252,7 +252,6 @@ pub enum Commands {
     /// Rollback (undo) applied migrations using down migration files
     Down {
         /// Number of migrations to rollback (default: all available)
-        #[arg(short = 'n', long)]
         count: Option<usize>,
 
         /// Only show what would be rolled back
