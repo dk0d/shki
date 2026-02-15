@@ -1,8 +1,8 @@
 pub use super::config::*;
 pub use super::types::*;
 
-use crate::Result;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
+use crate::Result;
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream};
