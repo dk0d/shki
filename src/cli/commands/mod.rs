@@ -16,6 +16,8 @@ use crate::{Commands, Result};
 use super::{Cli, SchemaLanguage};
 
 pub async fn run(cli: Cli) -> Result<()> {
+    println!();
+
     // Load config
     let mut config = if cli.config.exists() {
         Config::load(&cli.config)?

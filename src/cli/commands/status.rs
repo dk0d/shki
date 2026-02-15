@@ -12,6 +12,8 @@ use tabled::{
 
 use crate::create_any_pool_opts;
 
+const DOWN_SYMBOL: &str = "↓";
+
 #[derive(Debug, Tabled)]
 pub struct MigrationState {
     status: String,
@@ -69,7 +71,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
                 down: if has_down {
-                    " ↓".cyan().to_string()
+                    format!(" {}", DOWN_SYMBOL.cyan())
                 } else {
                     " x".red().to_string()
                 },
@@ -95,7 +97,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
     // TODO: use verbose flag to show these types of things
     // Show legend
     println!();
-    println!("  {} = down migration available", "↓".cyan());
+    println!("  {} = down migration available", DOWN_SYMBOL.cyan());
     println!("  {} = down migration not available", "x".red());
 
     Ok(())
@@ -104,9 +106,9 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
 /// Show migration status
 pub async fn cmd_status(config: &Config) -> Result<()> {
     if let Some(url) = config.database_url.as_ref() {
-        println!("\nURL {}", url.bright_green());
+        println!("URL {}", url.bright_green());
     } else {
-        println!("\n{}", "No database url found".bright_yellow());
+        println!("{}", "No database url found".bright_yellow());
     }
 
     let migration_manager = MigrationManager::new(&config.out, config.dialect)

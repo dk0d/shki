@@ -1,3 +1,7 @@
+pub mod mysql;
+pub mod pg;
+pub mod sqlite;
+
 use crate::SchemaDialect;
 
 pub fn delete_table(

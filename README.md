@@ -50,7 +50,7 @@ cargo install --path .
 # Initialize a new shki project with Lua schema support
 shki init my_db
 
-# Edit db/init.lua to define your schema, then generate migrations
+# Edit my_db/init.lua to define your schema, then generate migrations
 shki generate
 
 # Apply migrations to your database
@@ -287,15 +287,16 @@ database_url = "postgres://user:pass@localhost:5432/mydb"
 [migrations]
 table = "__shki_migrations"    # Table to track applied migrations
 prefix = "timestamp"           # "timestamp" or "sequential"
-generate_down = true           # Auto-generate rollback migrations
+generate_down = false           # Auto-generate rollback migrations
 
 # Schema settings  
 [schema]
 path = "init.lua"              # Entry point for Lua schema
 ```
+
 #### Note on Down Migrations
 
-⚠️ - Down migrations are mostly intended for local development and fast iteration - but I don't recommend them in production.
+⚠️: Down migrations are mostly intended for local development and fast iteration - but I don't recommend them in production.
 
 - **Data Loss**: Dropping a column or table via a down migration often means permanently losing data that was inserted after the forward migration was deployed.
 - **Incompatibility with modern CI/CD**: Modern systems move forward, not backward. 

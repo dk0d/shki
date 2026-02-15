@@ -2,14 +2,14 @@
 //!
 //! This module converts diff statements into executable SQL.
 
+use crate::MIGRATION_SPLIT_MARKER;
+use crate::Result;
 use crate::diff::*;
 use crate::schema::SchemaDialect;
 use crate::snapshot::{
     ColumnSnapshot, ConstraintSnapshot, ConstraintType, IndexSnapshot, SequenceSnapshot,
     TableSnapshot, ViewSnapshot,
 };
-use crate::Result;
-use crate::MIGRATION_SPLIT_MARKER;
 
 /// SQL generator for a specific dialect
 pub struct SqlGenerator {
@@ -67,7 +67,9 @@ impl SqlGenerator {
                 schema,
                 value,
                 position,
-            } => Ok(vec![self.add_enum_value(enum_name, schema, value, position)]),
+            } => Ok(vec![
+                self.add_enum_value(enum_name, schema, value, position),
+            ]),
             DiffStatement::AlterEnumDescription {
                 name,
                 schema,
@@ -132,7 +134,7 @@ impl SqlGenerator {
                 comment,
                 ..
             } => Ok(vec![
-                self.alter_column_comment(table, schema, column, comment)
+                self.alter_column_comment(table, schema, column, comment),
             ]),
             DiffStatement::CreateIndex {
                 table,
