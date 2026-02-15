@@ -57,7 +57,7 @@ pub fn cmd_generate_sql(
 
         if !irreversible.is_empty() {
             println!(
-                "\n{} {} statement(s) cannot be automatically reversed:",
+                "{} {} statement(s) cannot be automatically reversed:",
                 "Warning:".yellow(),
                 irreversible.len()
             );

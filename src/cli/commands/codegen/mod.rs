@@ -1,20 +1,22 @@
-//! Rust code generation from schema definitions
+//! Code generation from schema definitions
 //!
-//! This module generates Rust structs and enums from database schema definitions,
-//! compatible with sqlx and other database libraries.
+//! This module generates code from database schema definitions,
+//! supporting multiple output languages including Rust and Protocol Buffers.
 
 mod config;
-mod generate;
-mod types;
+pub mod languages;
 mod writer;
 
 use colored::Colorize;
 pub use config::*;
-pub use types::*;
 
+use crate::cli::CodegenLanguage;
 use crate::snapshot::Snapshot;
 use crate::{Config, Result};
 use std::path::PathBuf;
+
+use languages::{ProtobufWriter, RustWriter};
+use writer::CodeWriter;
 
 pub fn cmd_codegen(
     config: &Config,
@@ -22,6 +24,7 @@ pub fn cmd_codegen(
     mode: Option<OutputMode>,
     output: Option<PathBuf>,
     verbose: Option<bool>,
+    language: CodegenLanguage,
 ) -> Result<()> {
     let snapshot = match schema {
         Some(schema_path) => Snapshot::from_path(&schema_path)?,
@@ -34,21 +37,45 @@ pub fn cmd_codegen(
         .mode(mode)
         .verbose(verbose)
         .output_dir(output);
-    
-    let generated = generate::generate_rust_code(&snapshot, gen_config).unwrap();
 
-    if gen_config.verbose {
-        println!("{}", writer::format_generated_code(&generated));
+    match language {
+        CodegenLanguage::Rust => {
+            let generated = languages::RustGenerator::generate(&snapshot, gen_config);
+            let writer = RustWriter;
+
+            if gen_config.verbose {
+                println!("{}", writer.format_preview(&generated));
+            }
+
+            if gen_config.output.is_none() {
+                println!(
+                    "{}",
+                    "Generation skipped: no output path specified.".yellow()
+                );
+                return Ok(());
+            }
+
+            writer.write(&generated, gen_config)?;
+        }
+        CodegenLanguage::Protobuf => {
+            let generated = languages::ProtobufGenerator::generate(&snapshot, gen_config);
+            let writer = ProtobufWriter;
+
+            if gen_config.verbose {
+                println!("{}", writer.format_preview(&generated));
+            }
+
+            if gen_config.output.is_none() {
+                println!(
+                    "{}",
+                    "Generation skipped: no output path specified.".yellow()
+                );
+                return Ok(());
+            }
+
+            writer.write(&generated, gen_config)?;
+        }
     }
 
-    if gen_config.output.is_none() {
-        println!(
-            "{}",
-            "Generation skipped: no output path specified.".yellow()
-        );
-        return Ok(());
-    }
-
-    writer::write_generated_code(&generated, gen_config)?;
     Ok(())
 }

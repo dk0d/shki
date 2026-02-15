@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::schema::SchemaDialect;
 
 use self::commands::codegen::OutputMode;
+pub use CodegenLanguage as LanguageArg;
 
 pub fn get_styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
@@ -107,6 +108,19 @@ pub enum SchemaLanguage {
     /// Define schemas using Lua scripts
     #[default]
     Lua,
+}
+
+/// Output language for code generation
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodegenLanguage {
+    /// Generate Rust structs and enums
+    #[default]
+    Rust,
+
+    /// Generate Protocol Buffer definitions (.proto files)
+    #[value(name = "proto", alias = "protobuf")]
+    Protobuf,
 }
 
 /// CLI commands
@@ -222,6 +236,10 @@ pub enum Commands {
         /// Output mode (module or single file)
         #[arg(long, short)]
         mode: Option<OutputMode>,
+
+        /// Output language (rust or protobuf)
+        #[arg(long, short = 'L', value_enum, default_value = "rust")]
+        language: CodegenLanguage,
 
         /// Enable verbose output
         /// Will print the generated code to stdout as well as writing to files

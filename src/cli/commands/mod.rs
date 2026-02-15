@@ -86,8 +86,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             out,
             mode,
             schema,
+            language,
             verbose,
-        } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose)),
+        } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose), language),
 
         Commands::Down { count, dry_run } => down::cmd_down(&config, count, dry_run).await,
     }
