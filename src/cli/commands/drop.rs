@@ -7,19 +7,17 @@ use crate::{Config, MigrationManager, Result, ShkiError};
 /// Drop a migration file
 pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()> {
     let migration_manager = MigrationManager::new(&config.out, config.dialect);
-    let mut migrations = migration_manager.list_migrations()?;
+    let migrations = migration_manager.list_migrations()?;
 
     if migrations.is_empty() {
         println!("\n{}", "No migrations found".yellow());
         return Ok(());
     }
 
-    // search from the latest back
-    migrations.reverse();
-
     let to_drop = match migration {
         Some(migration) => {
-            let found = migrations.iter().find(|p| {
+            // search from the latest back
+            let found = migrations.iter().rev().find(|p| {
                 p.file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s == migration || s.ends_with(migration))
