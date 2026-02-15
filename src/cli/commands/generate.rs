@@ -51,25 +51,62 @@ pub fn cmd_generate_sql(
     let generator = SqlGenerator::new(config.dialect).with_breakpoints(config.breakpoints);
     let sql = generator.generate_sql(&diff)?;
 
+    // Generate down SQL if configured
+    let down_sql = if config.migrations.generate_down {
+        let (down_diff, irreversible) = diff.get_down_diff();
+
+        if !irreversible.is_empty() {
+            println!(
+                "\n{} {} statement(s) cannot be automatically reversed:",
+                "Warning:".yellow(),
+                irreversible.len()
+            );
+            for stmt in &irreversible {
+                println!("  - {:?}", std::mem::discriminant(stmt));
+            }
+            println!(
+                "  {}",
+                "These will need manual intervention in the down migration.".yellow()
+            );
+        }
+
+        if !down_diff.is_empty() {
+            Some(generator.generate_sql(&down_diff)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     println!("\n{}", "Changes detected:".yellow());
     println!("{}", diff.summary());
 
     if dry_run {
-        println!("\n{}", "SQL (dry run):".cyan());
+        println!("\n{}", "Up migration SQL (dry run):".cyan());
         println!("{}", sql);
+
+        if let Some(ref down) = down_sql {
+            println!("\n{}", "Down migration SQL (dry run):".cyan());
+            println!("{}", down);
+        }
         return Ok(());
     }
 
     // Create migration file (store the desired schema as the new snapshot)
-    let migration_path = migration_manager.create_migration(
+    let (up_path, down_path) = migration_manager.create_migration_with_down(
         name,
         &sql,
+        down_sql.as_deref(),
         prev_snapshot.as_ref(),
         &desired_snapshot,
     )?;
 
     println!("\n{}", "Migration created:".green());
-    println!("  {}", migration_path.display());
+    println!("  Up:   {}", up_path.display());
+    if let Some(down) = down_path {
+        println!("  Down: {}", down.display());
+    }
 
     Ok(())
 }
