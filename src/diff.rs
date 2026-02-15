@@ -23,130 +23,167 @@ pub struct SchemaDiff {
 #[derive(Debug, Clone)]
 pub enum DiffStatement {
     // Schema operations
-    CreateSchema(CreateSchemaStmt),
-    DropSchema(DropSchemaStmt),
-    RenameSchema(RenameSchemaStmt),
+    CreateSchema {
+        name: String,
+    },
+    DropSchema {
+        name: String,
+        cascade: bool,
+    },
+    RenameSchema {
+        from: String,
+        to: String,
+    },
 
     // Enum operations
-    CreateEnum(CreateEnumStmt),
-    DropEnum(DropEnumStmt),
-    RenameEnum(RenameEnumStmt),
-    AddEnumValue(AddEnumValueStmt),
-    AlterEnumDescription(AlterEnumDescriptionStmt),
+    CreateEnum {
+        name: String,
+        schema: Option<String>,
+        values: Vec<String>,
+        description: Option<String>,
+    },
+    DropEnum {
+        name: String,
+        schema: Option<String>,
+    },
+    RenameEnum {
+        from: String,
+        to: String,
+        schema: Option<String>,
+    },
+    AddEnumValue {
+        enum_name: String,
+        schema: Option<String>,
+        value: String,
+        position: EnumValuePosition,
+    },
+    AlterEnumDescription {
+        name: String,
+        schema: Option<String>,
+        description: Option<String>,
+    },
 
     // Sequence operations
-    CreateSequence(CreateSequenceStmt),
-    DropSequence(DropSequenceStmt),
-    AlterSequence(AlterSequenceStmt),
+    CreateSequence {
+        sequence: SequenceSnapshot,
+    },
+    DropSequence {
+        name: String,
+        schema: Option<String>,
+    },
+    AlterSequence {
+        name: String,
+        schema: Option<String>,
+        changes: Vec<SequenceChange>,
+    },
 
     // Table operations
-    CreateTable(CreateTableStmt),
-    DropTable(DropTableStmt),
-    RenameTable(RenameTableStmt),
-    AlterTableComment(AlterTableCommentStmt),
+    CreateTable {
+        table: TableSnapshot,
+    },
+    DropTable {
+        name: String,
+        schema: Option<String>,
+        cascade: bool,
+    },
+    RenameTable {
+        from: String,
+        to: String,
+        schema: Option<String>,
+    },
+    AlterTableComment {
+        table: String,
+        schema: Option<String>,
+        comment: Option<String>,
+    },
 
     // Column operations
-    AddColumn(AddColumnStmt),
-    DropColumn(DropColumnStmt),
-    RenameColumn(RenameColumnStmt),
-    AlterColumn(AlterColumnStmt),
-    AlterColumnComment(AlterColumnCommentStmt),
+    AddColumn {
+        table: String,
+        schema: Option<String>,
+        column: ColumnSnapshot,
+    },
+    DropColumn {
+        table: String,
+        schema: Option<String>,
+        column: String,
+        cascade: bool,
+    },
+    RenameColumn {
+        table: String,
+        schema: Option<String>,
+        from: String,
+        to: String,
+    },
+    AlterColumn {
+        table: String,
+        schema: Option<String>,
+        column: String,
+        changes: Vec<ColumnChange>,
+    },
+    AlterColumnComment {
+        table: String,
+        schema: Option<String>,
+        column: String,
+        comment: Option<String>,
+    },
 
     // Index operations
-    CreateIndex(CreateIndexStmt),
-    DropIndex(DropIndexStmt),
+    CreateIndex {
+        table: String,
+        schema: Option<String>,
+        index: IndexSnapshot,
+        concurrently: bool,
+        if_not_exists: bool,
+    },
+    DropIndex {
+        name: String,
+        schema: Option<String>,
+        concurrently: bool,
+        if_exists: bool,
+    },
 
     // Constraint operations
-    AddConstraint(AddConstraintStmt),
-    DropConstraint(DropConstraintStmt),
+    AddConstraint {
+        table: String,
+        schema: Option<String>,
+        constraint: ConstraintSnapshot,
+    },
+    DropConstraint {
+        table: String,
+        schema: Option<String>,
+        name: String,
+        cascade: bool,
+    },
 
     // View operations
-    CreateView(CreateViewStmt),
-    DropView(DropViewStmt),
-    AlterView(AlterViewStmt),
+    CreateView {
+        view: ViewSnapshot,
+        or_replace: bool,
+    },
+    DropView {
+        name: String,
+        schema: Option<String>,
+        materialized: bool,
+        cascade: bool,
+    },
+    AlterView {
+        name: String,
+        schema: Option<String>,
+        new_definition: String,
+    },
 
     // Extension operations (PostgreSQL)
     CreateExtension(String),
     DropExtension(String),
 }
 
-// Statement structs
-#[derive(Debug, Clone)]
-pub struct CreateSchemaStmt {
-    pub name: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropSchemaStmt {
-    pub name: String,
-    pub cascade: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameSchemaStmt {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateEnumStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub values: Vec<String>,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropEnumStmt {
-    pub name: String,
-    pub schema: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameEnumStmt {
-    pub from: String,
-    pub to: String,
-    pub schema: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AddEnumValueStmt {
-    pub enum_name: String,
-    pub schema: Option<String>,
-    pub value: String,
-    pub position: EnumValuePosition,
-}
-
+// Supporting enums for statement fields
 #[derive(Debug, Clone)]
 pub enum EnumValuePosition {
     End,
     Before(String),
     After(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterEnumDescriptionStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateSequenceStmt {
-    pub sequence: SequenceSnapshot,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropSequenceStmt {
-    pub name: String,
-    pub schema: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterSequenceStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub changes: Vec<SequenceChange>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,63 +197,6 @@ pub enum SequenceChange {
 }
 
 #[derive(Debug, Clone)]
-pub struct CreateTableStmt {
-    pub table: TableSnapshot,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropTableStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub cascade: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameTableStmt {
-    pub from: String,
-    pub to: String,
-    pub schema: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterTableCommentStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AddColumnStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub column: ColumnSnapshot,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropColumnStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub column: String,
-    pub cascade: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameColumnStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterColumnStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub column: String,
-    pub changes: Vec<ColumnChange>,
-}
-
-#[derive(Debug, Clone)]
 pub enum ColumnChange {
     SetType(String),
     SetNotNull,
@@ -225,67 +205,6 @@ pub enum ColumnChange {
     DropDefault,
     SetGenerated(String),
     DropGenerated,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterColumnCommentStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub column: String,
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateIndexStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub index: IndexSnapshot,
-    pub concurrently: bool,
-    pub if_not_exists: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropIndexStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub concurrently: bool,
-    pub if_exists: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct AddConstraintStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub constraint: ConstraintSnapshot,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropConstraintStmt {
-    pub table: String,
-    pub schema: Option<String>,
-    pub name: String,
-    pub cascade: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateViewStmt {
-    pub view: ViewSnapshot,
-    pub or_replace: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct DropViewStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub materialized: bool,
-    pub cascade: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlterViewStmt {
-    pub name: String,
-    pub schema: Option<String>,
-    pub new_definition: String,
 }
 
 /// Compute the diff between two snapshots
@@ -333,19 +252,19 @@ fn diff_schemas(from: &[String], to: &[String], statements: &mut Vec<DiffStateme
     // Schemas to create
     for schema in to {
         if !from.contains(schema) && schema != "public" && schema != "main" {
-            statements.push(DiffStatement::CreateSchema(CreateSchemaStmt {
+            statements.push(DiffStatement::CreateSchema {
                 name: schema.clone(),
-            }));
+            });
         }
     }
 
     // Schemas to drop
     for schema in from {
         if !to.contains(schema) && schema != "public" && schema != "main" {
-            statements.push(DiffStatement::DropSchema(DropSchemaStmt {
+            statements.push(DiffStatement::DropSchema {
                 name: schema.clone(),
                 cascade: false,
-            }));
+            });
         }
     }
 }
@@ -358,22 +277,22 @@ fn diff_enums(
     // Enums to create
     for (name, enum_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::CreateEnum(CreateEnumStmt {
+            statements.push(DiffStatement::CreateEnum {
                 name: enum_to.name.clone(),
                 schema: enum_to.schema.clone(),
                 values: enum_to.values.clone(),
                 description: enum_to.description.clone(),
-            }));
+            });
         }
     }
 
     // Enums to drop
     for (name, enum_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropEnum(DropEnumStmt {
+            statements.push(DiffStatement::DropEnum {
                 name: enum_from.name.clone(),
                 schema: enum_from.schema.clone(),
-            }));
+            });
         }
     }
 
@@ -388,25 +307,23 @@ fn diff_enums(
                         Some(pv) => EnumValuePosition::After(pv.clone()),
                         None => EnumValuePosition::End,
                     };
-                    statements.push(DiffStatement::AddEnumValue(AddEnumValueStmt {
+                    statements.push(DiffStatement::AddEnumValue {
                         enum_name: enum_to.name.clone(),
                         schema: enum_to.schema.clone(),
                         value: value.clone(),
                         position,
-                    }));
+                    });
                 }
                 prev_value = Some(value);
             }
 
             // Check for description changes
             if enum_from.description != enum_to.description {
-                statements.push(DiffStatement::AlterEnumDescription(
-                    AlterEnumDescriptionStmt {
-                        name: enum_to.name.clone(),
-                        schema: enum_to.schema.clone(),
-                        description: enum_to.description.clone(),
-                    },
-                ));
+                statements.push(DiffStatement::AlterEnumDescription {
+                    name: enum_to.name.clone(),
+                    schema: enum_to.schema.clone(),
+                    description: enum_to.description.clone(),
+                });
             }
         }
     }
@@ -420,19 +337,19 @@ fn diff_sequences(
     // Sequences to create
     for (name, seq_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::CreateSequence(CreateSequenceStmt {
+            statements.push(DiffStatement::CreateSequence {
                 sequence: seq_to.clone(),
-            }));
+            });
         }
     }
 
     // Sequences to drop
     for (name, seq_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropSequence(DropSequenceStmt {
+            statements.push(DiffStatement::DropSequence {
                 name: seq_from.name.clone(),
                 schema: seq_from.schema.clone(),
-            }));
+            });
         }
     }
 
@@ -458,11 +375,11 @@ fn diff_sequences(
             }
 
             if !changes.is_empty() {
-                statements.push(DiffStatement::AlterSequence(AlterSequenceStmt {
+                statements.push(DiffStatement::AlterSequence {
                     name: seq_to.name.clone(),
                     schema: seq_to.schema.clone(),
                     changes,
-                }));
+                });
             }
         }
     }
@@ -477,20 +394,20 @@ fn diff_tables(
     // Tables to create
     for (name, table_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::CreateTable(CreateTableStmt {
+            statements.push(DiffStatement::CreateTable {
                 table: table_to.clone(),
-            }));
+            });
         }
     }
 
     // Tables to drop
     for (name, table_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropTable(DropTableStmt {
+            statements.push(DiffStatement::DropTable {
                 name: table_from.name.clone(),
                 schema: table_from.schema.clone(),
                 cascade: false,
-            }));
+            });
         }
     }
 
@@ -513,11 +430,11 @@ fn diff_table(
 
     // Diff table comment
     if from.comment != to.comment {
-        statements.push(DiffStatement::AlterTableComment(AlterTableCommentStmt {
+        statements.push(DiffStatement::AlterTableComment {
             table: table.clone(),
             schema: schema.clone(),
             comment: to.comment.clone(),
-        }));
+        });
     }
 
     // Diff columns
@@ -546,23 +463,23 @@ fn diff_columns(
     // Columns to add
     for (name, col_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::AddColumn(AddColumnStmt {
+            statements.push(DiffStatement::AddColumn {
                 table: table.to_string(),
                 schema: schema.clone(),
                 column: col_to.clone(),
-            }));
+            });
         }
     }
 
     // Columns to drop
     for (name, _col_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropColumn(DropColumnStmt {
+            statements.push(DiffStatement::DropColumn {
                 table: table.to_string(),
                 schema: schema.clone(),
                 column: name.clone(),
                 cascade: false,
-            }));
+            });
         }
     }
 
@@ -571,22 +488,22 @@ fn diff_columns(
         if let Some(col_from) = from.get(name) {
             let changes = diff_column(col_from, col_to);
             if !changes.is_empty() {
-                statements.push(DiffStatement::AlterColumn(AlterColumnStmt {
+                statements.push(DiffStatement::AlterColumn {
                     table: table.to_string(),
                     schema: schema.clone(),
                     column: name.clone(),
                     changes,
-                }));
+                });
             }
 
             // Check for comment changes (handled separately from other column changes)
             if col_from.comment != col_to.comment {
-                statements.push(DiffStatement::AlterColumnComment(AlterColumnCommentStmt {
+                statements.push(DiffStatement::AlterColumnComment {
                     table: table.to_string(),
                     schema: schema.clone(),
                     column: name.clone(),
                     comment: col_to.comment.clone(),
-                }));
+                });
             }
         }
     }
@@ -636,25 +553,25 @@ fn diff_indexes(
     // Indexes to create
     for (name, idx_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::CreateIndex(CreateIndexStmt {
+            statements.push(DiffStatement::CreateIndex {
                 table: table.to_string(),
                 schema: schema.clone(),
                 index: idx_to.clone(),
                 concurrently: false,
                 if_not_exists: false,
-            }));
+            });
         }
     }
 
     // Indexes to drop
     for (name, _idx_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropIndex(DropIndexStmt {
+            statements.push(DiffStatement::DropIndex {
                 name: name.clone(),
                 schema: schema.clone(),
                 concurrently: false,
                 if_exists: false,
-            }));
+            });
         }
     }
 
@@ -664,19 +581,19 @@ fn diff_indexes(
             && idx_from != idx_to
         {
             // Drop and recreate
-            statements.push(DiffStatement::DropIndex(DropIndexStmt {
+            statements.push(DiffStatement::DropIndex {
                 name: name.clone(),
                 schema: schema.clone(),
                 concurrently: false,
                 if_exists: false,
-            }));
-            statements.push(DiffStatement::CreateIndex(CreateIndexStmt {
+            });
+            statements.push(DiffStatement::CreateIndex {
                 table: table.to_string(),
                 schema: schema.clone(),
                 index: idx_to.clone(),
                 concurrently: false,
                 if_not_exists: false,
-            }));
+            });
         }
     }
 }
@@ -702,23 +619,23 @@ fn diff_constraints(
     // Constraints to add
     for (name, constraint) in &to_by_name {
         if !from_by_name.contains_key(name) {
-            statements.push(DiffStatement::AddConstraint(AddConstraintStmt {
+            statements.push(DiffStatement::AddConstraint {
                 table: table.to_string(),
                 schema: schema.clone(),
                 constraint: (*constraint).clone(),
-            }));
+            });
         }
     }
 
     // Constraints to drop
     for (name, _constraint) in &from_by_name {
         if !to_by_name.contains_key(name) {
-            statements.push(DiffStatement::DropConstraint(DropConstraintStmt {
+            statements.push(DiffStatement::DropConstraint {
                 table: table.to_string(),
                 schema: schema.clone(),
                 name: name.clone(),
                 cascade: false,
-            }));
+            });
         }
     }
 
@@ -727,17 +644,17 @@ fn diff_constraints(
         if let Some(constraint_from) = from_by_name.get(name)
             && constraint_from != constraint_to
         {
-            statements.push(DiffStatement::DropConstraint(DropConstraintStmt {
+            statements.push(DiffStatement::DropConstraint {
                 table: table.to_string(),
                 schema: schema.clone(),
                 name: name.clone(),
                 cascade: false,
-            }));
-            statements.push(DiffStatement::AddConstraint(AddConstraintStmt {
+            });
+            statements.push(DiffStatement::AddConstraint {
                 table: table.to_string(),
                 schema: schema.clone(),
                 constraint: (*constraint_to).clone(),
-            }));
+            });
         }
     }
 }
@@ -750,22 +667,22 @@ fn diff_views(
     // Views to create
     for (name, view_to) in to {
         if !from.contains_key(name) {
-            statements.push(DiffStatement::CreateView(CreateViewStmt {
+            statements.push(DiffStatement::CreateView {
                 view: view_to.clone(),
                 or_replace: false,
-            }));
+            });
         }
     }
 
     // Views to drop
     for (name, view_from) in from {
         if !to.contains_key(name) {
-            statements.push(DiffStatement::DropView(DropViewStmt {
+            statements.push(DiffStatement::DropView {
                 name: view_from.name.clone(),
                 schema: view_from.schema.clone(),
                 materialized: view_from.materialized,
                 cascade: false,
-            }));
+            });
         }
     }
 
@@ -774,11 +691,11 @@ fn diff_views(
         if let Some(view_from) = from.get(name)
             && view_from.definition != view_to.definition
         {
-            statements.push(DiffStatement::AlterView(AlterViewStmt {
+            statements.push(DiffStatement::AlterView {
                 name: view_to.name.clone(),
                 schema: view_to.schema.clone(),
                 new_definition: view_to.definition.clone(),
-            }));
+            });
         }
     }
 }
@@ -799,12 +716,12 @@ impl SchemaDiff {
         self.statements.iter().any(|s| {
             matches!(
                 s,
-                DiffStatement::DropSchema(_)
-                    | DiffStatement::DropEnum(_)
-                    | DiffStatement::DropSequence(_)
-                    | DiffStatement::DropTable(_)
-                    | DiffStatement::DropColumn(_)
-                    | DiffStatement::DropView(_)
+                DiffStatement::DropSchema { .. }
+                    | DiffStatement::DropEnum { .. }
+                    | DiffStatement::DropSequence { .. }
+                    | DiffStatement::DropTable { .. }
+                    | DiffStatement::DropColumn { .. }
+                    | DiffStatement::DropView { .. }
             )
         })
     }
@@ -815,35 +732,35 @@ impl SchemaDiff {
 
         for stmt in &self.statements {
             match stmt {
-                DiffStatement::CreateSchema(_) => summary.schemas_created += 1,
-                DiffStatement::DropSchema(_) => summary.schemas_dropped += 1,
-                DiffStatement::CreateEnum(_) => summary.enums_created += 1,
-                DiffStatement::DropEnum(_) => summary.enums_dropped += 1,
-                DiffStatement::AddEnumValue(_) => summary.enum_values_added += 1,
-                DiffStatement::AlterEnumDescription(_) => summary.enums_altered += 1,
-                DiffStatement::CreateSequence(_) => summary.sequences_created += 1,
-                DiffStatement::DropSequence(_) => summary.sequences_dropped += 1,
-                DiffStatement::AlterSequence(_) => summary.sequences_altered += 1,
-                DiffStatement::CreateTable(_) => summary.tables_created += 1,
-                DiffStatement::DropTable(_) => summary.tables_dropped += 1,
-                DiffStatement::RenameTable(_) => summary.tables_renamed += 1,
-                DiffStatement::AlterTableComment(_) => summary.tables_altered += 1,
-                DiffStatement::AddColumn(_) => summary.columns_added += 1,
-                DiffStatement::DropColumn(_) => summary.columns_dropped += 1,
-                DiffStatement::RenameColumn(_) => summary.columns_renamed += 1,
-                DiffStatement::AlterColumn(_) => summary.columns_altered += 1,
-                DiffStatement::AlterColumnComment(_) => summary.columns_altered += 1,
-                DiffStatement::CreateIndex(_) => summary.indexes_created += 1,
-                DiffStatement::DropIndex(_) => summary.indexes_dropped += 1,
-                DiffStatement::AddConstraint(_) => summary.constraints_added += 1,
-                DiffStatement::DropConstraint(_) => summary.constraints_dropped += 1,
-                DiffStatement::CreateView(_) => summary.views_created += 1,
-                DiffStatement::DropView(_) => summary.views_dropped += 1,
-                DiffStatement::AlterView(_) => summary.views_altered += 1,
+                DiffStatement::CreateSchema { .. } => summary.schemas_created += 1,
+                DiffStatement::DropSchema { .. } => summary.schemas_dropped += 1,
+                DiffStatement::CreateEnum { .. } => summary.enums_created += 1,
+                DiffStatement::DropEnum { .. } => summary.enums_dropped += 1,
+                DiffStatement::AddEnumValue { .. } => summary.enum_values_added += 1,
+                DiffStatement::AlterEnumDescription { .. } => summary.enums_altered += 1,
+                DiffStatement::CreateSequence { .. } => summary.sequences_created += 1,
+                DiffStatement::DropSequence { .. } => summary.sequences_dropped += 1,
+                DiffStatement::AlterSequence { .. } => summary.sequences_altered += 1,
+                DiffStatement::CreateTable { .. } => summary.tables_created += 1,
+                DiffStatement::DropTable { .. } => summary.tables_dropped += 1,
+                DiffStatement::RenameTable { .. } => summary.tables_renamed += 1,
+                DiffStatement::AlterTableComment { .. } => summary.tables_altered += 1,
+                DiffStatement::AddColumn { .. } => summary.columns_added += 1,
+                DiffStatement::DropColumn { .. } => summary.columns_dropped += 1,
+                DiffStatement::RenameColumn { .. } => summary.columns_renamed += 1,
+                DiffStatement::AlterColumn { .. } => summary.columns_altered += 1,
+                DiffStatement::AlterColumnComment { .. } => summary.columns_altered += 1,
+                DiffStatement::CreateIndex { .. } => summary.indexes_created += 1,
+                DiffStatement::DropIndex { .. } => summary.indexes_dropped += 1,
+                DiffStatement::AddConstraint { .. } => summary.constraints_added += 1,
+                DiffStatement::DropConstraint { .. } => summary.constraints_dropped += 1,
+                DiffStatement::CreateView { .. } => summary.views_created += 1,
+                DiffStatement::DropView { .. } => summary.views_dropped += 1,
+                DiffStatement::AlterView { .. } => summary.views_altered += 1,
                 DiffStatement::CreateExtension(_) => summary.extensions_created += 1,
                 DiffStatement::DropExtension(_) => summary.extensions_dropped += 1,
-                DiffStatement::RenameSchema(_) => summary.schemas_renamed += 1,
-                DiffStatement::RenameEnum(_) => summary.enums_renamed += 1,
+                DiffStatement::RenameSchema { .. } => summary.schemas_renamed += 1,
+                DiffStatement::RenameEnum { .. } => summary.enums_renamed += 1,
             }
         }
 
@@ -981,9 +898,11 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterEnumDescription(stmt) => {
-                assert_eq!(stmt.name, "status");
-                assert_eq!(stmt.description, Some("Status of the entity".to_string()));
+            DiffStatement::AlterEnumDescription {
+                name, description, ..
+            } => {
+                assert_eq!(name, "status");
+                assert_eq!(*description, Some("Status of the entity".to_string()));
             }
             _ => panic!("Expected AlterEnumDescription"),
         }
@@ -1016,9 +935,11 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterEnumDescription(stmt) => {
-                assert_eq!(stmt.name, "status");
-                assert_eq!(stmt.description, Some("New description".to_string()));
+            DiffStatement::AlterEnumDescription {
+                name, description, ..
+            } => {
+                assert_eq!(name, "status");
+                assert_eq!(*description, Some("New description".to_string()));
             }
             _ => panic!("Expected AlterEnumDescription"),
         }
@@ -1051,9 +972,11 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterEnumDescription(stmt) => {
-                assert_eq!(stmt.name, "status");
-                assert_eq!(stmt.description, None);
+            DiffStatement::AlterEnumDescription {
+                name, description, ..
+            } => {
+                assert_eq!(name, "status");
+                assert_eq!(*description, None);
             }
             _ => panic!("Expected AlterEnumDescription"),
         }
@@ -1117,9 +1040,9 @@ mod tests {
         let has_add_value = diff
             .statements
             .iter()
-            .any(|s| matches!(s, DiffStatement::AddEnumValue(stmt) if stmt.value == "pending"));
+            .any(|s| matches!(s, DiffStatement::AddEnumValue { value, .. } if value == "pending"));
         let has_alter_desc = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AlterEnumDescription(stmt) if stmt.description == Some("New description".to_string()))
+            matches!(s, DiffStatement::AlterEnumDescription { description, .. } if *description == Some("New description".to_string()))
         });
 
         assert!(has_add_value, "Expected AddEnumValue statement");
@@ -1187,9 +1110,9 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterTableComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.comment, Some("User accounts table".to_string()));
+            DiffStatement::AlterTableComment { table, comment, .. } => {
+                assert_eq!(table, "users");
+                assert_eq!(*comment, Some("User accounts table".to_string()));
             }
             _ => panic!("Expected AlterTableComment"),
         }
@@ -1212,9 +1135,9 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterTableComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.comment, Some("New comment".to_string()));
+            DiffStatement::AlterTableComment { table, comment, .. } => {
+                assert_eq!(table, "users");
+                assert_eq!(*comment, Some("New comment".to_string()));
             }
             _ => panic!("Expected AlterTableComment"),
         }
@@ -1235,9 +1158,9 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterTableComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.comment, None);
+            DiffStatement::AlterTableComment { table, comment, .. } => {
+                assert_eq!(table, "users");
+                assert_eq!(*comment, None);
             }
             _ => panic!("Expected AlterTableComment"),
         }
@@ -1281,10 +1204,15 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterColumnComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.column, "email");
-                assert_eq!(stmt.comment, Some("User email address".to_string()));
+            DiffStatement::AlterColumnComment {
+                table,
+                column,
+                comment,
+                ..
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(column, "email");
+                assert_eq!(comment, &Some("User email address".to_string()));
             }
             _ => panic!("Expected AlterColumnComment"),
         }
@@ -1311,10 +1239,15 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterColumnComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.column, "email");
-                assert_eq!(stmt.comment, Some("New comment".to_string()));
+            DiffStatement::AlterColumnComment {
+                table,
+                column,
+                comment,
+                ..
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(column, "email");
+                assert_eq!(comment, &Some("New comment".to_string()));
             }
             _ => panic!("Expected AlterColumnComment"),
         }
@@ -1340,10 +1273,15 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 1);
         match &diff.statements[0] {
-            DiffStatement::AlterColumnComment(stmt) => {
-                assert_eq!(stmt.table, "users");
-                assert_eq!(stmt.column, "email");
-                assert_eq!(stmt.comment, None);
+            DiffStatement::AlterColumnComment {
+                table,
+                column,
+                comment,
+                ..
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(column, "email");
+                assert_eq!(comment, &None);
             }
             _ => panic!("Expected AlterColumnComment"),
         }
@@ -1393,10 +1331,10 @@ mod tests {
         assert_eq!(diff.statements.len(), 2);
 
         let has_table_comment = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AlterTableComment(stmt) if stmt.comment == Some("New table comment".to_string()))
+            matches!(s, DiffStatement::AlterTableComment { comment, .. } if comment == &Some("New table comment".to_string()))
         });
         let has_column_comment = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AlterColumnComment(stmt) if stmt.comment == Some("New column comment".to_string()))
+            matches!(s, DiffStatement::AlterColumnComment { comment, .. } if comment == &Some("New column comment".to_string()))
         });
 
         assert!(has_table_comment, "Expected AlterTableComment statement");
