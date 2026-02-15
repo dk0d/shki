@@ -45,6 +45,7 @@ pub enum DiffStatement {
     DropEnum {
         name: String,
         schema: Option<String>,
+        prev: EnumSnapshot,
     },
     RenameEnum {
         from: String,
@@ -61,6 +62,7 @@ pub enum DiffStatement {
         name: String,
         schema: Option<String>,
         description: Option<String>,
+        prev_description: Option<String>,
     },
 
     // Sequence operations
@@ -70,6 +72,7 @@ pub enum DiffStatement {
     DropSequence {
         name: String,
         schema: Option<String>,
+        prev: SequenceSnapshot,
     },
     AlterSequence {
         name: String,
@@ -85,6 +88,7 @@ pub enum DiffStatement {
         name: String,
         schema: Option<String>,
         cascade: bool,
+        prev: TableSnapshot,
     },
     RenameTable {
         from: String,
@@ -94,6 +98,7 @@ pub enum DiffStatement {
     AlterTableComment {
         table: String,
         schema: Option<String>,
+        prev: Option<String>,
         comment: Option<String>,
     },
 
@@ -108,6 +113,7 @@ pub enum DiffStatement {
         schema: Option<String>,
         column: String,
         cascade: bool,
+        prev: ColumnSnapshot,
     },
     RenameColumn {
         table: String,
@@ -126,6 +132,7 @@ pub enum DiffStatement {
         schema: Option<String>,
         column: String,
         comment: Option<String>,
+        prev_comment: Option<String>,
     },
 
     // Index operations
@@ -137,10 +144,12 @@ pub enum DiffStatement {
         if_not_exists: bool,
     },
     DropIndex {
+        table: String,
         name: String,
         schema: Option<String>,
         concurrently: bool,
         if_exists: bool,
+        prev: IndexSnapshot,
     },
 
     // Constraint operations
@@ -154,6 +163,7 @@ pub enum DiffStatement {
         schema: Option<String>,
         name: String,
         cascade: bool,
+        prev: ConstraintSnapshot,
     },
 
     // View operations
@@ -166,16 +176,273 @@ pub enum DiffStatement {
         schema: Option<String>,
         materialized: bool,
         cascade: bool,
+        prev: ViewSnapshot,
     },
     AlterView {
         name: String,
         schema: Option<String>,
         new_definition: String,
+        prev_definition: String,
     },
 
     // Extension operations (PostgreSQL)
     CreateExtension(String),
     DropExtension(String),
+}
+
+impl DiffStatement {
+    /// Generate the reverse statement that undoes this change
+    ///
+    /// Note: Some operations cannot be perfectly reversed:
+    /// - AddEnumValue cannot be reversed (PostgreSQL doesn't support removing enum values)
+    /// - AlterColumn changes may lose information about the original state
+    /// - AlterEnumDescription, AlterTableComment, AlterColumnComment need the original value
+    ///
+    /// For operations that can't be perfectly reversed, this returns None.
+    pub fn undo_statement(&self) -> Option<DiffStatement> {
+        match self {
+            // Schema operations
+            DiffStatement::CreateSchema { name } => Some(DiffStatement::DropSchema {
+                name: name.clone(),
+                cascade: false,
+            }),
+            DiffStatement::DropSchema { name, .. } => {
+                Some(DiffStatement::CreateSchema { name: name.clone() })
+            }
+            DiffStatement::RenameSchema { from, to } => Some(DiffStatement::RenameSchema {
+                from: to.clone(),
+                to: from.clone(),
+            }),
+
+            // Enum operations
+            DiffStatement::CreateEnum {
+                name,
+                schema,
+                values,
+                description,
+            } => Some(DiffStatement::DropEnum {
+                name: name.clone(),
+                schema: schema.clone(),
+                prev: EnumSnapshot {
+                    name: name.clone(),
+                    schema: schema.clone(),
+                    values: values.clone(),
+                    description: description.clone(),
+                },
+            }),
+            DiffStatement::DropEnum { prev, .. } => Some(DiffStatement::CreateEnum {
+                name: prev.name.clone(),
+                schema: prev.schema.clone(),
+                values: prev.values.clone(),
+                description: prev.description.clone(),
+            }),
+            DiffStatement::RenameEnum { from, to, schema } => Some(DiffStatement::RenameEnum {
+                from: to.clone(),
+                to: from.clone(),
+                schema: schema.clone(),
+            }),
+            DiffStatement::AddEnumValue { .. } => {
+                // PostgreSQL doesn't support removing enum values
+                None
+            }
+            DiffStatement::AlterEnumDescription {
+                name,
+                schema,
+                description,
+                prev_description,
+            } => Some(DiffStatement::AlterEnumDescription {
+                name: name.clone(),
+                schema: schema.clone(),
+                description: prev_description.clone(),
+                prev_description: description.clone(),
+            }),
+
+            // Sequence operations
+            DiffStatement::CreateSequence { sequence } => Some(DiffStatement::DropSequence {
+                name: sequence.name.clone(),
+                schema: sequence.schema.clone(),
+                prev: sequence.clone(),
+            }),
+            DiffStatement::DropSequence { prev, .. } => Some(DiffStatement::CreateSequence {
+                sequence: prev.clone(),
+            }),
+            DiffStatement::AlterSequence { .. } => {
+                // Cannot know the previous values
+                None
+            }
+
+            // Table operations
+            DiffStatement::CreateTable { table } => Some(DiffStatement::DropTable {
+                name: table.name.clone(),
+                schema: table.schema.clone(),
+                cascade: false,
+                prev: table.clone(),
+            }),
+            DiffStatement::DropTable { prev, .. } => Some(DiffStatement::CreateTable {
+                table: prev.clone(),
+            }),
+            DiffStatement::RenameTable { from, to, schema } => Some(DiffStatement::RenameTable {
+                from: to.clone(),
+                to: from.clone(),
+                schema: schema.clone(),
+            }),
+            DiffStatement::AlterTableComment {
+                table,
+                schema,
+                prev,
+                comment,
+            } => Some(DiffStatement::AlterTableComment {
+                table: table.clone(),
+                schema: schema.clone(),
+                prev: comment.clone(),
+                comment: prev.clone(),
+            }),
+
+            // Column operations
+            DiffStatement::AddColumn {
+                table,
+                schema,
+                column,
+            } => Some(DiffStatement::DropColumn {
+                table: table.clone(),
+                schema: schema.clone(),
+                column: column.name.clone(),
+                cascade: false,
+                prev: column.clone(),
+            }),
+            DiffStatement::DropColumn {
+                table,
+                schema,
+                prev,
+                ..
+            } => Some(DiffStatement::AddColumn {
+                table: table.clone(),
+                schema: schema.clone(),
+                column: prev.clone(),
+            }),
+            DiffStatement::RenameColumn {
+                table,
+                schema,
+                from,
+                to,
+            } => Some(DiffStatement::RenameColumn {
+                table: table.clone(),
+                schema: schema.clone(),
+                from: to.clone(),
+                to: from.clone(),
+            }),
+            DiffStatement::AlterColumn { .. } => {
+                // Cannot know the previous column state
+                None
+            }
+            DiffStatement::AlterColumnComment {
+                table,
+                schema,
+                column,
+                comment,
+                prev_comment,
+            } => Some(DiffStatement::AlterColumnComment {
+                table: table.clone(),
+                schema: schema.clone(),
+                column: column.clone(),
+                comment: prev_comment.clone(),
+                prev_comment: comment.clone(),
+            }),
+
+            // Index operations
+            DiffStatement::CreateIndex {
+                table,
+                schema,
+                index,
+                ..
+            } => Some(DiffStatement::DropIndex {
+                table: table.clone(),
+                name: index.name.clone(),
+                schema: schema.clone(),
+                concurrently: false,
+                if_exists: false,
+                prev: index.clone(),
+            }),
+            DiffStatement::DropIndex {
+                table,
+                schema,
+                prev,
+                ..
+            } => Some(DiffStatement::CreateIndex {
+                table: table.clone(),
+                schema: schema.clone(),
+                index: prev.clone(),
+                concurrently: false,
+                if_not_exists: false,
+            }),
+
+            // Constraint operations
+            DiffStatement::AddConstraint {
+                table,
+                schema,
+                constraint,
+            } => {
+                // Can only drop named constraints
+                constraint
+                    .name
+                    .as_ref()
+                    .map(|name| DiffStatement::DropConstraint {
+                        table: table.clone(),
+                        schema: schema.clone(),
+                        name: name.clone(),
+                        cascade: false,
+                        prev: constraint.clone(),
+                    })
+            }
+            DiffStatement::DropConstraint {
+                table,
+                schema,
+                prev,
+                ..
+            } => Some(DiffStatement::AddConstraint {
+                table: table.clone(),
+                schema: schema.clone(),
+                constraint: prev.clone(),
+            }),
+
+            // View operations
+            DiffStatement::CreateView { view, .. } => Some(DiffStatement::DropView {
+                name: view.name.clone(),
+                schema: view.schema.clone(),
+                materialized: view.materialized,
+                cascade: false,
+                prev: view.clone(),
+            }),
+            DiffStatement::DropView { prev, .. } => Some(DiffStatement::CreateView {
+                view: prev.clone(),
+                or_replace: false,
+            }),
+            DiffStatement::AlterView {
+                name,
+                schema,
+                new_definition,
+                prev_definition,
+            } => Some(DiffStatement::AlterView {
+                name: name.clone(),
+                schema: schema.clone(),
+                new_definition: prev_definition.clone(),
+                prev_definition: new_definition.clone(),
+            }),
+
+            // Extension operations
+            DiffStatement::CreateExtension(name) => {
+                Some(DiffStatement::DropExtension(name.clone()))
+            }
+            DiffStatement::DropExtension(name) => {
+                Some(DiffStatement::CreateExtension(name.clone()))
+            }
+        }
+    }
+
+    /// Check if this statement can be automatically reversed
+    pub fn is_reversible(&self) -> bool {
+        self.undo_statement().is_some()
+    }
 }
 
 // Supporting enums for statement fields
@@ -292,6 +559,7 @@ fn diff_enums(
             statements.push(DiffStatement::DropEnum {
                 name: enum_from.name.clone(),
                 schema: enum_from.schema.clone(),
+                prev: enum_from.clone(),
             });
         }
     }
@@ -323,6 +591,7 @@ fn diff_enums(
                     name: enum_to.name.clone(),
                     schema: enum_to.schema.clone(),
                     description: enum_to.description.clone(),
+                    prev_description: enum_from.description.clone(),
                 });
             }
         }
@@ -349,6 +618,7 @@ fn diff_sequences(
             statements.push(DiffStatement::DropSequence {
                 name: seq_from.name.clone(),
                 schema: seq_from.schema.clone(),
+                prev: seq_from.clone(),
             });
         }
     }
@@ -407,6 +677,7 @@ fn diff_tables(
                 name: table_from.name.clone(),
                 schema: table_from.schema.clone(),
                 cascade: false,
+                prev: table_from.clone(),
             });
         }
     }
@@ -433,6 +704,7 @@ fn diff_table(
         statements.push(DiffStatement::AlterTableComment {
             table: table.clone(),
             schema: schema.clone(),
+            prev: from.comment.clone(),
             comment: to.comment.clone(),
         });
     }
@@ -472,13 +744,14 @@ fn diff_columns(
     }
 
     // Columns to drop
-    for (name, _col_from) in from {
+    for (name, col_from) in from {
         if !to.contains_key(name) {
             statements.push(DiffStatement::DropColumn {
                 table: table.to_string(),
                 schema: schema.clone(),
                 column: name.clone(),
                 cascade: false,
+                prev: col_from.clone(),
             });
         }
     }
@@ -503,6 +776,7 @@ fn diff_columns(
                     schema: schema.clone(),
                     column: name.clone(),
                     comment: col_to.comment.clone(),
+                    prev_comment: col_from.comment.clone(),
                 });
             }
         }
@@ -564,13 +838,15 @@ fn diff_indexes(
     }
 
     // Indexes to drop
-    for (name, _idx_from) in from {
+    for (name, idx_from) in from {
         if !to.contains_key(name) {
             statements.push(DiffStatement::DropIndex {
+                table: table.to_string(),
                 name: name.clone(),
                 schema: schema.clone(),
                 concurrently: false,
                 if_exists: false,
+                prev: idx_from.clone(),
             });
         }
     }
@@ -582,10 +858,12 @@ fn diff_indexes(
         {
             // Drop and recreate
             statements.push(DiffStatement::DropIndex {
+                table: table.to_string(),
                 name: name.clone(),
                 schema: schema.clone(),
                 concurrently: false,
                 if_exists: false,
+                prev: idx_from.clone(),
             });
             statements.push(DiffStatement::CreateIndex {
                 table: table.to_string(),
@@ -628,13 +906,14 @@ fn diff_constraints(
     }
 
     // Constraints to drop
-    for (name, _constraint) in &from_by_name {
+    for (name, constraint) in &from_by_name {
         if !to_by_name.contains_key(name) {
             statements.push(DiffStatement::DropConstraint {
                 table: table.to_string(),
                 schema: schema.clone(),
                 name: name.clone(),
                 cascade: false,
+                prev: (*constraint).clone(),
             });
         }
     }
@@ -649,6 +928,7 @@ fn diff_constraints(
                 schema: schema.clone(),
                 name: name.clone(),
                 cascade: false,
+                prev: (*constraint_from).clone(),
             });
             statements.push(DiffStatement::AddConstraint {
                 table: table.to_string(),
@@ -682,6 +962,7 @@ fn diff_views(
                 schema: view_from.schema.clone(),
                 materialized: view_from.materialized,
                 cascade: false,
+                prev: view_from.clone(),
             });
         }
     }
@@ -695,6 +976,7 @@ fn diff_views(
                 name: view_to.name.clone(),
                 schema: view_to.schema.clone(),
                 new_definition: view_to.definition.clone(),
+                prev_definition: view_from.definition.clone(),
             });
         }
     }
@@ -709,6 +991,45 @@ impl SchemaDiff {
     /// Get the number of statements
     pub fn len(&self) -> usize {
         self.statements.len()
+    }
+
+    /// Generate the reverse diff that undoes all changes
+    ///
+    /// Returns a new SchemaDiff with statements in reverse order that undo each change.
+    /// Statements that cannot be reversed are omitted and listed in the second return value.
+    ///
+    /// # Returns
+    /// A tuple of (reversible_diff, irreversible_statements)
+    pub fn get_down_diff(&self) -> (SchemaDiff, Vec<DiffStatement>) {
+        let mut reversible = Vec::new();
+        let mut irreversible = Vec::new();
+
+        // Process statements in reverse order
+        for stmt in self.statements.iter().rev() {
+            match stmt.undo_statement() {
+                Some(reversed) => reversible.push(reversed),
+                None => irreversible.push(stmt.clone()),
+            }
+        }
+
+        (
+            SchemaDiff {
+                statements: reversible,
+            },
+            irreversible,
+        )
+    }
+
+    /// Check if all statements in this diff can be automatically reversed
+    pub fn is_fully_reversible(&self) -> bool {
+        self.statements.iter().all(|s| s.is_reversible())
+    }
+
+    /// Get the count of reversible and irreversible statements
+    pub fn reversibility_stats(&self) -> (usize, usize) {
+        let reversible = self.statements.iter().filter(|s| s.is_reversible()).count();
+        let irreversible = self.statements.len() - reversible;
+        (reversible, irreversible)
     }
 
     /// Check if the diff contains any destructive operations
@@ -866,6 +1187,7 @@ impl std::fmt::Display for DiffSummary {
 mod tests {
     use super::*;
     use crate::schema::SchemaDialect;
+    use crate::snapshot::{ConstraintType, ForeignKeyReference};
 
     fn empty_snapshot() -> Snapshot {
         Snapshot::new(SchemaDialect::Postgres)
@@ -1339,5 +1661,884 @@ mod tests {
 
         assert!(has_table_comment, "Expected AlterTableComment statement");
         assert!(has_column_comment, "Expected AlterColumnComment statement");
+    }
+
+    // ==================== DiffStatement::undo() Tests ====================
+
+    #[test]
+    fn test_undo_create_schema() {
+        let stmt = DiffStatement::CreateSchema {
+            name: "myschema".to_string(),
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateSchema should be reversible");
+        match undone {
+            DiffStatement::DropSchema { name, cascade } => {
+                assert_eq!(name, "myschema");
+                assert!(!cascade);
+            }
+            _ => panic!("Expected DropSchema"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_schema() {
+        let stmt = DiffStatement::DropSchema {
+            name: "myschema".to_string(),
+            cascade: true,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("DropSchema should be reversible");
+        match undone {
+            DiffStatement::CreateSchema { name } => {
+                assert_eq!(name, "myschema");
+            }
+            _ => panic!("Expected CreateSchema"),
+        }
+    }
+
+    #[test]
+    fn test_undo_rename_schema() {
+        let stmt = DiffStatement::RenameSchema {
+            from: "old_name".to_string(),
+            to: "new_name".to_string(),
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("RenameSchema should be reversible");
+        match undone {
+            DiffStatement::RenameSchema { from, to } => {
+                assert_eq!(from, "new_name");
+                assert_eq!(to, "old_name");
+            }
+            _ => panic!("Expected RenameSchema"),
+        }
+    }
+
+    #[test]
+    fn test_undo_create_enum() {
+        let stmt = DiffStatement::CreateEnum {
+            name: "status".to_string(),
+            schema: Some("public".to_string()),
+            values: vec!["active".to_string(), "inactive".to_string()],
+            description: Some("Status enum".to_string()),
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateEnum should be reversible");
+        match undone {
+            DiffStatement::DropEnum { name, schema, .. } => {
+                assert_eq!(name, "status");
+                assert_eq!(schema, Some("public".to_string()));
+            }
+            _ => panic!("Expected DropEnum"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_enum_is_reversible() {
+        let stmt = DiffStatement::DropEnum {
+            name: "status".to_string(),
+            schema: Some("public".to_string()),
+            prev: EnumSnapshot {
+                name: "status".to_string(),
+                schema: Some("public".to_string()),
+                values: vec!["active".to_string(), "inactive".to_string()],
+                description: Some("Status enum".to_string()),
+            },
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropEnum should be reversible");
+        match undo.unwrap() {
+            DiffStatement::CreateEnum {
+                name,
+                schema,
+                values,
+                description,
+            } => {
+                assert_eq!(name, "status");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(values, vec!["active", "inactive"]);
+                assert_eq!(description, Some("Status enum".to_string()));
+            }
+            _ => panic!("Expected CreateEnum"),
+        }
+    }
+
+    #[test]
+    fn test_undo_add_enum_value_not_reversible() {
+        let stmt = DiffStatement::AddEnumValue {
+            enum_name: "status".to_string(),
+            schema: None,
+            value: "pending".to_string(),
+            position: EnumValuePosition::End,
+        };
+        assert!(
+            stmt.undo_statement().is_none(),
+            "AddEnumValue should not be reversible"
+        );
+    }
+
+    #[test]
+    fn test_undo_rename_enum() {
+        let stmt = DiffStatement::RenameEnum {
+            from: "old_enum".to_string(),
+            to: "new_enum".to_string(),
+            schema: Some("public".to_string()),
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("RenameEnum should be reversible");
+        match undone {
+            DiffStatement::RenameEnum { from, to, schema } => {
+                assert_eq!(from, "new_enum");
+                assert_eq!(to, "old_enum");
+                assert_eq!(schema, Some("public".to_string()));
+            }
+            _ => panic!("Expected RenameEnum"),
+        }
+    }
+
+    #[test]
+    fn test_undo_create_table() {
+        let table = TableSnapshot {
+            name: "users".to_string(),
+            schema: Some("public".to_string()),
+            columns: IndexMap::new(),
+            constraints: vec![],
+            indexes: IndexMap::new(),
+            comment: None,
+        };
+        let stmt = DiffStatement::CreateTable { table };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateTable should be reversible");
+        match undone {
+            DiffStatement::DropTable {
+                name,
+                schema,
+                cascade,
+                ..
+            } => {
+                assert_eq!(name, "users");
+                assert_eq!(schema, Some("public".to_string()));
+                assert!(!cascade);
+            }
+            _ => panic!("Expected DropTable"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_table_is_reversible() {
+        let table = TableSnapshot {
+            name: "users".to_string(),
+            schema: Some("public".to_string()),
+            columns: IndexMap::new(),
+            constraints: vec![],
+            indexes: IndexMap::new(),
+            comment: None,
+        };
+        let stmt = DiffStatement::DropTable {
+            name: "users".to_string(),
+            schema: Some("public".to_string()),
+            cascade: false,
+            prev: table,
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropTable should be reversible");
+        match undo.unwrap() {
+            DiffStatement::CreateTable { table } => {
+                assert_eq!(table.name, "users");
+                assert_eq!(table.schema, Some("public".to_string()));
+            }
+            _ => panic!("Expected CreateTable"),
+        }
+    }
+
+    #[test]
+    fn test_undo_rename_table() {
+        let stmt = DiffStatement::RenameTable {
+            from: "old_table".to_string(),
+            to: "new_table".to_string(),
+            schema: None,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("RenameTable should be reversible");
+        match undone {
+            DiffStatement::RenameTable { from, to, schema } => {
+                assert_eq!(from, "new_table");
+                assert_eq!(to, "old_table");
+                assert!(schema.is_none());
+            }
+            _ => panic!("Expected RenameTable"),
+        }
+    }
+
+    #[test]
+    fn test_undo_add_column() {
+        let column = ColumnSnapshot {
+            name: "email".to_string(),
+            data_type: "text".to_string(),
+            nullable: true,
+            default: None,
+            primary_key: false,
+            unique: false,
+            generated: None,
+            identity: None,
+            comment: None,
+            collation: None,
+        };
+        let stmt = DiffStatement::AddColumn {
+            table: "users".to_string(),
+            schema: None,
+            column,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("AddColumn should be reversible");
+        match undone {
+            DiffStatement::DropColumn {
+                table,
+                schema,
+                column,
+                cascade,
+                ..
+            } => {
+                assert_eq!(table, "users");
+                assert!(schema.is_none());
+                assert_eq!(column, "email");
+                assert!(!cascade);
+            }
+            _ => panic!("Expected DropColumn"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_column_is_reversible() {
+        let prev = ColumnSnapshot {
+            name: "email".to_string(),
+            data_type: "text".to_string(),
+            nullable: false,
+            default: None,
+            primary_key: false,
+            unique: true,
+            generated: None,
+            identity: None,
+            comment: None,
+            collation: None,
+        };
+        let stmt = DiffStatement::DropColumn {
+            table: "users".to_string(),
+            schema: Some("public".to_string()),
+            column: "email".to_string(),
+            cascade: false,
+            prev,
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropColumn should be reversible");
+        match undo.unwrap() {
+            DiffStatement::AddColumn {
+                table,
+                schema,
+                column,
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(column.name, "email");
+                assert_eq!(column.data_type, "text");
+            }
+            _ => panic!("Expected AddColumn"),
+        }
+    }
+
+    #[test]
+    fn test_undo_rename_column() {
+        let stmt = DiffStatement::RenameColumn {
+            table: "users".to_string(),
+            schema: None,
+            from: "old_col".to_string(),
+            to: "new_col".to_string(),
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("RenameColumn should be reversible");
+        match undone {
+            DiffStatement::RenameColumn {
+                table,
+                schema,
+                from,
+                to,
+            } => {
+                assert_eq!(table, "users");
+                assert!(schema.is_none());
+                assert_eq!(from, "new_col");
+                assert_eq!(to, "old_col");
+            }
+            _ => panic!("Expected RenameColumn"),
+        }
+    }
+
+    #[test]
+    fn test_undo_create_index() {
+        let index = IndexSnapshot {
+            name: "idx_users_email".to_string(),
+            columns: vec!["email".to_string()],
+            unique: true,
+            method: "btree".to_string(),
+            where_clause: None,
+            include: vec![],
+        };
+        let stmt = DiffStatement::CreateIndex {
+            table: "users".to_string(),
+            schema: Some("public".to_string()),
+            index,
+            concurrently: false,
+            if_not_exists: false,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateIndex should be reversible");
+        match undone {
+            DiffStatement::DropIndex {
+                name,
+                schema,
+                concurrently,
+                if_exists,
+                ..
+            } => {
+                assert_eq!(name, "idx_users_email");
+                assert_eq!(schema, Some("public".to_string()));
+                assert!(!concurrently);
+                assert!(!if_exists);
+            }
+            _ => panic!("Expected DropIndex"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_index_is_reversible() {
+        let prev = IndexSnapshot {
+            name: "idx_users_email".to_string(),
+            columns: vec!["email".to_string()],
+            unique: true,
+            method: "btree".to_string(),
+            where_clause: None,
+            include: vec![],
+        };
+        let stmt = DiffStatement::DropIndex {
+            table: "users".to_string(),
+            name: "idx_users_email".to_string(),
+            schema: Some("public".to_string()),
+            concurrently: false,
+            if_exists: false,
+            prev,
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropIndex should be reversible");
+        match undo.unwrap() {
+            DiffStatement::CreateIndex {
+                table,
+                schema,
+                index,
+                ..
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(index.name, "idx_users_email");
+                assert_eq!(index.columns, vec!["email"]);
+            }
+            _ => panic!("Expected CreateIndex"),
+        }
+    }
+
+    #[test]
+    fn test_undo_add_constraint_named() {
+        let constraint = ConstraintSnapshot {
+            name: Some("fk_posts_user".to_string()),
+            constraint_type: ConstraintType::ForeignKey,
+            columns: vec!["user_id".to_string()],
+            references: None,
+            expression: None,
+        };
+        let stmt = DiffStatement::AddConstraint {
+            table: "posts".to_string(),
+            schema: None,
+            constraint,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("AddConstraint with name should be reversible");
+        match undone {
+            DiffStatement::DropConstraint {
+                table,
+                schema,
+                name,
+                cascade,
+                ..
+            } => {
+                assert_eq!(table, "posts");
+                assert!(schema.is_none());
+                assert_eq!(name, "fk_posts_user");
+                assert!(!cascade);
+            }
+            _ => panic!("Expected DropConstraint"),
+        }
+    }
+
+    #[test]
+    fn test_undo_add_constraint_unnamed_not_reversible() {
+        let constraint = ConstraintSnapshot {
+            name: None,
+            constraint_type: ConstraintType::Check,
+            columns: vec![],
+            references: None,
+            expression: Some("age > 0".to_string()),
+        };
+        let stmt = DiffStatement::AddConstraint {
+            table: "users".to_string(),
+            schema: None,
+            constraint,
+        };
+        assert!(
+            stmt.undo_statement().is_none(),
+            "AddConstraint without name should not be reversible"
+        );
+    }
+
+    #[test]
+    fn test_undo_create_view() {
+        let view = ViewSnapshot {
+            name: "active_users".to_string(),
+            schema: None,
+            definition: "SELECT * FROM users WHERE active = true".to_string(),
+            materialized: false,
+        };
+        let stmt = DiffStatement::CreateView {
+            view,
+            or_replace: false,
+        };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateView should be reversible");
+        match undone {
+            DiffStatement::DropView {
+                name,
+                schema,
+                materialized,
+                cascade,
+                ..
+            } => {
+                assert_eq!(name, "active_users");
+                assert!(schema.is_none());
+                assert!(!materialized);
+                assert!(!cascade);
+            }
+            _ => panic!("Expected DropView"),
+        }
+    }
+
+    #[test]
+    fn test_undo_create_extension() {
+        let stmt = DiffStatement::CreateExtension("uuid-ossp".to_string());
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateExtension should be reversible");
+        match undone {
+            DiffStatement::DropExtension(name) => {
+                assert_eq!(name, "uuid-ossp");
+            }
+            _ => panic!("Expected DropExtension"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_extension() {
+        let stmt = DiffStatement::DropExtension("uuid-ossp".to_string());
+        let undone = stmt
+            .undo_statement()
+            .expect("DropExtension should be reversible");
+        match undone {
+            DiffStatement::CreateExtension(name) => {
+                assert_eq!(name, "uuid-ossp");
+            }
+            _ => panic!("Expected CreateExtension"),
+        }
+    }
+
+    #[test]
+    fn test_undo_create_sequence() {
+        let sequence = SequenceSnapshot {
+            name: "user_id_seq".to_string(),
+            schema: Some("public".to_string()),
+            increment: 1,
+            min_value: 1,
+            max_value: None,
+            start: 1,
+            cache: 1,
+            cycle: false,
+        };
+        let stmt = DiffStatement::CreateSequence { sequence };
+        let undone = stmt
+            .undo_statement()
+            .expect("CreateSequence should be reversible");
+        match undone {
+            DiffStatement::DropSequence { name, schema, .. } => {
+                assert_eq!(name, "user_id_seq");
+                assert_eq!(schema, Some("public".to_string()));
+            }
+            _ => panic!("Expected DropSequence"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_sequence_is_reversible() {
+        let prev = SequenceSnapshot {
+            name: "user_id_seq".to_string(),
+            schema: Some("public".to_string()),
+            increment: 1,
+            min_value: 1,
+            max_value: Some(1000000),
+            start: 100,
+            cache: 10,
+            cycle: true,
+        };
+        let stmt = DiffStatement::DropSequence {
+            name: "user_id_seq".to_string(),
+            schema: Some("public".to_string()),
+            prev: prev.clone(),
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropSequence should be reversible");
+        match undo.unwrap() {
+            DiffStatement::CreateSequence { sequence } => {
+                assert_eq!(sequence.name, "user_id_seq");
+                assert_eq!(sequence.schema, Some("public".to_string()));
+                assert_eq!(sequence.increment, 1);
+                assert_eq!(sequence.max_value, Some(1000000));
+                assert_eq!(sequence.start, 100);
+                assert_eq!(sequence.cache, 10);
+                assert!(sequence.cycle);
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_constraint_is_reversible() {
+        let prev = ConstraintSnapshot {
+            name: Some("fk_user_id".to_string()),
+            constraint_type: ConstraintType::ForeignKey,
+            columns: vec!["user_id".to_string()],
+            references: Some(ForeignKeyReference {
+                schema: None,
+                table: "users".to_string(),
+                columns: vec!["id".to_string()],
+                on_delete: "CASCADE".to_string(),
+                on_update: "NO ACTION".to_string(),
+            }),
+            expression: None,
+        };
+        let stmt = DiffStatement::DropConstraint {
+            table: "posts".to_string(),
+            schema: Some("public".to_string()),
+            name: "fk_user_id".to_string(),
+            cascade: false,
+            prev,
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropConstraint should be reversible");
+        match undo.unwrap() {
+            DiffStatement::AddConstraint {
+                table,
+                schema,
+                constraint,
+            } => {
+                assert_eq!(table, "posts");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(constraint.name, Some("fk_user_id".to_string()));
+                assert!(matches!(
+                    constraint.constraint_type,
+                    ConstraintType::ForeignKey
+                ));
+            }
+            _ => panic!("Expected AddConstraint"),
+        }
+    }
+
+    #[test]
+    fn test_undo_drop_view_is_reversible() {
+        let prev = ViewSnapshot {
+            name: "active_users".to_string(),
+            schema: Some("public".to_string()),
+            definition: "SELECT * FROM users WHERE active = true".to_string(),
+            materialized: false,
+        };
+        let stmt = DiffStatement::DropView {
+            name: "active_users".to_string(),
+            schema: Some("public".to_string()),
+            materialized: false,
+            cascade: false,
+            prev,
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "DropView should be reversible");
+        match undo.unwrap() {
+            DiffStatement::CreateView { view, or_replace } => {
+                assert_eq!(view.name, "active_users");
+                assert_eq!(view.schema, Some("public".to_string()));
+                assert_eq!(view.definition, "SELECT * FROM users WHERE active = true");
+                assert!(!view.materialized);
+                assert!(!or_replace);
+            }
+            _ => panic!("Expected CreateView"),
+        }
+    }
+
+    #[test]
+    fn test_undo_alter_enum_description_is_reversible() {
+        let stmt = DiffStatement::AlterEnumDescription {
+            name: "status".to_string(),
+            schema: Some("public".to_string()),
+            description: Some("New description".to_string()),
+            prev_description: Some("Old description".to_string()),
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "AlterEnumDescription should be reversible");
+        match undo.unwrap() {
+            DiffStatement::AlterEnumDescription {
+                name,
+                schema,
+                description,
+                prev_description,
+            } => {
+                assert_eq!(name, "status");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(description, Some("Old description".to_string()));
+                assert_eq!(prev_description, Some("New description".to_string()));
+            }
+            _ => panic!("Expected AlterEnumDescription"),
+        }
+    }
+
+    #[test]
+    fn test_undo_alter_column_comment_is_reversible() {
+        let stmt = DiffStatement::AlterColumnComment {
+            table: "users".to_string(),
+            schema: Some("public".to_string()),
+            column: "email".to_string(),
+            comment: Some("New comment".to_string()),
+            prev_comment: Some("Old comment".to_string()),
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "AlterColumnComment should be reversible");
+        match undo.unwrap() {
+            DiffStatement::AlterColumnComment {
+                table,
+                schema,
+                column,
+                comment,
+                prev_comment,
+            } => {
+                assert_eq!(table, "users");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(column, "email");
+                assert_eq!(comment, Some("Old comment".to_string()));
+                assert_eq!(prev_comment, Some("New comment".to_string()));
+            }
+            _ => panic!("Expected AlterColumnComment"),
+        }
+    }
+
+    #[test]
+    fn test_undo_alter_view_is_reversible() {
+        let stmt = DiffStatement::AlterView {
+            name: "active_users".to_string(),
+            schema: Some("public".to_string()),
+            new_definition: "SELECT * FROM users WHERE active = true AND verified = true"
+                .to_string(),
+            prev_definition: "SELECT * FROM users WHERE active = true".to_string(),
+        };
+        let undo = stmt.undo_statement();
+        assert!(undo.is_some(), "AlterView should be reversible");
+        match undo.unwrap() {
+            DiffStatement::AlterView {
+                name,
+                schema,
+                new_definition,
+                prev_definition,
+            } => {
+                assert_eq!(name, "active_users");
+                assert_eq!(schema, Some("public".to_string()));
+                assert_eq!(new_definition, "SELECT * FROM users WHERE active = true");
+                assert_eq!(
+                    prev_definition,
+                    "SELECT * FROM users WHERE active = true AND verified = true"
+                );
+            }
+            _ => panic!("Expected AlterView"),
+        }
+    }
+
+    // ==================== SchemaDiff::undo() Tests ====================
+
+    #[test]
+    fn test_schema_diff_undo_reversible() {
+        let diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::CreateSchema {
+                    name: "myschema".to_string(),
+                },
+                DiffStatement::CreateExtension("uuid-ossp".to_string()),
+            ],
+        };
+
+        let (reversed, irreversible) = diff.get_down_diff();
+
+        assert!(irreversible.is_empty());
+        assert_eq!(reversed.statements.len(), 2);
+
+        // Statements should be in reverse order
+        match &reversed.statements[0] {
+            DiffStatement::DropExtension(name) => assert_eq!(name, "uuid-ossp"),
+            _ => panic!("Expected DropExtension first"),
+        }
+        match &reversed.statements[1] {
+            DiffStatement::DropSchema { name, .. } => assert_eq!(name, "myschema"),
+            _ => panic!("Expected DropSchema second"),
+        }
+    }
+
+    #[test]
+    fn test_schema_diff_undo_mixed() {
+        let diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::CreateSchema {
+                    name: "myschema".to_string(),
+                },
+                DiffStatement::AddEnumValue {
+                    enum_name: "status".to_string(),
+                    schema: None,
+                    value: "pending".to_string(),
+                    position: EnumValuePosition::End,
+                },
+                DiffStatement::CreateExtension("uuid-ossp".to_string()),
+            ],
+        };
+
+        let (reversed, irreversible) = diff.get_down_diff();
+
+        // AddEnumValue is not reversible
+        assert_eq!(irreversible.len(), 1);
+        assert_eq!(reversed.statements.len(), 2);
+    }
+
+    #[test]
+    fn test_schema_diff_is_fully_reversible() {
+        let reversible_diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::CreateSchema {
+                    name: "myschema".to_string(),
+                },
+                DiffStatement::CreateExtension("uuid-ossp".to_string()),
+            ],
+        };
+        assert!(reversible_diff.is_fully_reversible());
+
+        let mixed_diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::CreateSchema {
+                    name: "myschema".to_string(),
+                },
+                DiffStatement::AddEnumValue {
+                    enum_name: "status".to_string(),
+                    schema: None,
+                    value: "pending".to_string(),
+                    position: EnumValuePosition::End,
+                },
+            ],
+        };
+        assert!(!mixed_diff.is_fully_reversible());
+    }
+
+    #[test]
+    fn test_schema_diff_reversibility_stats() {
+        let diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::CreateSchema {
+                    name: "myschema".to_string(),
+                },
+                DiffStatement::AddEnumValue {
+                    enum_name: "status".to_string(),
+                    schema: None,
+                    value: "pending".to_string(),
+                    position: EnumValuePosition::End,
+                },
+                DiffStatement::CreateExtension("uuid-ossp".to_string()),
+                DiffStatement::AlterColumn {
+                    table: "users".to_string(),
+                    schema: None,
+                    column: "name".to_string(),
+                    changes: vec![ColumnChange::SetNotNull],
+                },
+            ],
+        };
+
+        let (reversible, irreversible) = diff.reversibility_stats();
+        assert_eq!(reversible, 2); // CreateSchema, CreateExtension
+        assert_eq!(irreversible, 2); // AddEnumValue, AlterColumn
+    }
+
+    #[test]
+    fn test_schema_diff_undo_empty() {
+        let diff = SchemaDiff { statements: vec![] };
+        let (reversed, irreversible) = diff.get_down_diff();
+
+        assert!(reversed.is_empty());
+        assert!(irreversible.is_empty());
+    }
+
+    #[test]
+    fn test_diff_statement_is_reversible() {
+        // Reversible statements
+        assert!(
+            DiffStatement::CreateSchema {
+                name: "s".to_string()
+            }
+            .is_reversible()
+        );
+        assert!(DiffStatement::CreateExtension("e".to_string()).is_reversible());
+        assert!(DiffStatement::DropExtension("e".to_string()).is_reversible());
+
+        // Now-reversible statements (with prev field)
+        assert!(
+            DiffStatement::DropTable {
+                name: "t".to_string(),
+                schema: None,
+                cascade: false,
+                prev: TableSnapshot {
+                    name: "t".to_string(),
+                    schema: None,
+                    columns: IndexMap::new(),
+                    constraints: vec![],
+                    indexes: IndexMap::new(),
+                    comment: None,
+                },
+            }
+            .is_reversible()
+        );
+
+        // Irreversible statements (PostgreSQL limitation)
+        assert!(
+            !DiffStatement::AddEnumValue {
+                enum_name: "e".to_string(),
+                schema: None,
+                value: "v".to_string(),
+                position: EnumValuePosition::End,
+            }
+            .is_reversible()
+        );
     }
 }

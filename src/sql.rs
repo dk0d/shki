@@ -58,7 +58,7 @@ impl SqlGenerator {
                 values,
                 description,
             } => Ok(self.create_enum(name, schema, values, description)),
-            DiffStatement::DropEnum { name, schema } => Ok(vec![self.drop_enum(name, schema)]),
+            DiffStatement::DropEnum { name, schema, .. } => Ok(vec![self.drop_enum(name, schema)]),
             DiffStatement::RenameEnum { from, to, schema } => {
                 Ok(vec![self.rename_enum(from, to, schema)])
             }
@@ -72,9 +72,10 @@ impl SqlGenerator {
                 name,
                 schema,
                 description,
+                ..
             } => Ok(vec![self.alter_enum_description(name, schema, description)]),
             DiffStatement::CreateSequence { sequence } => Ok(vec![self.create_sequence(sequence)]),
-            DiffStatement::DropSequence { name, schema } => {
+            DiffStatement::DropSequence { name, schema, .. } => {
                 Ok(vec![self.drop_sequence(name, schema)])
             }
             DiffStatement::AlterSequence {
@@ -87,6 +88,7 @@ impl SqlGenerator {
                 name,
                 schema,
                 cascade,
+                ..
             } => Ok(vec![self.drop_table(name, schema, *cascade)]),
             DiffStatement::RenameTable { from, to, schema } => {
                 Ok(vec![self.rename_table(from, to, schema)])
@@ -95,6 +97,9 @@ impl SqlGenerator {
                 table,
                 schema,
                 comment,
+                // don't need prev to set the comment -
+                // only used to build down migration
+                prev: _,
             } => Ok(vec![self.alter_table_comment(table, schema, comment)]),
             DiffStatement::AddColumn {
                 table,
@@ -106,6 +111,7 @@ impl SqlGenerator {
                 schema,
                 column,
                 cascade,
+                ..
             } => Ok(vec![self.drop_column(table, schema, column, *cascade)]),
             DiffStatement::RenameColumn {
                 table,
@@ -124,6 +130,7 @@ impl SqlGenerator {
                 schema,
                 column,
                 comment,
+                ..
             } => Ok(vec![
                 self.alter_column_comment(table, schema, column, comment)
             ]),
@@ -145,6 +152,7 @@ impl SqlGenerator {
                 schema,
                 concurrently,
                 if_exists,
+                ..
             } => Ok(vec![self.drop_index(
                 name,
                 schema,
@@ -161,6 +169,7 @@ impl SqlGenerator {
                 schema,
                 name,
                 cascade,
+                ..
             } => Ok(vec![self.drop_constraint(table, schema, name, *cascade)]),
             DiffStatement::CreateView { view, or_replace } => {
                 Ok(vec![self.create_view(view, *or_replace)])
@@ -170,11 +179,13 @@ impl SqlGenerator {
                 schema,
                 materialized,
                 cascade,
+                ..
             } => Ok(vec![self.drop_view(name, schema, *materialized, *cascade)]),
             DiffStatement::AlterView {
                 name,
                 schema,
                 new_definition,
+                ..
             } => Ok(vec![self.alter_view(name, schema, new_definition)]),
             DiffStatement::CreateExtension(name) => Ok(vec![self.create_extension(name)]),
             DiffStatement::DropExtension(name) => Ok(vec![self.drop_extension(name)]),

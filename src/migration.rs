@@ -1366,4 +1366,78 @@ ALTER TABLE users ADD COLUMN name TEXT;
         assert!(migrations_path.exists());
         assert!(migrations_path.join("_meta").exists());
     }
+
+    #[test]
+    fn test_create_migration_with_down() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let up_sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let down_sql = "DROP TABLE \"users\";";
+        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres);
+
+        let (up_path, down_path) = manager
+            .create_migration_with_down(
+                Some("create_users".to_string()),
+                up_sql,
+                Some(down_sql),
+                None,
+                &snapshot,
+            )
+            .expect("failed to create migration with down");
+
+        // Verify up migration exists and has correct content
+        assert!(up_path.exists());
+        let up_content = fs::read_to_string(&up_path).expect("failed to read up migration");
+        assert!(up_content.contains("CREATE TABLE users"));
+        assert!(up_content.contains("(up)"));
+
+        // Verify down migration exists and has correct content
+        assert!(down_path.is_some());
+        let down_path = down_path.unwrap();
+        assert!(down_path.exists());
+        let down_content = fs::read_to_string(&down_path).expect("failed to read down migration");
+        assert!(down_content.contains("DROP TABLE"));
+        assert!(down_content.contains("(down)"));
+        assert!(down_content.contains("reverses"));
+
+        // Verify file naming
+        let up_name = up_path.file_name().unwrap().to_str().unwrap();
+        let down_name = down_path.file_name().unwrap().to_str().unwrap();
+        assert!(up_name.ends_with(".sql"));
+        assert!(down_name.ends_with(".down.sql"));
+        assert!(up_name.contains("create_users"));
+        assert!(down_name.contains("create_users"));
+    }
+
+    #[test]
+    fn test_create_migration_without_down() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let up_sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres);
+
+        let (up_path, down_path) = manager
+            .create_migration_with_down(
+                Some("create_users".to_string()),
+                up_sql,
+                None, // No down SQL
+                None,
+                &snapshot,
+            )
+            .expect("failed to create migration");
+
+        // Verify up migration exists
+        assert!(up_path.exists());
+        let up_content = fs::read_to_string(&up_path).expect("failed to read up migration");
+        assert!(up_content.contains("CREATE TABLE users"));
+
+        // Verify no down migration was created
+        assert!(down_path.is_none());
+        
+        // Double-check that no .down.sql file exists
+        let down_file = manager.get_down_migration_path(&up_path);
+        assert!(!down_file.exists());
+    }
 }
