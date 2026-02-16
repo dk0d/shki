@@ -3,13 +3,13 @@
 //! This module provides configuration structures for the CLI and library.
 
 use figment::{
-    providers::{Env, Format, Toml},
     Figment,
+    providers::{Env, Format, Toml},
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{commands::codegen::CodegenConfig, schema::SchemaDialect, ShkiError};
+use crate::{ShkiError, commands::codegen::CodegenConfig, schema::SchemaDialect};
 
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,6 +170,7 @@ impl Config {
         // let content = std::fs::read_to_string(path)?;
         let config: Config = Figment::new()
             .merge(Toml::file(path))
+            .merge(Env::raw())
             .merge(Env::prefixed("SHKI_").split("__"))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
