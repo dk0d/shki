@@ -160,6 +160,27 @@ db/
 └── shki.toml          # Project configuration
 ```
 
+
+> [!IMPORTANT]
+> You can also move `shki.toml` out of the shki project directory.
+> Just set the `root` config property to point to the project.
+> 
+> **All other paths are relative to `root` (defaults to `.`)**
+> 
+> e.g. 
+> ```bash
+> shki.toml              # Project configuration
+> db/
+> ├── migrations/        # Generated migrations live here
+> │   ...
+> ```
+> `shki.toml`
+> ```toml
+> root = "./db"
+> ...
+> ```
+
+
 #### Defining Your Schema
 
 Edit `init.lua`:
