@@ -35,9 +35,21 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub struct_renames: IndexMap<String, String>,
 
+    /// A suffix to add to all structs
+    pub struct_suffix: Option<String>,
+
+    /// A prefix to add to all structs
+    pub struct_prefix: Option<String>,
+
     /// Custom enum name overrides (enum_name -> RustEnumName)
     #[serde(default)]
     pub enum_renames: IndexMap<String, String>,
+
+    /// A suffix to add to all enums
+    pub enum_suffix: Option<String>,
+
+    /// A prefix to add to all enums
+    pub enum_prefix: Option<String>,
 
     /// SQL type to Rust type overrides
     #[serde(default)]
@@ -154,7 +166,11 @@ impl Default for CodegenConfig {
             enum_derives: default_enum_derives(),
             enum_attributes: Vec::new(),
             struct_renames: IndexMap::new(),
+            struct_prefix: None,
+            struct_suffix: None,
             enum_renames: IndexMap::new(),
+            enum_prefix: None,
+            enum_suffix: None,
             type_overrides: IndexMap::new(),
             serde: false,
             sqlx: true,
@@ -212,6 +228,30 @@ impl CodegenConfig {
     /// Set struct derives (replaces defaults)
     pub fn struct_derives(mut self, derives: Vec<impl Into<String>>) -> Self {
         self.struct_derives = derives.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Set struct prefix
+    pub fn struct_prefix(mut self, prefix: Option<String>) -> Self {
+        self.struct_prefix = prefix;
+        self
+    }
+
+    /// Set enum prefix
+    pub fn enum_prefix(mut self, prefix: Option<String>) -> Self {
+        self.enum_prefix = prefix;
+        self
+    }
+
+    /// Set struct suffix
+    pub fn struct_suffix(mut self, suffix: Option<String>) -> Self {
+        self.struct_suffix = suffix;
+        self
+    }
+
+    /// Set enum suffix
+    pub fn enum_suffix(mut self, suffix: Option<String>) -> Self {
+        self.enum_suffix = suffix;
         self
     }
 

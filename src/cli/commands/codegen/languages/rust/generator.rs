@@ -9,6 +9,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
 use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
 /// A generated Rust enum
@@ -130,9 +131,11 @@ fn extract_imports(rust_type: &str, imports: &mut Vec<String>) {
 /// Rust code generator
 pub struct RustGenerator;
 
-impl RustGenerator {
+impl CodeGenerator for RustGenerator {
+    type Output = GeneratedRust;
+
     /// Generate Rust code from a schema snapshot
-    pub fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedRust {
+    fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedRust {
         let mut code = GeneratedRust::new();
 
         // Generate enums first (structs may depend on them)
@@ -152,14 +155,12 @@ impl RustGenerator {
 
         code
     }
+}
 
+impl RustGenerator {
     /// Generate a Rust enum from an enum snapshot
     fn generate_enum(name: &str, enum_snapshot: &EnumSnapshot, config: &CodegenConfig) -> RustEnum {
-        let rust_name = config
-            .enum_renames
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_upper_camel_case());
+        let rust_name = Self::transform_enum_name(name, config);
 
         let variants: Vec<RustEnumVariant> = enum_snapshot
             .values
@@ -191,11 +192,7 @@ impl RustGenerator {
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> RustStruct {
-        let rust_name = config
-            .struct_renames
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| singularize(name).to_upper_camel_case());
+        let rust_name = Self::transform_struct_name(name, config);
 
         let fields: Vec<RustField> = table
             .columns
@@ -388,11 +385,6 @@ pub fn make_safe_field_name(name: &str) -> String {
     } else {
         snake
     }
-}
-
-/// Singularize a table name
-pub fn singularize(name: &str) -> String {
-    pluralizer::pluralize(name, 1, false)
 }
 
 // ============================================================================

@@ -111,7 +111,17 @@ pub enum SchemaLanguage {
 }
 
 /// Output language for code generation
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum CodegenLanguage {
     /// Generate Rust structs and enums
@@ -150,7 +160,6 @@ pub enum Commands {
     #[command(visible_alias = "gen")]
     Generate {
         /// Migration name/suffix
-        #[arg(short, long)]
         name: Option<String>,
 
         /// Path to schema file(s) or directory

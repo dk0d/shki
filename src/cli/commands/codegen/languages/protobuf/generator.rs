@@ -5,6 +5,7 @@
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
+use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::commands::codegen::CodegenConfig;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
@@ -80,9 +81,11 @@ pub struct ProtoField {
 /// Protocol Buffer generator
 pub struct ProtobufGenerator;
 
-impl ProtobufGenerator {
+impl CodeGenerator for ProtobufGenerator {
+    type Output = GeneratedProto;
+
     /// Generate Protocol Buffer code from a schema snapshot
-    pub fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedProto {
+    fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedProto {
         let mut proto = GeneratedProto {
             package: "schema".to_string(),
             ..Default::default()
@@ -114,18 +117,16 @@ impl ProtobufGenerator {
         proto.imports.sort();
         proto
     }
+}
 
+impl ProtobufGenerator {
     /// Generate a Protocol Buffer enum from an enum snapshot
     fn generate_enum(
         name: &str,
         enum_snapshot: &EnumSnapshot,
         config: &CodegenConfig,
     ) -> ProtoEnum {
-        let proto_name = config
-            .enum_renames
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_upper_camel_case());
+        let proto_name = Self::transform_enum_name(name, config);
 
         // Create UNSPECIFIED as the first value (proto3 requirement)
         let prefix = proto_name.to_shouty_snake_case();
@@ -161,11 +162,7 @@ impl ProtobufGenerator {
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> (ProtoMessage, Vec<String>) {
-        let proto_name = config
-            .struct_renames
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| singularize(name).to_upper_camel_case());
+        let proto_name = Self::transform_struct_name(name, config);
 
         let mut imports = Vec::new();
         let fields: Vec<ProtoField> = table
@@ -369,11 +366,6 @@ impl ToShoutySnakeCase for str {
     fn to_shouty_snake_case(&self) -> String {
         self.to_snake_case().to_uppercase()
     }
-}
-
-/// Singularize a table name
-fn singularize(name: &str) -> String {
-    pluralizer::pluralize(name, 1, false)
 }
 
 impl std::fmt::Display for GeneratedProto {

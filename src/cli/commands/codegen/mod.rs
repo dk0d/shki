@@ -15,7 +15,7 @@ use crate::snapshot::Snapshot;
 use crate::{Config, Result};
 use std::path::PathBuf;
 
-use languages::{ProtobufWriter, RustWriter};
+use languages::{CodeGenerator, ProtobufWriter, RustWriter};
 use writer::CodeWriter;
 
 pub fn cmd_codegen(
