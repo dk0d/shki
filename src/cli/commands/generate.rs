@@ -1,4 +1,7 @@
-use crate::{Config, MigrationManager, Result, Snapshot, SqlGenerator, diff_snapshots};
+use crate::{
+    Config, MigrationManager, RenameDetector, Result, Snapshot, SqlGenerator,
+    diff_snapshots_with_renames,
+};
 use colored::Colorize;
 use std::path::PathBuf;
 
@@ -7,6 +10,16 @@ pub fn cmd_generate_sql(
     name: Option<String>,
     schema_path: Option<PathBuf>,
     dry_run: bool,
+) -> Result<()> {
+    cmd_generate_sql_interactive(config, name, schema_path, dry_run, true)
+}
+
+pub fn cmd_generate_sql_interactive(
+    config: &Config,
+    name: Option<String>,
+    schema_path: Option<PathBuf>,
+    dry_run: bool,
+    interactive: bool,
 ) -> Result<()> {
     println!("{}", "Loading schema definitions...".cyan());
     let desired_snapshot = if let Some(path) = schema_path {
@@ -41,8 +54,22 @@ pub fn cmd_generate_sql(
         println!("  {} previous migration snapshot", "Found".green());
     }
 
-    // Compute diff (from previous/empty snapshot to desired schema)
-    let diff = diff_snapshots(&base_snapshot, &desired_snapshot)?;
+    // Detect potential renames and prompt user
+    let rename_detector = RenameDetector::new(&base_snapshot, &desired_snapshot);
+    let renames = if rename_detector.has_potential_renames() {
+        let count = rename_detector.potential_rename_count();
+        println!(
+            "\n{} {}",
+            "Detected".yellow(),
+            format!("{} potential rename(s)", count).yellow()
+        );
+        rename_detector.prompt_for_decisions(interactive)?
+    } else {
+        crate::RenameDecisions::default()
+    };
+
+    // Compute diff (from previous/empty snapshot to desired schema) with rename decisions
+    let diff = diff_snapshots_with_renames(&base_snapshot, &desired_snapshot, &renames)?;
 
     if diff.is_empty() {
         println!("{}", "No changes detected".green());

@@ -12,6 +12,8 @@ pub mod snapshot;
 pub use snapshot::*;
 pub mod lua;
 pub use lua::*;
+pub mod rename;
+pub use rename::*;
 pub mod diff;
 pub use diff::*;
 pub mod sql;

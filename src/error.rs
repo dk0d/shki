@@ -49,6 +49,9 @@ pub enum ShkiError {
 
     #[error("[LUA] {0}")]
     Lua(String),
+
+    #[error("[USER] Cancelled")]
+    Cancelled,
 }
 
 impl ShkiError {
