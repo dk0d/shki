@@ -14,8 +14,10 @@ pub struct LuaSequenceBuilder {
 
 impl LuaSequenceBuilder {
     pub fn new(name: String) -> Self {
-        let mut seq = Sequence::default();
-        seq.name = name;
+        let seq = Sequence {
+            name,
+            ..Sequence::default()
+        };
         Self {
             inner: Rc::new(RefCell::new(seq)),
         }

@@ -40,8 +40,10 @@ pub async fn cmd_pull(
 
     match output {
         Some(path) => {
-            std::fs::write(path, &content)?;
-            println!("{} {}", "Schema written to:".green(), path.display());
+            // Resolve the output path relative to the project root
+            let resolved_path = config.resolve_path(path);
+            std::fs::write(&resolved_path, &content)?;
+            println!("{} {}", "Schema written to:".green(), resolved_path.display());
         }
         None => {
             println!("{}", content);

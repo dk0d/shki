@@ -12,7 +12,7 @@ pub async fn cmd_create(
     with_down: bool,
     open_editor: bool,
 ) -> Result<()> {
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 
@@ -23,8 +23,10 @@ pub async fn cmd_create(
     let initial_sql = if let Some(sql_content) = sql {
         Some(sql_content.to_string())
     } else if let Some(file_path) = sql_file {
+        // Resolve the SQL file path relative to the project root
+        let resolved_path = config.resolve_path(file_path);
         Some(
-            std::fs::read_to_string(file_path)
+            std::fs::read_to_string(&resolved_path)
                 .map_err(|e| ShkiError::config(format!("Failed to read SQL file: {}", e)))?,
         )
     } else {

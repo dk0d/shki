@@ -26,17 +26,26 @@ pub fn cmd_codegen(
     verbose: Option<bool>,
     language: CodegenLanguage,
 ) -> Result<()> {
+    // Resolve schema path relative to project root if provided
     let snapshot = match schema {
-        Some(schema_path) => Snapshot::from_path(&schema_path)?,
+        Some(schema_path) => {
+            let resolved_schema = config.resolve_path(&schema_path);
+            Snapshot::from_path(&resolved_schema)?
+        }
         None => Snapshot::from_config(config)?,
     };
+
+    // Resolve output path: CLI arg > config value, both resolved relative to root
+    let resolved_output = output
+        .map(|p| config.resolve_path(&p))
+        .or_else(|| config.codegen_out_dir());
 
     let gen_config = &config
         .codegen
         .clone()
         .mode(mode)
         .verbose(verbose)
-        .output_dir(output);
+        .output_dir(resolved_output);
 
     match language {
         CodegenLanguage::Rust => {

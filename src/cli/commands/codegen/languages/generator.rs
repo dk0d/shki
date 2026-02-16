@@ -122,8 +122,7 @@ mod tests {
 
     #[test]
     fn test_transform_struct_name_with_prefix() {
-        let mut config = CodegenConfig::default();
-        config.struct_prefix = Some("Db".to_string());
+        let config = CodegenConfig::default().struct_prefix(Some("Db".to_string()));
 
         assert_eq!(
             TestGenerator::transform_struct_name("users", &config),
@@ -133,8 +132,7 @@ mod tests {
 
     #[test]
     fn test_transform_struct_name_with_suffix() {
-        let mut config = CodegenConfig::default();
-        config.struct_suffix = Some("Entity".to_string());
+        let config = CodegenConfig::default().struct_suffix(Some("Entity".to_string()));
 
         assert_eq!(
             TestGenerator::transform_struct_name("users", &config),
@@ -144,9 +142,9 @@ mod tests {
 
     #[test]
     fn test_transform_struct_name_with_prefix_and_suffix() {
-        let mut config = CodegenConfig::default();
-        config.struct_prefix = Some("Db".to_string());
-        config.struct_suffix = Some("Entity".to_string());
+        let config = CodegenConfig::default()
+            .struct_prefix(Some("Db".to_string()))
+            .struct_suffix(Some("Entity".to_string()));
 
         assert_eq!(
             TestGenerator::transform_struct_name("users", &config),
@@ -183,9 +181,9 @@ mod tests {
 
     #[test]
     fn test_transform_enum_name_with_prefix_and_suffix() {
-        let mut config = CodegenConfig::default();
-        config.enum_prefix = Some("Db".to_string());
-        config.enum_suffix = Some("Type".to_string());
+        let config = CodegenConfig::default()
+            .enum_prefix(Some("Db".to_string()))
+            .enum_suffix(Some("Type".to_string()));
 
         assert_eq!(
             TestGenerator::transform_enum_name("user_status", &config),

@@ -111,7 +111,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
         println!("{}", "No database url found".bright_yellow());
     }
 
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table);
 
     display_migrations(&migration_manager, config).await

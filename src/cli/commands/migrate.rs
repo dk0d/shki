@@ -21,7 +21,7 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
         .connect(db_url)
         .await?;
 
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 

@@ -15,9 +15,11 @@ pub async fn cmd_diff(
 
     // Load desired schema from file if provided, otherwise use latest snapshot
     let desired_snapshot = if let Some(path) = schema_path {
-        load_schema_from_file(path)?.into()
+        // Resolve the schema path relative to the project root
+        let resolved_path = config.resolve_path(path);
+        load_schema_from_file(&resolved_path)?.into()
     } else {
-        let migration_manager = MigrationManager::new(&config.out, config.dialect);
+        let migration_manager = MigrationManager::new(config.out_dir(), config.dialect);
         migration_manager
             .load_latest_snapshot()?
             .unwrap_or_else(|| Snapshot::new(config.dialect))

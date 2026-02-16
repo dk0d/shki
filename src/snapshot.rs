@@ -3,15 +3,13 @@
 //! Snapshots are JSON representations of the database schema at a point in time.
 //! They are used to compute diffs between schema versions.
 
-use std::path::PathBuf;
-
 use chrono::{DateTime, Utc};
 use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::ShkiError;
 use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
+use crate::ShkiError;
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,7 +284,7 @@ impl Snapshot {
                      - Configure schema patterns in shki.toml under 'schema'",
             ));
         }
-        let path = PathBuf::from(&config.schema);
+        let path = config.schema_path();
         Self::from_path(&path)
     }
 

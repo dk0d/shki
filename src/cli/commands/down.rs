@@ -12,7 +12,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
 
     let pool = create_any_pool(db_url).await;
 
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 

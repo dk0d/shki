@@ -3,17 +3,20 @@
 //! This module provides configuration structures for the CLI and library.
 
 use figment::{
-    Figment,
     providers::{Env, Format, Toml},
+    Figment,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{ShkiError, commands::codegen::CodegenConfig, schema::SchemaDialect};
+use crate::{commands::codegen::CodegenConfig, schema::SchemaDialect, ShkiError};
 
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Project root directory
+    pub root: PathBuf,
+
     /// Database dialect
     pub dialect: SchemaDialect,
 
@@ -55,6 +58,10 @@ pub struct Config {
 
 fn default_timeout() -> u64 {
     2
+}
+
+fn default_root() -> PathBuf {
+    PathBuf::from("./")
 }
 
 fn default_out() -> PathBuf {
@@ -141,6 +148,7 @@ pub enum IdentifierCasing {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            root: default_root(),
             dialect: SchemaDialect::Postgres,
             schema: "init.lua".to_string(),
             out: default_out(),
@@ -184,5 +192,33 @@ impl Config {
             .map_err(|e| ShkiError::config(format!("Failed to serialize config: {}", e)))?;
         std::fs::write(path, content)?;
         Ok(())
+    }
+
+    /// Resolve a path relative to the project root.
+    ///
+    /// If the path is absolute, it is returned as-is.
+    /// If the path is relative, it is joined with the root directory.
+    pub fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> PathBuf {
+        let path = path.as_ref();
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root.join(path)
+        }
+    }
+
+    /// Get the resolved output directory for migrations
+    pub fn out_dir(&self) -> PathBuf {
+        self.resolve_path(&self.out)
+    }
+
+    /// Get the resolved schema path
+    pub fn schema_path(&self) -> PathBuf {
+        self.resolve_path(&self.schema)
+    }
+
+    /// Get the resolved codegen output directory (if configured)
+    pub fn codegen_out_dir(&self) -> Option<PathBuf> {
+        self.codegen.output.as_ref().map(|p| self.resolve_path(p))
     }
 }

@@ -6,7 +6,7 @@ use crate::{Config, MigrationManager, Result, ShkiError};
 
 /// Drop a migration file
 pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()> {
-    let migration_manager = MigrationManager::new(&config.out, config.dialect);
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect);
     let migrations = migration_manager.list_migrations()?;
 
     if migrations.is_empty() {

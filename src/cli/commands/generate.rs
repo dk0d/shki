@@ -10,13 +10,15 @@ pub fn cmd_generate_sql(
 ) -> Result<()> {
     println!("{}", "Loading schema definitions...".cyan());
     let desired_snapshot = if let Some(path) = schema_path {
-        Snapshot::from_path(&path)?
+        // Resolve the schema path relative to the project root
+        let resolved_path = config.resolve_path(&path);
+        Snapshot::from_path(&resolved_path)?
     } else {
         Snapshot::from_config(config)?
     };
 
     // Load previous snapshot from migrations/_meta/
-    let migration_manager = MigrationManager::new(&config.out, config.dialect)
+    let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 
