@@ -6,7 +6,9 @@
 mod generator;
 pub mod protobuf;
 pub mod rust;
+pub mod typescript;
 
 pub use generator::{singularize, CodeGenerator};
 pub use protobuf::*;
 pub use rust::*;
+pub use typescript::*;

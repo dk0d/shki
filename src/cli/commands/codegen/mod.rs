@@ -15,7 +15,7 @@ use crate::snapshot::Snapshot;
 use crate::{Config, Result};
 use std::path::PathBuf;
 
-use languages::{CodeGenerator, ProtobufWriter, RustWriter};
+use languages::{CodeGenerator, ProtobufWriter, RustWriter, TypeScriptWriter};
 use writer::CodeWriter;
 
 pub fn cmd_codegen(
@@ -60,6 +60,24 @@ pub fn cmd_codegen(
         CodegenLanguage::Protobuf => {
             let generated = languages::ProtobufGenerator::generate(&snapshot, gen_config);
             let writer = ProtobufWriter;
+
+            if gen_config.verbose {
+                println!("{}", writer.format_preview(&generated));
+            }
+
+            if gen_config.output.is_none() {
+                println!(
+                    "{}",
+                    "Generation skipped: no output path specified.".yellow()
+                );
+                return Ok(());
+            }
+
+            writer.write(&generated, gen_config)?;
+        }
+        CodegenLanguage::TypeScript => {
+            let generated = languages::TypeScriptGenerator::generate(&snapshot, gen_config);
+            let writer = TypeScriptWriter;
 
             if gen_config.verbose {
                 println!("{}", writer.format_preview(&generated));

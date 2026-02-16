@@ -131,6 +131,10 @@ pub enum CodegenLanguage {
     /// Generate Protocol Buffer definitions (.proto files)
     #[value(name = "proto", alias = "protobuf")]
     Protobuf,
+
+    /// Generate TypeScript interfaces and enums
+    #[value(name = "ts", alias = "typescript")]
+    TypeScript,
 }
 
 /// CLI commands
