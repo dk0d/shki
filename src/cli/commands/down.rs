@@ -31,7 +31,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
     // Determine how many to rollback
     let to_rollback: Vec<_> = match count {
         Some(n) => rollback_migrations.into_iter().take(n).collect(),
-        None => rollback_migrations,
+        None => rollback_migrations.into_iter().take(1).collect(),
     };
 
     println!(
