@@ -25,8 +25,6 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 
-    display_migrations(&migration_manager, config).await?;
-
     if dry_run {
         println!("\n{}", "(dry run - no changes applied)".cyan());
         return Ok(());
@@ -35,7 +33,7 @@ pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
     let applied = migration_manager.apply_all(&pool).await?;
 
     println!(
-        "\n\n{} migration(s) applied\n\n",
+        "{} migration(s) applied\n\n",
         applied.len().to_string().green()
     );
 
