@@ -9,9 +9,11 @@ use petname::Generator;
 use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
 use sqlx::prelude::FromRow;
+use tabled::{Tabled, derive::display};
 
 use crate::checksum::sql_checksum;
 use crate::config::MigrationPrefix;
+use crate::error::{MismatchDetail, SnapshotValidationSummary};
 use crate::schema::SchemaDialect;
 use crate::snapshot::Snapshot;
 use crate::{Result, ShkiError};
@@ -74,7 +76,7 @@ pub struct MigrationManager {
     pub dialect: SchemaDialect,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, Tabled)]
 pub struct MigrationRow {
     pub id: i64,
     pub name: String,
@@ -249,12 +251,12 @@ impl MigrationManager {
         up_content.push('\n');
         up_content.push_str(up_sql);
 
-        std::fs::write(&up_path, up_content)?;
+        std::fs::write(&up_path, &up_content)?;
 
         // Write down migration if provided
         let down_path = if let Some(down) = down_sql {
             let path = self.out_dir.join(format!("{}.down.sql", name));
-            
+
             let mut down_content = String::new();
             down_content.push_str(&format!("-- Migration: {} (down)\n", name));
             down_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
@@ -269,8 +271,12 @@ impl MigrationManager {
             None
         };
 
-        // Save the new snapshot
-        to_snapshot.save(&self.out_dir)?;
+        // Save the new snapshot with migration metadata
+        // Use the full file content checksum so it matches what gets stored when applied.
+        let snapshot_with_migration = to_snapshot
+            .clone()
+            .with_migration(name.clone(), sql_checksum(&up_content));
+        snapshot_with_migration.save(&self.out_dir)?;
 
         Ok((up_path, down_path))
     }
@@ -314,6 +320,158 @@ impl MigrationManager {
             .collect();
 
         Ok(pending)
+    }
+
+    /// Validate checksums of applied migrations against the migration files
+    ///
+    /// Returns an error if any applied migration's checksum doesn't match the
+    /// current file's checksum. This detects if migration files have been
+    /// modified after being applied.
+    ///
+    /// Migrations that were applied before checksum tracking (with null checksums)
+    /// are skipped.
+    pub async fn validate_checksums(&self, pool: &AnyPool) -> Result<()> {
+        let applied = self.get_applied_migrations(pool).await?;
+
+        for migration in applied {
+            // Skip migrations without checksums (applied before checksum tracking)
+            let Some(stored_checksum) = migration.checksum else {
+                continue;
+            };
+
+            // Find the migration file
+            let migration_path = self.out_dir.join(format!("{}.sql", migration.name));
+            if !migration_path.exists() {
+                // Migration file not found - could be intentionally removed
+                // We don't error here since the migration was already applied
+                continue;
+            }
+
+            // Calculate current checksum
+            let sql = std::fs::read_to_string(&migration_path)?;
+            let current_checksum = sql_checksum(&sql);
+
+            // Compare checksums
+            if stored_checksum != current_checksum {
+                return Err(ShkiError::checksum_mismatch(
+                    &migration.name,
+                    &stored_checksum,
+                    &current_checksum,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate snapshots against their associated migration files
+    ///
+    /// Checks that each snapshot's stored migration checksum matches the
+    /// current checksum of the corresponding migration file. This detects
+    /// if migration files have been modified after the snapshots were created.
+    ///
+    /// Returns an error with a detailed summary if any mismatches are found.
+    pub fn validate_snapshots(&self) -> Result<()> {
+        let snapshots = Snapshot::load_all(&self.out_dir)?;
+
+        let total_snapshots = snapshots.len();
+        let mut snapshots_with_migrations = 0;
+        let mut mismatches = Vec::new();
+
+        for snapshot in snapshots {
+            // Skip snapshots without migration info
+            let Some(ref migration_info) = snapshot.migration else {
+                continue;
+            };
+
+            snapshots_with_migrations += 1;
+
+            // Find the migration file
+            let migration_path = self.out_dir.join(format!("{}.sql", migration_info.name));
+
+            if !migration_path.exists() {
+                mismatches.push(MismatchDetail {
+                    snapshot_id: snapshot.id.clone(),
+                    migration_name: migration_info.name.clone(),
+                    snapshot_checksum: migration_info.checksum.clone(),
+                    file_checksum: None,
+                    issue: "Migration file not found".to_string(),
+                });
+                continue;
+            }
+
+            // Calculate current checksum
+            let sql = std::fs::read_to_string(&migration_path)?;
+            let current_checksum = sql_checksum(&sql);
+
+            // Compare checksums
+            if migration_info.checksum != current_checksum {
+                mismatches.push(MismatchDetail {
+                    snapshot_id: snapshot.id.clone(),
+                    migration_name: migration_info.name.clone(),
+                    snapshot_checksum: migration_info.checksum.clone(),
+                    file_checksum: Some(current_checksum),
+                    issue: "Checksum mismatch - migration file has been modified".to_string(),
+                });
+            }
+        }
+
+        if !mismatches.is_empty() {
+            return Err(ShkiError::snapshot_validation(SnapshotValidationSummary {
+                total_snapshots,
+                snapshots_with_migrations,
+                mismatches,
+            }));
+        }
+
+        Ok(())
+    }
+
+    /// Find applied migrations that don't have corresponding snapshots
+    ///
+    /// Returns a list of migration names that exist in the database but don't
+    /// have a snapshot with matching migration info and a list of migrations in the
+    /// DB that have matching checksums to snapshots.
+    ///
+    /// Checksum matching can indicate that the name of the migration has changed, but the
+    /// sql content in the migration is still the same.
+    ///
+    /// This is really just a nice to have and any actual resolution will require
+    /// manual intervention to ensure data integrity
+    pub async fn find_migrations_without_snapshots(
+        &self,
+        pool: &AnyPool,
+    ) -> Result<(Vec<MigrationRow>, Vec<MigrationRow>, Vec<(String, String)>)> {
+        let applied = self.get_applied_migrations(pool).await?;
+        let snapshots = Snapshot::load_all(&self.out_dir)?;
+
+        // Build a set of migration names that have snapshots
+        let snapshot_names: std::collections::HashSet<String> = snapshots
+            .iter()
+            .filter_map(|s| s.migration.as_ref())
+            .map(|m| m.name.clone())
+            .collect();
+
+        // Find applied migrations without snapshots
+        let missing: Vec<MigrationRow> = applied
+            .iter()
+            .filter(|m| !snapshot_names.contains(&m.name))
+            .cloned()
+            .collect();
+
+        // get (migration, snapshot) names where checksums match
+        let checksums_match = missing
+            .iter()
+            .filter_map(|m| {
+                snapshots
+                    .iter()
+                    .filter_map(|s| s.migration.as_ref())
+                    .find(|info| m.checksum.as_ref().is_some_and(|c| c == &info.checksum))
+                    .map(|info| (m.name.clone(), info.name.clone()))
+            })
+            .collect();
+
+        Ok((applied, missing, checksums_match))
     }
 
     /// Apply a single migration within a transaction
@@ -367,7 +525,17 @@ impl MigrationManager {
     }
 
     /// Apply all pending migrations
+    ///
+    /// Validates both snapshots and applied migration checksums before applying
+    /// new ones. If any checksum mismatch is detected, the operation fails before
+    /// any new migrations are applied.
     pub async fn apply_all(&self, pool: &AnyPool) -> Result<Vec<String>> {
+        // Validate snapshots against migration files first
+        self.validate_snapshots()?;
+
+        // Validate checksums of already-applied migrations
+        self.validate_checksums(pool).await?;
+
         let pending = self.get_pending_migrations(pool).await?;
         let mut applied = Vec::new();
 
@@ -1415,6 +1583,23 @@ ALTER TABLE users ADD COLUMN name TEXT;
         assert!(down_name.ends_with(".down.sql"));
         assert!(up_name.contains("create_users"));
         assert!(down_name.contains("create_users"));
+
+        // Verify snapshot includes migration metadata with checksum
+        let latest_snapshot = crate::Snapshot::load_latest(temp_dir.path())
+            .expect("failed to load latest snapshot")
+            .expect("expected latest snapshot");
+        let migration_info = latest_snapshot
+            .migration
+            .expect("snapshot should include migration metadata");
+
+        let expected_name = up_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("invalid migration filename");
+        let expected_checksum = crate::checksum::sql_checksum(&up_content);
+
+        assert_eq!(migration_info.name, expected_name);
+        assert_eq!(migration_info.checksum, expected_checksum);
     }
 
     #[test]
@@ -1442,9 +1627,173 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
         // Verify no down migration was created
         assert!(down_path.is_none());
-        
+
         // Double-check that no .down.sql file exists
         let down_file = manager.get_down_migration_path(&up_path);
         assert!(!down_file.exists());
+
+        // Verify snapshot includes migration metadata
+        let latest_snapshot = crate::Snapshot::load_latest(temp_dir.path())
+            .expect("failed to load latest snapshot")
+            .expect("expected latest snapshot");
+        let migration_info = latest_snapshot
+            .migration
+            .expect("snapshot should include migration metadata");
+
+        let expected_name = up_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("invalid migration filename");
+
+        assert_eq!(migration_info.name, expected_name);
+        assert_eq!(migration_info.checksum.len(), 64);
+    }
+
+    // ==================== Snapshot Validation Tests ====================
+
+    #[test]
+    fn test_validate_snapshots_empty_dir() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        // Should pass with no snapshots
+        manager
+            .validate_snapshots()
+            .expect("validation should pass with empty dir");
+    }
+
+    #[test]
+    fn test_validate_snapshots_no_migration_info() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        // Create a snapshot without migration info
+        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres);
+        snapshot
+            .save(temp_dir.path())
+            .expect("failed to save snapshot");
+
+        // Should pass - snapshots without migration info are skipped
+        manager
+            .validate_snapshots()
+            .expect("validation should pass");
+    }
+
+    #[test]
+    fn test_validate_snapshots_matching_checksum() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        // Create a migration file
+        let sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let migration_path = temp_dir.path().join("0000_test.sql");
+        fs::write(&migration_path, sql).expect("failed to write migration");
+
+        // Calculate the checksum
+        let checksum = crate::checksum::sql_checksum(sql);
+
+        // Create a snapshot with matching migration info
+        let snapshot =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_test", &checksum);
+        snapshot
+            .save(temp_dir.path())
+            .expect("failed to save snapshot");
+
+        // Should pass - checksum matches
+        manager
+            .validate_snapshots()
+            .expect("validation should pass");
+    }
+
+    #[test]
+    fn test_validate_snapshots_checksum_mismatch() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        // Create a migration file
+        let sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let migration_path = temp_dir.path().join("0000_test.sql");
+        fs::write(&migration_path, sql).expect("failed to write migration");
+
+        // Create a snapshot with wrong checksum
+        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+            "0000_test",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        snapshot
+            .save(temp_dir.path())
+            .expect("failed to save snapshot");
+
+        // Should fail - checksum mismatch
+        let result = manager.validate_snapshots();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_string = err.to_string();
+        assert!(err_string.contains("Snapshot validation failed"));
+    }
+
+    #[test]
+    fn test_validate_snapshots_missing_migration_file() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        // Create a snapshot referencing a non-existent migration
+        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+            "0000_nonexistent",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        snapshot
+            .save(temp_dir.path())
+            .expect("failed to save snapshot");
+
+        // Should fail - migration file not found
+        let result = manager.validate_snapshots();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_string = err.to_string();
+        assert!(err_string.contains("Snapshot validation failed"));
+    }
+
+    #[test]
+    fn test_validate_snapshots_multiple_snapshots_mixed() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        // Create migration files
+        let sql1 = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let sql2 = "CREATE TABLE posts (id SERIAL PRIMARY KEY);";
+        fs::write(temp_dir.path().join("0000_users.sql"), sql1).expect("failed to write");
+        fs::write(temp_dir.path().join("0001_posts.sql"), sql2).expect("failed to write");
+
+        let checksum1 = crate::checksum::sql_checksum(sql1);
+
+        // Create snapshots - one matching, one mismatched
+        let snapshot1 =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_users", &checksum1);
+        snapshot1
+            .save(temp_dir.path())
+            .expect("failed to save snapshot1");
+
+        // Wait a tiny bit to ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let snapshot2 = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+            "0001_posts",
+            "wrongchecksum0000000000000000000000000000000000000000000000000000",
+        );
+        snapshot2
+            .save(temp_dir.path())
+            .expect("failed to save snapshot2");
+
+        // Should fail - one mismatch
+        let result = manager.validate_snapshots();
+        assert!(result.is_err());
     }
 }

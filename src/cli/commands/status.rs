@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::MigrationManager;
+use crate::MigrationRow;
 use crate::Result;
+use crate::Snapshot;
 use crate::config::Config;
 use colored::Colorize;
 use tabled::{
@@ -20,12 +22,21 @@ pub struct MigrationState {
     name: String,
     down: String,
     applied_at: String,
+    checksum: String,
 }
 
 pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> Result<()> {
     let all_migrations = manager.list_migrations()?;
+
     if all_migrations.is_empty() {
         println!("{}", "No migrations found".yellow());
+        return Ok(());
+    }
+
+    let snapshots = Snapshot::load_all(&config.out_dir())?;
+
+    if snapshots.is_empty() {
+        println!("{}", "No snapshots found".red());
         return Ok(());
     }
 
@@ -67,9 +78,32 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
             // Check if down migration exists
             let has_down = manager.has_down_migration(path);
 
+            let checksum = if let Some(a) = applied.as_ref() {
+                a.iter()
+                    .find(|m| m.name == name)
+                    .map(|m| m.checksum.clone())
+                    .unwrap_or_default()
+            } else {
+                Some("".to_string())
+            };
+
+            let snapshot = snapshots
+                .iter()
+                .find(|s| s.migration.as_ref().is_some_and(|m| m.name == name));
+            let snapshot_checksum: Option<String> = if let Some(s) = snapshot
+                && let Some(m) = &s.migration
+            {
+                Some(m.checksum.clone())
+            } else {
+                None
+            };
+
             MigrationState {
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
+                checksum: checksum
+                    .map(|c| format!("{}...", &c[..5]))
+                    .unwrap_or(snapshot_checksum.unwrap_or_default()),
                 down: if has_down {
                     format!(" {}", DOWN_SYMBOL.cyan())
                 } else {
@@ -103,6 +137,15 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
     Ok(())
 }
 
+pub fn display_migration_rows(migrations: &[MigrationRow]) {
+    let mut table = Table::new(migrations);
+    table
+        .with(Style::psql())
+        .modify(Columns::new(0..), Color::FG_BLUE);
+
+    println!("{}", table);
+}
+
 /// Show migration status
 pub async fn cmd_status(config: &Config) -> Result<()> {
     if let Some(url) = config.database_url.as_ref() {
@@ -114,5 +157,92 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table);
 
-    display_migrations(&migration_manager, config).await
+    display_migrations(&migration_manager, config).await?;
+
+    // Perform validation checks
+    let mut has_errors = false;
+    let mut has_warnings = false;
+
+    // Validate snapshots against migration files
+    if let Err(e) = migration_manager.validate_snapshots() {
+        println!();
+        println!("{}", "Snapshot Validation Failed".red().bold());
+        println!("{}", e);
+        has_errors = true;
+    }
+
+    // Validate applied migration checksums if database is available
+    if let Some(db_url) = config.database_url.as_ref() {
+        let pool = create_any_pool_opts()
+            .max_connections(2)
+            .acquire_timeout(Duration::from_secs(config.timeout_seconds))
+            .connect(db_url)
+            .await?;
+
+        if let Err(e) = migration_manager.validate_checksums(&pool).await {
+            println!();
+            println!("{}", "Checksum Validation Failed".red().bold());
+            println!("{}", e);
+            has_errors = true;
+        }
+
+        // Check for migrations without snapshots
+        let (applied, missing_snapshots, checksums_match) = migration_manager
+            .find_migrations_without_snapshots(&pool)
+            .await?;
+
+        if !missing_snapshots.is_empty() {
+            println!();
+            println!();
+            println!("{}", "Database State".bright_red().bold());
+
+            display_migration_rows(&applied);
+
+            println!();
+            println!(
+                "{}: Applied migrations without snapshots",
+                "Warning".yellow().bold()
+            );
+            println!(
+                "The following migrations exist in the database but don't have corresponding snapshots:"
+            );
+            for row in &missing_snapshots {
+                println!(
+                    "  - {} ({})",
+                    row.name.yellow(),
+                    row.checksum.clone().unwrap_or_default().dimmed()
+                );
+            }
+            println!();
+
+            if !checksums_match.is_empty() {
+                println!();
+                println!(
+                    "{}: There are migrations with mismatched names but matching checksums",
+                    "NOTE".bright_blue().bold()
+                );
+                for (migration_name, snapshot_name) in &checksums_match {
+                    println!(
+                        "  - {} ({})",
+                        migration_name.yellow(),
+                        snapshot_name.dimmed()
+                    );
+                }
+            }
+            has_warnings = true;
+        }
+    }
+
+    if has_errors {
+        println!();
+        println!(
+            "{}",
+            "Validation errors found. Please resolve before running migrations.".red()
+        );
+    } else if has_warnings {
+        println!();
+        println!("{}", "Warnings found. Review the issues above.".yellow());
+    }
+
+    Ok(())
 }
