@@ -4,16 +4,18 @@ pub mod sqlite;
 
 use crate::SchemaDialect;
 
+fn qualified_table(schema_name: Option<&str>, table_name: &str) -> String {
+    schema_name
+        .map(|schema| format!("\"{}\".\"{}\"", schema, table_name))
+        .unwrap_or_else(|| format!("\"{}\"", table_name))
+}
+
 pub fn delete_table(
     dialect: &SchemaDialect,
-    schema_name: &Option<String>,
-    table_name: &String,
+    schema_name: Option<&str>,
+    table_name: &str,
 ) -> String {
-    // Build the SQL for removing the migration record
-    let table_name = match &schema_name {
-        Some(s) => format!("\"{}\".\"{}\"", s, table_name),
-        None => format!("\"{}\"", table_name),
-    };
+    let table_name = qualified_table(schema_name, table_name);
 
     match dialect {
         SchemaDialect::Postgres | SchemaDialect::Sqlite => {
@@ -27,13 +29,10 @@ pub fn delete_table(
 
 pub fn select_migrations(
     dialect: &SchemaDialect,
-    schema_name: &Option<String>,
-    table_name: &String,
+    schema_name: Option<&str>,
+    table_name: &str,
 ) -> String {
-    let table_name = match &schema_name {
-        Some(s) => format!("\"{}\".\"{}\"", s, table_name),
-        None => format!("\"{}\"", table_name),
-    };
+    let table_name = qualified_table(schema_name, table_name);
 
     match dialect {
         SchemaDialect::Postgres => format!(
@@ -54,17 +53,17 @@ pub fn select_migrations(
 
 pub fn insert_migration(
     dialect: &SchemaDialect,
-    schema_name: &Option<String>,
-    table_name: &String,
+    schema_name: Option<&str>,
+    table_name: &str,
 ) -> String {
-    let table_name = match &schema_name {
-        Some(s) => format!("\"{}\".\"{}\"", s, table_name),
-        None => format!("\"{}\"", table_name),
-    };
+    let table_name = qualified_table(schema_name, table_name);
 
     match dialect {
         SchemaDialect::Postgres => {
-            format!("INSERT INTO {} (name, checksum) VALUES ($1, $2)", table_name)
+            format!(
+                "INSERT INTO {} (name, checksum) VALUES ($1, $2)",
+                table_name
+            )
         }
         SchemaDialect::Mysql => {
             format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name)
@@ -77,13 +76,10 @@ pub fn insert_migration(
 
 pub fn ensure_migrations(
     dialect: &SchemaDialect,
-    schema_name: &Option<String>,
-    table_name: &String,
+    schema_name: Option<&str>,
+    table_name: &str,
 ) -> String {
-    let table_name = match &schema_name {
-        Some(s) => format!("\"{}\".\"{}\"", s, table_name),
-        None => format!("\"{}\"", table_name),
-    };
+    let table_name = qualified_table(schema_name, table_name);
 
     // use text for `applied_at` for simplicity across dialects
     // allows us to use AnyPool more easily
@@ -132,26 +128,19 @@ pub fn ensure_migrations(
 /// that were applied before checksum tracking was added.
 pub fn alter_migrations_add_checksum(
     dialect: &SchemaDialect,
-    schema_name: &Option<String>,
-    table_name: &String,
+    schema_name: Option<&str>,
+    table_name: &str,
 ) -> String {
-    let table_name = match &schema_name {
-        Some(s) => format!("\"{}\".\"{}\"", s, table_name),
-        None => format!("\"{}\"", table_name),
-    };
+    let table_name = qualified_table(schema_name, table_name);
 
     match dialect {
         SchemaDialect::Postgres => format!(
             "ALTER TABLE {} ADD COLUMN IF NOT EXISTS checksum VARCHAR(64)",
             table_name
         ),
-        SchemaDialect::Mysql => format!(
-            "ALTER TABLE {} ADD COLUMN checksum VARCHAR(64)",
-            table_name
-        ),
-        SchemaDialect::Sqlite => format!(
-            "ALTER TABLE {} ADD COLUMN checksum TEXT",
-            table_name
-        ),
+        SchemaDialect::Mysql => {
+            format!("ALTER TABLE {} ADD COLUMN checksum VARCHAR(64)", table_name)
+        }
+        SchemaDialect::Sqlite => format!("ALTER TABLE {} ADD COLUMN checksum TEXT", table_name),
     }
 }

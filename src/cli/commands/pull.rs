@@ -3,6 +3,7 @@ use crate::Config;
 use crate::{Result, ShkiError, Snapshot, diff::diff_snapshots, sql::SqlGenerator};
 
 use colored::Colorize;
+use std::fmt::Write as _;
 
 /// Pull (introspect) the database schema
 pub async fn cmd_pull(
@@ -43,7 +44,11 @@ pub async fn cmd_pull(
             // Resolve the output path relative to the project root
             let resolved_path = config.resolve_path(path);
             std::fs::write(&resolved_path, &content)?;
-            println!("{} {}", "Schema written to:".green(), resolved_path.display());
+            println!(
+                "{} {}",
+                "Schema written to:".green(),
+                resolved_path.display()
+            );
         }
         None => {
             println!("{}", content);
@@ -62,23 +67,30 @@ fn generate_rust_schema(snapshot: &Snapshot) -> Result<String> {
 
     // Generate enums
     for enum_snapshot in snapshot.enums.values() {
-        code.push_str(&format!("// Enum: {}\n", enum_snapshot.name));
-        code.push_str(&format!("// Values: {:?}\n\n", enum_snapshot.values));
+        writeln!(&mut code, "// Enum: {}", enum_snapshot.name)
+            .expect("writing to String cannot fail");
+        writeln!(&mut code, "// Values: {:?}", enum_snapshot.values)
+            .expect("writing to String cannot fail");
+        writeln!(&mut code).expect("writing to String cannot fail");
     }
 
     // Generate table definitions
     for table in snapshot.tables.values() {
-        code.push_str(&format!("// Table: {}\n", table.name));
-        code.push_str(&format!("pub fn {}() -> Table {{\n", table.name));
-        code.push_str(&format!("    TableBuilder::new(\"{}\")\n", table.name));
+        writeln!(&mut code, "// Table: {}", table.name).expect("writing to String cannot fail");
+        writeln!(&mut code, "pub fn {}() -> Table {{", table.name)
+            .expect("writing to String cannot fail");
+        writeln!(&mut code, "    TableBuilder::new(\"{}\")", table.name)
+            .expect("writing to String cannot fail");
 
         for col in table.columns.values() {
-            code.push_str(&format!(
-                "        // {}: {}{}\n",
+            writeln!(
+                &mut code,
+                "        // {}: {}{}",
                 col.name,
                 col.data_type,
                 if col.nullable { "" } else { " NOT NULL" }
-            ));
+            )
+            .expect("writing to String cannot fail");
         }
 
         code.push_str("        .build()\n");

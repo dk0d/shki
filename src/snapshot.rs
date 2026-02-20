@@ -389,7 +389,7 @@ impl Snapshot {
             let content = std::fs::read_to_string(entry.path())?;
             snapshots.push(Self::from_json(&content)?);
         }
-        
+
         Ok(snapshots)
     }
 

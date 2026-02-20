@@ -1,6 +1,6 @@
 use crate::{
-    diff_snapshots, rename::apply_renames, Config, MigrationManager, RenameDetector, Result,
-    Snapshot, SqlGenerator,
+    Config, MigrationManager, RenameDetector, Result, Snapshot, SqlGenerator, diff_snapshots,
+    rename::apply_renames,
 };
 use colored::Colorize;
 use std::path::PathBuf;

@@ -5,8 +5,8 @@
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
-use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
 /// Generated Protocol Buffer code
@@ -371,31 +371,29 @@ impl ToShoutySnakeCase for str {
 impl std::fmt::Display for GeneratedProto {
     /// Format the generated proto as a complete .proto file
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // pub fn to_string(&self) -> String {
-        // let mut output = String::new();
-
-        // Syntax declaration
-        let _ = write!(f, "syntax = \"proto3\";\n\n");
-
-        // Package
-        let _ = write!(f, "package {};", self.package);
+        writeln!(f, "syntax = \"proto3\";")?;
+        writeln!(f, "package {};", self.package)?;
 
         // Imports
         if !self.imports.is_empty() {
-            let _ = write!(f, "\n\n");
+            writeln!(f)?;
             for import in &self.imports {
-                let _ = write!(f, "import \"{}\";", import);
+                writeln!(f, "import \"{}\";", import)?;
             }
+        }
+
+        if !self.enums.is_empty() || !self.messages.is_empty() {
+            writeln!(f)?;
         }
 
         // Enums
         for proto_enum in self.enums.values() {
-            let _ = write!(f, "{}", &proto_enum.to_string());
+            write!(f, "{}", proto_enum)?;
         }
 
         // Messages
         for proto_message in self.messages.values() {
-            let _ = write!(f, "{}", &proto_message.to_string());
+            write!(f, "{}", proto_message)?;
         }
 
         Ok(())
@@ -412,65 +410,52 @@ impl GeneratedProto {
 impl std::fmt::Display for ProtoEnum {
     /// Format the enum as Protocol Buffer syntax
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut output = String::new();
-
-        // Doc comment
         if let Some(comment) = &self.comment {
-            output.push_str(&format!("// {}\n", comment));
+            writeln!(f, "// {}", comment)?;
         }
 
-        output.push_str(&format!("enum {} {{\n", self.name));
+        writeln!(f, "enum {} {{", self.name)?;
 
         for value in &self.values {
             if !value.db_value.is_empty() {
-                output.push_str(&format!("  // DB value: \"{}\"\n", value.db_value));
+                writeln!(f, "  // DB value: \"{}\"", value.db_value)?;
             }
-            output.push_str(&format!("  {} = {};\n", value.name, value.number));
+            writeln!(f, "  {} = {};", value.name, value.number)?;
         }
 
-        output.push_str("}\n");
-
-        write!(f, "{}", output)
+        writeln!(f, "}}")
     }
 }
 
 impl std::fmt::Display for ProtoMessage {
     /// Format the message as Protocol Buffer syntax
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut output = String::new();
-
-        // Doc comment
         if let Some(comment) = &self.comment {
-            output.push_str(&format!("// {}\n", comment));
+            writeln!(f, "// {}", comment)?;
         }
 
         // Table name annotation
-        output.push_str(&format!("// Table: {}\n", self.table_name));
-        output.push_str(&format!("message {} {{\n", self.name));
+        writeln!(f, "// Table: {}", self.table_name)?;
+        writeln!(f, "message {} {{", self.name)?;
 
         for field in &self.fields {
-            output.push_str(&field.to_string());
+            write!(f, "{}", field)?;
         }
 
-        output.push_str("}\n");
-
-        write!(f, "{}", output)
+        writeln!(f, "}}")
     }
 }
 
 impl std::fmt::Display for ProtoField {
     /// Format the field as Protocol Buffer syntax
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut output = String::new();
-
-        // Doc comment
         if let Some(comment) = &self.comment {
-            output.push_str(&format!("  // {}\n", comment));
+            writeln!(f, "  // {}", comment)?;
         }
 
         // Column name annotation if different
         if self.name != self.db_name {
-            output.push_str(&format!("  // Column: {}\n", self.db_name));
+            writeln!(f, "  // Column: {}", self.db_name)?;
         }
 
         // Field definition
@@ -482,12 +467,11 @@ impl std::fmt::Display for ProtoField {
             ""
         };
 
-        output.push_str(&format!(
-            "  {}{} {} = {};\n",
+        writeln!(
+            f,
+            "  {}{} {} = {};",
             modifier, self.proto_type, self.name, self.number
-        ));
-
-        write!(f, "{}", output)
+        )
     }
 }
 

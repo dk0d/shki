@@ -8,8 +8,8 @@ use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
-use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
 /// A generated Rust enum

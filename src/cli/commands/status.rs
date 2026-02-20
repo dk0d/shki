@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::MigrationManager;
@@ -53,11 +53,15 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         None
     };
 
-    let applied_set: std::collections::HashSet<String> = if let Some(a) = applied.as_ref() {
-        a.iter().map(|m| m.name.clone()).collect()
-    } else {
-        HashSet::new()
-    };
+    let applied_set: HashSet<&str> = applied
+        .as_deref()
+        .map(|rows| rows.iter().map(|m| m.name.as_str()).collect())
+        .unwrap_or_default();
+
+    let applied_by_name: HashMap<&str, &MigrationRow> = applied
+        .as_deref()
+        .map(|rows| rows.iter().map(|m| (m.name.as_str(), m)).collect())
+        .unwrap_or_default();
 
     println!("\n{}\n", "Migration Status".cyan());
 
@@ -78,19 +82,10 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
             // Check if down migration exists
             let has_down = manager.has_down_migration(path);
 
-            let checksum = if let Some(a) = applied.as_ref() {
-                a.iter()
-                    .find(|m| m.name == name)
-                    .map(|m| m.checksum.clone())
-                    .unwrap_or_default()
-            } else {
-                Some("".to_string())
-            };
-
             let snapshot = snapshots
                 .iter()
                 .find(|s| s.migration.as_ref().is_some_and(|m| m.name == name));
-            let snapshot_checksum: Option<String> = if let Some(s) = snapshot
+            let snapshot_checksum = if let Some(s) = snapshot
                 && let Some(m) = &s.migration
             {
                 Some(m.checksum.clone())
@@ -98,25 +93,25 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
                 None
             };
 
+            let checksum = applied_by_name
+                .get(name)
+                .and_then(|m| m.checksum.as_deref())
+                .map(|c| format!("{}...", c.get(..5).unwrap_or(c)))
+                .unwrap_or_else(|| snapshot_checksum.unwrap_or_default());
+
             MigrationState {
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
-                checksum: checksum
-                    .map(|c| format!("{}...", &c[..5]))
-                    .unwrap_or(snapshot_checksum.unwrap_or_default()),
+                checksum,
                 down: if has_down {
                     format!(" {}", DOWN_SYMBOL.cyan())
                 } else {
                     " x".red().to_string()
                 },
-                applied_at: if let Some(a) = applied.as_ref() {
-                    a.iter()
-                        .find(|m| m.name == name)
-                        .map(|m| m.applied_at.clone())
-                        .unwrap_or_default()
-                } else {
-                    "".to_string()
-                },
+                applied_at: applied_by_name
+                    .get(name)
+                    .map(|m| m.applied_at.clone())
+                    .unwrap_or_default(),
             }
         })
         .collect::<Vec<_>>();

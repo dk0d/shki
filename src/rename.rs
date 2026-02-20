@@ -66,10 +66,10 @@ impl fmt::Display for TableId {
 
 /// Format a schema-qualified name for display
 fn format_qualified_name(name: &str, schema: &Option<String>) -> String {
-    match schema {
-        Some(s) => format!("{}.{}", s, name),
-        None => name.to_string(),
-    }
+    schema
+        .as_deref()
+        .map(|s| format!("{}.{}", s, name))
+        .unwrap_or_else(|| name.to_owned())
 }
 
 // ============================================================================
@@ -103,10 +103,12 @@ impl RenameDecisions {
 
     /// Get the new name if a table was renamed
     pub fn get_table_new_name(&self, dropped_name: &str) -> Option<&str> {
-        match self.tables.get(dropped_name) {
-            Some(RenameDecision::Rename { to, .. }) => Some(to.as_str()),
-            _ => None,
-        }
+        self.tables
+            .get(dropped_name)
+            .and_then(|decision| match decision {
+                RenameDecision::Rename { to, .. } => Some(to.as_str()),
+                _ => None,
+            })
     }
 
     /// Get the original table name for a given new table name (if it was renamed)
@@ -123,21 +125,22 @@ impl RenameDecisions {
 
     /// Get the new name if a column was renamed (keyed by original table name)
     pub fn get_column_new_name(&self, table: &str, dropped_column: &str) -> Option<&str> {
-        match self
-            .columns
-            .get(&(table.to_string(), dropped_column.to_string()))
-        {
-            Some(RenameDecision::Rename { to, .. }) => Some(to.as_str()),
-            _ => None,
-        }
+        self.columns
+            .get(&(table.to_owned(), dropped_column.to_owned()))
+            .and_then(|decision| match decision {
+                RenameDecision::Rename { to, .. } => Some(to.as_str()),
+                _ => None,
+            })
     }
 
     /// Get the new name if an enum was renamed
     pub fn get_enum_new_name(&self, dropped_name: &str) -> Option<&str> {
-        match self.enums.get(dropped_name) {
-            Some(RenameDecision::Rename { to, .. }) => Some(to.as_str()),
-            _ => None,
-        }
+        self.enums
+            .get(dropped_name)
+            .and_then(|decision| match decision {
+                RenameDecision::Rename { to, .. } => Some(to.as_str()),
+                _ => None,
+            })
     }
 
     /// Check if a table is the target of a rename
@@ -172,8 +175,8 @@ impl RenameDecisions {
     /// Get the effective table name (after any rename)
     fn effective_table_name(&self, original: &str) -> String {
         self.get_table_new_name(original)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| original.to_string())
+            .unwrap_or(original)
+            .to_owned()
     }
 }
 

@@ -4,11 +4,11 @@ use mlua::{FromLua, Lua, Result as LuaResult, UserData, UserDataMethods, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::schema::index::IndexColumn;
 use crate::schema::Index;
+use crate::schema::index::IndexColumn;
 
-use super::helpers::parse_index_method;
 use super::LuaIndexColumn;
+use super::helpers::parse_index_method;
 
 /// Lua wrapper for IndexBuilder
 #[derive(Clone)]

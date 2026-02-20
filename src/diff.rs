@@ -9,6 +9,7 @@
 //! these into RenameTable/RenameColumn/RenameEnum statements.
 
 use indexmap::IndexMap;
+use std::collections::HashSet;
 
 use crate::Result;
 use crate::schema::SchemaDialect;
@@ -578,11 +579,13 @@ fn diff_enums(
     for (name, enum_to) in to {
         if let Some(enum_from) = from.get(name) {
             // Find new values
-            let mut prev_value: Option<&String> = None;
+            let existing_values: HashSet<&str> =
+                enum_from.values.iter().map(String::as_str).collect();
+            let mut prev_value: Option<&str> = None;
             for value in &enum_to.values {
-                if !enum_from.values.contains(value) {
+                if !existing_values.contains(value.as_str()) {
                     let position = match prev_value {
-                        Some(pv) => EnumValuePosition::After(pv.clone()),
+                        Some(pv) => EnumValuePosition::After(pv.to_owned()),
                         None => EnumValuePosition::End,
                     };
                     statements.push(DiffStatement::AddEnumValue {
@@ -592,7 +595,7 @@ fn diff_enums(
                         position,
                     });
                 }
-                prev_value = Some(value);
+                prev_value = Some(value.as_str());
             }
 
             // Check for description changes
@@ -1196,7 +1199,7 @@ impl std::fmt::Display for DiffSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rename::{apply_renames, RenameDecision, RenameDecisions};
+    use crate::rename::{RenameDecision, RenameDecisions, apply_renames};
     use crate::schema::SchemaDialect;
     use crate::snapshot::{ConstraintType, ForeignKeyReference};
 
@@ -2576,8 +2579,13 @@ mod tests {
         // Without rename decision: should drop old and add new
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 2);
-        let has_drop = diff.statements.iter().any(|s| matches!(s, DiffStatement::DropColumn { column, .. } if column == "old_name"));
-        let has_add = diff.statements.iter().any(|s| matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "new_name"));
+        let has_drop = diff
+            .statements
+            .iter()
+            .any(|s| matches!(s, DiffStatement::DropColumn { column, .. } if column == "old_name"));
+        let has_add = diff.statements.iter().any(
+            |s| matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "new_name"),
+        );
         assert!(has_drop, "Expected DropColumn for old_name");
         assert!(has_add, "Expected AddColumn for new_name");
 
@@ -2594,12 +2602,17 @@ mod tests {
         let diff_with_rename = apply_renames(&diff, &renames);
         assert_eq!(diff_with_rename.statements.len(), 1);
         match &diff_with_rename.statements[0] {
-            DiffStatement::RenameColumn { table, from, to, .. } => {
+            DiffStatement::RenameColumn {
+                table, from, to, ..
+            } => {
                 assert_eq!(table, "users");
                 assert_eq!(from, "old_name");
                 assert_eq!(to, "new_name");
             }
-            _ => panic!("Expected RenameColumn, got {:?}", diff_with_rename.statements[0]),
+            _ => panic!(
+                "Expected RenameColumn, got {:?}",
+                diff_with_rename.statements[0]
+            ),
         }
     }
 
@@ -2620,8 +2633,13 @@ mod tests {
         // Without rename decision: should drop old and create new
         let diff = diff_snapshots(&from, &to).unwrap();
         assert_eq!(diff.statements.len(), 2);
-        let has_drop = diff.statements.iter().any(|s| matches!(s, DiffStatement::DropTable { name, .. } if name == "old_table"));
-        let has_create = diff.statements.iter().any(|s| matches!(s, DiffStatement::CreateTable { table, .. } if table.name == "new_table"));
+        let has_drop = diff
+            .statements
+            .iter()
+            .any(|s| matches!(s, DiffStatement::DropTable { name, .. } if name == "old_table"));
+        let has_create = diff.statements.iter().any(
+            |s| matches!(s, DiffStatement::CreateTable { table, .. } if table.name == "new_table"),
+        );
         assert!(has_drop, "Expected DropTable for old_table");
         assert!(has_create, "Expected CreateTable for new_table");
 
@@ -2642,7 +2660,10 @@ mod tests {
                 assert_eq!(from, "old_table");
                 assert_eq!(to, "new_table");
             }
-            _ => panic!("Expected RenameTable, got {:?}", diff_with_rename.statements[0]),
+            _ => panic!(
+                "Expected RenameTable, got {:?}",
+                diff_with_rename.statements[0]
+            ),
         }
     }
 
@@ -2691,7 +2712,10 @@ mod tests {
                 assert_eq!(from, "old_status");
                 assert_eq!(to, "new_status");
             }
-            _ => panic!("Expected RenameEnum, got {:?}", diff_with_rename.statements[0]),
+            _ => panic!(
+                "Expected RenameEnum, got {:?}",
+                diff_with_rename.statements[0]
+            ),
         }
     }
 
@@ -2748,14 +2772,14 @@ mod tests {
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff_with_rename = apply_renames(&diff, &renames);
         assert_eq!(diff_with_rename.statements.len(), 2);
-        
+
         let has_rename = diff_with_rename.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameColumn { from, to, .. } if from == "old_col" && to == "new_col")
         });
         let has_alter = diff_with_rename.statements.iter().any(|s| {
             matches!(s, DiffStatement::AlterColumn { column, changes, .. } if column == "new_col" && !changes.is_empty())
         });
-        
+
         assert!(has_rename, "Expected RenameColumn");
         assert!(has_alter, "Expected AlterColumn for type change");
     }
@@ -2764,14 +2788,24 @@ mod tests {
     fn test_diff_multiple_column_renames_in_same_table() {
         let mut from = empty_snapshot();
         let mut table_from = create_table_snapshot("users", None);
-        table_from.columns.insert("col_a".to_string(), create_column_snapshot("col_a", None));
-        table_from.columns.insert("col_b".to_string(), create_column_snapshot("col_b", None));
+        table_from
+            .columns
+            .insert("col_a".to_string(), create_column_snapshot("col_a", None));
+        table_from
+            .columns
+            .insert("col_b".to_string(), create_column_snapshot("col_b", None));
         from.tables.insert("users".to_string(), table_from);
 
         let mut to = empty_snapshot();
         let mut table_to = create_table_snapshot("users", None);
-        table_to.columns.insert("renamed_a".to_string(), create_column_snapshot("renamed_a", None));
-        table_to.columns.insert("renamed_b".to_string(), create_column_snapshot("renamed_b", None));
+        table_to.columns.insert(
+            "renamed_a".to_string(),
+            create_column_snapshot("renamed_a", None),
+        );
+        table_to.columns.insert(
+            "renamed_b".to_string(),
+            create_column_snapshot("renamed_b", None),
+        );
         to.tables.insert("users".to_string(), table_to);
 
         // Create rename decisions for both columns
@@ -2793,9 +2827,11 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff_with_rename = apply_renames(&diff, &renames);
-        
+
         // Should have exactly 2 rename statements
-        let rename_count = diff_with_rename.statements.iter()
+        let rename_count = diff_with_rename
+            .statements
+            .iter()
             .filter(|s| matches!(s, DiffStatement::RenameColumn { .. }))
             .count();
         assert_eq!(rename_count, 2);
@@ -2806,14 +2842,23 @@ mod tests {
         // Test case where user renames one column but drops another
         let mut from = empty_snapshot();
         let mut table_from = create_table_snapshot("users", None);
-        table_from.columns.insert("col_a".to_string(), create_column_snapshot("col_a", None));
-        table_from.columns.insert("col_b".to_string(), create_column_snapshot("col_b", None));
+        table_from
+            .columns
+            .insert("col_a".to_string(), create_column_snapshot("col_a", None));
+        table_from
+            .columns
+            .insert("col_b".to_string(), create_column_snapshot("col_b", None));
         from.tables.insert("users".to_string(), table_from);
 
         let mut to = empty_snapshot();
         let mut table_to = create_table_snapshot("users", None);
-        table_to.columns.insert("renamed_a".to_string(), create_column_snapshot("renamed_a", None));
-        table_to.columns.insert("new_c".to_string(), create_column_snapshot("new_c", None));
+        table_to.columns.insert(
+            "renamed_a".to_string(),
+            create_column_snapshot("renamed_a", None),
+        );
+        table_to
+            .columns
+            .insert("new_c".to_string(), create_column_snapshot("new_c", None));
         to.tables.insert("users".to_string(), table_to);
 
         // Only rename col_a -> renamed_a, let col_b be dropped and new_c be added
@@ -2829,17 +2874,18 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         let has_rename_a = diff.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameColumn { from, to, .. } if from == "col_a" && to == "renamed_a")
         });
-        let has_drop_b = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::DropColumn { column, .. } if column == "col_b")
-        });
-        let has_add_c = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "new_c")
-        });
-        
+        let has_drop_b = diff
+            .statements
+            .iter()
+            .any(|s| matches!(s, DiffStatement::DropColumn { column, .. } if column == "col_b"));
+        let has_add_c = diff.statements.iter().any(
+            |s| matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "new_c"),
+        );
+
         assert!(has_rename_a, "Expected RenameColumn for col_a");
         assert!(has_drop_b, "Expected DropColumn for col_b");
         assert!(has_add_c, "Expected AddColumn for new_c");
@@ -2901,37 +2947,63 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should have: 1 table rename + 2 column renames = 3 statements
-        assert_eq!(diff.statements.len(), 3, "Expected 3 statements, got: {:?}", diff.statements);
-        
+        assert_eq!(
+            diff.statements.len(),
+            3,
+            "Expected 3 statements, got: {:?}",
+            diff.statements
+        );
+
         let has_table_rename = diff.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameTable { from, to, .. } if from == "old_users" && to == "new_accounts")
         });
         // Column renames use ORIGINAL table name (before table rename)
         let has_email_rename = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::RenameColumn { table, from, to, .. } 
+            matches!(s, DiffStatement::RenameColumn { table, from, to, .. }
                 if table == "old_users" && from == "old_email" && to == "new_email")
         });
         let has_name_rename = diff.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameColumn { table, from, to, .. }
                 if table == "old_users" && from == "old_name" && to == "new_name")
         });
-        
-        assert!(has_table_rename, "Expected RenameTable from old_users to new_accounts");
-        assert!(has_email_rename, "Expected RenameColumn from old_email to new_email in old_users");
-        assert!(has_name_rename, "Expected RenameColumn from old_name to new_name in old_users");
-        
+
+        assert!(
+            has_table_rename,
+            "Expected RenameTable from old_users to new_accounts"
+        );
+        assert!(
+            has_email_rename,
+            "Expected RenameColumn from old_email to new_email in old_users"
+        );
+        assert!(
+            has_name_rename,
+            "Expected RenameColumn from old_name to new_name in old_users"
+        );
+
         // Verify no drops or adds
         let has_any_drop = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::DropTable { .. } | DiffStatement::DropColumn { .. })
+            matches!(
+                s,
+                DiffStatement::DropTable { .. } | DiffStatement::DropColumn { .. }
+            )
         });
         let has_any_add = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::CreateTable { .. } | DiffStatement::AddColumn { .. })
+            matches!(
+                s,
+                DiffStatement::CreateTable { .. } | DiffStatement::AddColumn { .. }
+            )
         });
-        
-        assert!(!has_any_drop, "Should not have any drop statements when renaming");
-        assert!(!has_any_add, "Should not have any add statements when renaming");
+
+        assert!(
+            !has_any_drop,
+            "Should not have any drop statements when renaming"
+        );
+        assert!(
+            !has_any_add,
+            "Should not have any add statements when renaming"
+        );
     }
 
     #[test]
@@ -2981,23 +3053,28 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should have: 1 table rename + 1 column rename + 1 drop + 1 add = 4 statements
-        assert_eq!(diff.statements.len(), 4, "Expected 4 statements, got: {:?}", diff.statements);
-        
+        assert_eq!(
+            diff.statements.len(),
+            4,
+            "Expected 4 statements, got: {:?}",
+            diff.statements
+        );
+
         let has_table_rename = diff.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameTable { from, to, .. } if from == "old_users" && to == "new_accounts")
         });
         let has_email_rename = diff.statements.iter().any(|s| {
             matches!(s, DiffStatement::RenameColumn { from, to, .. } if from == "old_email" && to == "new_email")
         });
-        let has_drop = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::DropColumn { column, .. } if column == "dropped_col")
-        });
-        let has_add = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "added_col")
-        });
-        
+        let has_drop = diff.statements.iter().any(
+            |s| matches!(s, DiffStatement::DropColumn { column, .. } if column == "dropped_col"),
+        );
+        let has_add = diff.statements.iter().any(
+            |s| matches!(s, DiffStatement::AddColumn { column, .. } if column.name == "added_col"),
+        );
+
         assert!(has_table_rename, "Expected RenameTable");
         assert!(has_email_rename, "Expected RenameColumn for email");
         assert!(has_drop, "Expected DropColumn for dropped_col");
@@ -3076,10 +3153,15 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should only have the RenameEnum statement, no AlterColumn
-        assert_eq!(diff.statements.len(), 1, "Expected 1 statement (RenameEnum), got: {:?}", diff.statements);
-        
+        assert_eq!(
+            diff.statements.len(),
+            1,
+            "Expected 1 statement (RenameEnum), got: {:?}",
+            diff.statements
+        );
+
         match &diff.statements[0] {
             DiffStatement::RenameEnum { from, to, .. } => {
                 assert_eq!(from, "old_status");
@@ -3087,10 +3169,16 @@ mod tests {
             }
             _ => panic!("Expected RenameEnum, got: {:?}", diff.statements[0]),
         }
-        
+
         // Verify no AlterColumn was generated
-        let has_alter_column = diff.statements.iter().any(|s| matches!(s, DiffStatement::AlterColumn { .. }));
-        assert!(!has_alter_column, "Should not have AlterColumn when enum is renamed");
+        let has_alter_column = diff
+            .statements
+            .iter()
+            .any(|s| matches!(s, DiffStatement::AlterColumn { .. }));
+        assert!(
+            !has_alter_column,
+            "Should not have AlterColumn when enum is renamed"
+        );
     }
 
     #[test]
@@ -3164,10 +3252,18 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should only have the RenameEnum statement, no AlterColumn
-        assert_eq!(diff.statements.len(), 1, "Expected 1 statement, got: {:?}", diff.statements);
-        assert!(matches!(&diff.statements[0], DiffStatement::RenameEnum { .. }));
+        assert_eq!(
+            diff.statements.len(),
+            1,
+            "Expected 1 statement, got: {:?}",
+            diff.statements
+        );
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::RenameEnum { .. }
+        ));
     }
 
     #[test]
@@ -3241,10 +3337,18 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should only have the RenameEnum statement, no AlterColumn
-        assert_eq!(diff.statements.len(), 1, "Expected 1 statement, got: {:?}", diff.statements);
-        assert!(matches!(&diff.statements[0], DiffStatement::RenameEnum { .. }));
+        assert_eq!(
+            diff.statements.len(),
+            1,
+            "Expected 1 statement, got: {:?}",
+            diff.statements
+        );
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::RenameEnum { .. }
+        ));
     }
 
     #[test]
@@ -3312,12 +3416,16 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to).unwrap();
         let diff = apply_renames(&diff, &renames);
-        
+
         // Should have: DropEnum, CreateEnum, AlterColumn
         let has_alter = diff.statements.iter().any(|s| {
-            matches!(s, DiffStatement::AlterColumn { changes, .. } 
+            matches!(s, DiffStatement::AlterColumn { changes, .. }
                 if changes.iter().any(|c| matches!(c, ColumnChange::SetType(t) if t == "different_enum")))
         });
-        assert!(has_alter, "Expected AlterColumn with SetType for real type change. Got: {:?}", diff.statements);
+        assert!(
+            has_alter,
+            "Expected AlterColumn with SetType for real type change. Got: {:?}",
+            diff.statements
+        );
     }
 }

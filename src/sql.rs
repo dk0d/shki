@@ -10,6 +10,8 @@ use crate::snapshot::{
     ColumnSnapshot, ConstraintSnapshot, ConstraintType, IndexSnapshot, SequenceSnapshot,
     TableSnapshot, ViewSnapshot,
 };
+use std::collections::HashSet;
+use std::fmt::Write as _;
 
 /// SQL generator for a specific dialect
 pub struct SqlGenerator {
@@ -362,22 +364,24 @@ impl SqlGenerator {
         changes: &[SequenceChange],
     ) -> String {
         let qualified = self.qualified_name(name, schema);
-        let mut parts = vec![format!("ALTER SEQUENCE {}", qualified)];
+
+        let mut line = String::new();
+        let _ = write!(line, "ALTER SEQUENCE {}", qualified);
 
         for change in changes {
-            match change {
-                SequenceChange::Increment(v) => parts.push(format!("INCREMENT BY {}", v)),
-                SequenceChange::MinValue(v) => parts.push(format!("MINVALUE {}", v)),
-                SequenceChange::MaxValue(Some(v)) => parts.push(format!("MAXVALUE {}", v)),
-                SequenceChange::MaxValue(None) => parts.push("NO MAXVALUE".to_string()),
-                SequenceChange::Start(v) => parts.push(format!("START WITH {}", v)),
-                SequenceChange::Cache(v) => parts.push(format!("CACHE {}", v)),
-                SequenceChange::Cycle(true) => parts.push("CYCLE".to_string()),
-                SequenceChange::Cycle(false) => parts.push("NO CYCLE".to_string()),
-            }
+            let _ = match change {
+                SequenceChange::Increment(v) => write!(line, " INCREMENT BY {}", v),
+                SequenceChange::MinValue(v) => write!(line, " MINVALUE {}", v),
+                SequenceChange::MaxValue(Some(v)) => write!(line, " MAXVALUE {}", v),
+                SequenceChange::MaxValue(None) => write!(line, " NO MAXVALUE"),
+                SequenceChange::Start(v) => write!(line, " START WITH {}", v),
+                SequenceChange::Cache(v) => write!(line, " CACHE {}", v),
+                SequenceChange::Cycle(true) => write!(line, " CYCLE"),
+                SequenceChange::Cycle(false) => write!(line, " NO CYCLE"),
+            };
         }
 
-        parts.join(" ")
+        line
     }
 
     // Table operations
@@ -385,10 +389,30 @@ impl SqlGenerator {
     fn create_table(&self, table: &TableSnapshot) -> Vec<String> {
         let name = self.qualified_name(&table.name, &table.schema);
 
+        let mut table_pk_cols: HashSet<&str> = HashSet::new();
+        let mut table_unique_cols: HashSet<&str> = HashSet::new();
+        for constraint in &table.constraints {
+            match constraint.constraint_type {
+                ConstraintType::PrimaryKey if constraint.columns.len() == 1 => {
+                    table_pk_cols.insert(constraint.columns[0].as_str());
+                }
+                ConstraintType::Unique if constraint.columns.len() == 1 => {
+                    table_unique_cols.insert(constraint.columns[0].as_str());
+                }
+                _ => {}
+            }
+        }
+
         let mut column_defs: Vec<String> = table
             .columns
             .values()
-            .map(|c| self.column_definition(c))
+            .map(|c| {
+                self.column_definition_with_suppression(
+                    c,
+                    table_pk_cols.contains(c.name.as_str()),
+                    table_unique_cols.contains(c.name.as_str()),
+                )
+            })
             .collect();
 
         // Add table-level constraints
@@ -425,9 +449,18 @@ impl SqlGenerator {
     }
 
     fn column_definition(&self, col: &ColumnSnapshot) -> String {
+        self.column_definition_with_suppression(col, false, false)
+    }
+
+    fn column_definition_with_suppression(
+        &self,
+        col: &ColumnSnapshot,
+        suppress_primary_key: bool,
+        suppress_unique: bool,
+    ) -> String {
         let mut parts = vec![self.quote_identifier(&col.name), col.data_type.clone()];
 
-        if col.primary_key {
+        if col.primary_key && !suppress_primary_key {
             parts.push("PRIMARY KEY".to_string());
         }
 
@@ -435,7 +468,7 @@ impl SqlGenerator {
             parts.push("NOT NULL".to_string());
         }
 
-        if col.unique && !col.primary_key {
+        if col.unique && !col.primary_key && !suppress_unique {
             parts.push("UNIQUE".to_string());
         }
 
@@ -458,58 +491,65 @@ impl SqlGenerator {
         let mut sql = String::new();
 
         if let Some(name) = &constraint.name {
-            sql.push_str(&format!("CONSTRAINT {} ", self.quote_identifier(name)));
+            write!(&mut sql, "CONSTRAINT {} ", self.quote_identifier(name))
+                .expect("writing to String cannot fail");
         }
 
         match constraint.constraint_type {
             ConstraintType::PrimaryKey => {
-                let cols: Vec<String> = constraint
-                    .columns
-                    .iter()
-                    .map(|c| self.quote_identifier(c))
-                    .collect();
-                sql.push_str(&format!("PRIMARY KEY ({})", cols.join(", ")));
+                sql.push_str("PRIMARY KEY (");
+                for (idx, col) in constraint.columns.iter().enumerate() {
+                    if idx > 0 {
+                        sql.push_str(", ");
+                    }
+                    sql.push_str(&self.quote_identifier(col));
+                }
+                sql.push(')');
             }
             ConstraintType::Unique => {
-                let cols: Vec<String> = constraint
-                    .columns
-                    .iter()
-                    .map(|c| self.quote_identifier(c))
-                    .collect();
-                sql.push_str(&format!("UNIQUE ({})", cols.join(", ")));
+                sql.push_str("UNIQUE (");
+                for (idx, col) in constraint.columns.iter().enumerate() {
+                    if idx > 0 {
+                        sql.push_str(", ");
+                    }
+                    sql.push_str(&self.quote_identifier(col));
+                }
+                sql.push(')');
             }
             ConstraintType::ForeignKey => {
                 if let Some(ref_info) = &constraint.references {
-                    let cols: Vec<String> = constraint
-                        .columns
-                        .iter()
-                        .map(|c| self.quote_identifier(c))
-                        .collect();
-                    let ref_cols: Vec<String> = ref_info
-                        .columns
-                        .iter()
-                        .map(|c| self.quote_identifier(c))
-                        .collect();
                     let ref_table = self.qualified_name(&ref_info.table, &ref_info.schema);
 
-                    sql.push_str(&format!(
-                        "FOREIGN KEY ({}) REFERENCES {} ({})",
-                        cols.join(", "),
-                        ref_table,
-                        ref_cols.join(", ")
-                    ));
+                    sql.push_str("FOREIGN KEY (");
+                    for (idx, col) in constraint.columns.iter().enumerate() {
+                        if idx > 0 {
+                            sql.push_str(", ");
+                        }
+                        sql.push_str(&self.quote_identifier(col));
+                    }
+                    write!(&mut sql, ") REFERENCES {} (", ref_table)
+                        .expect("writing to String cannot fail");
+                    for (idx, col) in ref_info.columns.iter().enumerate() {
+                        if idx > 0 {
+                            sql.push_str(", ");
+                        }
+                        sql.push_str(&self.quote_identifier(col));
+                    }
+                    sql.push(')');
 
                     if ref_info.on_delete != "NO ACTION" {
-                        sql.push_str(&format!(" ON DELETE {}", ref_info.on_delete));
+                        write!(&mut sql, " ON DELETE {}", ref_info.on_delete)
+                            .expect("writing to String cannot fail");
                     }
                     if ref_info.on_update != "NO ACTION" {
-                        sql.push_str(&format!(" ON UPDATE {}", ref_info.on_update));
+                        write!(&mut sql, " ON UPDATE {}", ref_info.on_update)
+                            .expect("writing to String cannot fail");
                     }
                 }
             }
             ConstraintType::Check => {
                 if let Some(expr) = &constraint.expression {
-                    sql.push_str(&format!("CHECK ({})", expr));
+                    write!(&mut sql, "CHECK ({})", expr).expect("writing to String cannot fail");
                 }
             }
             ConstraintType::Exclusion => {
@@ -701,33 +741,35 @@ impl SqlGenerator {
         sql.push_str(&self.qualified_name(table, schema));
 
         if index.method != "btree" {
-            sql.push_str(&format!(" USING {}", index.method));
+            write!(&mut sql, " USING {}", index.method).expect("writing to String cannot fail");
         }
 
-        let cols: Vec<String> = index
-            .columns
-            .iter()
-            .map(|c| {
-                if c.starts_with('(') {
-                    c.clone() // Expression
-                } else {
-                    self.quote_identifier(c)
-                }
-            })
-            .collect();
-        sql.push_str(&format!(" ({})", cols.join(", ")));
+        sql.push_str(" (");
+        for (idx, col) in index.columns.iter().enumerate() {
+            if idx > 0 {
+                sql.push_str(", ");
+            }
+            if col.starts_with('(') {
+                sql.push_str(col);
+            } else {
+                sql.push_str(&self.quote_identifier(col));
+            }
+        }
+        sql.push(')');
 
         if !index.include.is_empty() {
-            let include_cols: Vec<String> = index
-                .include
-                .iter()
-                .map(|c| self.quote_identifier(c))
-                .collect();
-            sql.push_str(&format!(" INCLUDE ({})", include_cols.join(", ")));
+            sql.push_str(" INCLUDE (");
+            for (idx, col) in index.include.iter().enumerate() {
+                if idx > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&self.quote_identifier(col));
+            }
+            sql.push(')');
         }
 
         if let Some(where_clause) = &index.where_clause {
-            sql.push_str(&format!(" WHERE {}", where_clause));
+            write!(&mut sql, " WHERE {}", where_clause).expect("writing to String cannot fail");
         }
 
         sql
@@ -802,7 +844,8 @@ impl SqlGenerator {
             sql.push_str("MATERIALIZED ");
         }
 
-        sql.push_str(&format!("VIEW {} AS {}", name, view.definition));
+        write!(&mut sql, "VIEW {} AS {}", name, view.definition)
+            .expect("writing to String cannot fail");
         sql
     }
 

@@ -3,6 +3,7 @@
 //! This module handles reading, writing, and applying migration files.
 
 use std::path::{Path, PathBuf};
+use std::{collections::HashMap, fmt::Write as _};
 
 use chrono::{DateTime, Utc};
 use petname::Generator;
@@ -141,7 +142,6 @@ impl MigrationManager {
             }
             MigrationPrefix::Timestamp => {
                 let ts = Utc::now().format("%Y%m%d%H%M%S").to_string();
-                dbg!(&ts);
                 Ok(format!("{}_{}", ts, suffix))
             }
             MigrationPrefix::Unix => {
@@ -242,12 +242,20 @@ impl MigrationManager {
 
         // Write up migration SQL file
         let mut up_content = String::new();
-        up_content.push_str(&format!("-- Migration: {} (up)\n", name));
-        up_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
+        writeln!(&mut up_content, "-- Migration: {} (up)", name)
+            .expect("writing to String cannot fail");
+        writeln!(
+            &mut up_content,
+            "-- Created at: {}",
+            Utc::now().to_rfc3339()
+        )
+        .expect("writing to String cannot fail");
         if let Some(from) = from_snapshot {
-            up_content.push_str(&format!("-- From snapshot: {}\n", from.id));
+            writeln!(&mut up_content, "-- From snapshot: {}", from.id)
+                .expect("writing to String cannot fail");
         }
-        up_content.push_str(&format!("-- To snapshot: {}\n", to_snapshot.id));
+        writeln!(&mut up_content, "-- To snapshot: {}", to_snapshot.id)
+            .expect("writing to String cannot fail");
         up_content.push('\n');
         up_content.push_str(up_sql);
 
@@ -258,8 +266,14 @@ impl MigrationManager {
             let path = self.out_dir.join(format!("{}.down.sql", name));
 
             let mut down_content = String::new();
-            down_content.push_str(&format!("-- Migration: {} (down)\n", name));
-            down_content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
+            writeln!(&mut down_content, "-- Migration: {} (down)", name)
+                .expect("writing to String cannot fail");
+            writeln!(
+                &mut down_content,
+                "-- Created at: {}",
+                Utc::now().to_rfc3339()
+            )
+            .expect("writing to String cannot fail");
             down_content
                 .push_str("-- This migration reverses the changes made by the up migration.\n");
             down_content.push('\n');
@@ -283,7 +297,11 @@ impl MigrationManager {
 
     /// Create the migrations table if it doesn't exist
     pub async fn ensure_migrations_table(&self, pool: &AnyPool) -> Result<()> {
-        let query = queries::ensure_migrations(&self.dialect, &self.table_schema, &self.table_name);
+        let query = queries::ensure_migrations(
+            &self.dialect,
+            self.table_schema.as_deref(),
+            &self.table_name,
+        );
         sqlx::query(&query).execute(pool).await.map_err(|e| {
             ShkiError::migration(format!(
                 "Failed to create migrations table '{}': {}",
@@ -296,7 +314,11 @@ impl MigrationManager {
     /// Get list of applied migrations from the database
     pub async fn get_applied_migrations(&self, pool: &AnyPool) -> Result<Vec<MigrationRow>> {
         self.ensure_migrations_table(pool).await?;
-        let query = queries::select_migrations(&self.dialect, &self.table_schema, &self.table_name);
+        let query = queries::select_migrations(
+            &self.dialect,
+            self.table_schema.as_deref(),
+            &self.table_name,
+        );
         let rows = sqlx::query_as::<_, MigrationRow>(&query)
             .fetch_all(pool)
             .await?;
@@ -459,15 +481,19 @@ impl MigrationManager {
             .cloned()
             .collect();
 
+        let snapshots_by_checksum: HashMap<&str, &str> = snapshots
+            .iter()
+            .filter_map(|s| s.migration.as_ref())
+            .map(|m| (m.checksum.as_str(), m.name.as_str()))
+            .collect();
+
         // get (migration, snapshot) names where checksums match
         let checksums_match = missing
             .iter()
             .filter_map(|m| {
-                snapshots
-                    .iter()
-                    .filter_map(|s| s.migration.as_ref())
-                    .find(|info| m.checksum.as_ref().is_some_and(|c| c == &info.checksum))
-                    .map(|info| (m.name.clone(), info.name.clone()))
+                let checksum = m.checksum.as_deref()?;
+                let snapshot_name = snapshots_by_checksum.get(checksum)?;
+                Some((m.name.clone(), (*snapshot_name).to_owned()))
             })
             .collect();
 
@@ -504,7 +530,11 @@ impl MigrationManager {
         })?;
 
         // Build the SQL for recording the migration
-        let query = queries::insert_migration(&self.dialect, &self.table_schema, &self.table_name);
+        let query = queries::insert_migration(
+            &self.dialect,
+            self.table_schema.as_deref(),
+            &self.table_name,
+        );
 
         // Record the migration with checksum within the same transaction
         sqlx::query(&query)
@@ -602,7 +632,11 @@ impl MigrationManager {
             .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
 
         // Build the SQL for removing the migration record
-        let delete_sql = queries::delete_table(&self.dialect, &self.table_schema, &self.table_name);
+        let delete_sql = queries::delete_table(
+            &self.dialect,
+            self.table_schema.as_deref(),
+            &self.table_name,
+        );
 
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;
@@ -775,20 +809,25 @@ impl MigrationManager {
         direction: MigrationDirection,
     ) -> String {
         let mut content = String::new();
-        content.push_str(&format!(
-            "-- Migration: {} ({})\n",
+        writeln!(
+            &mut content,
+            "-- Migration: {} ({})",
             migration_name, direction
-        ));
-        content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
+        )
+        .expect("writing to String cannot fail");
+        writeln!(&mut content, "-- Created at: {}", Utc::now().to_rfc3339())
+            .expect("writing to String cannot fail");
         content.push_str("-- Type: manual\n");
         content.push_str("--\n");
         content.push_str("-- This migration was created for manual editing.\n");
         content.push_str("-- The entire migration runs in a single transaction.\n");
         content.push_str("--\n");
-        content.push_str(&format!(
-            "-- Use '{}' to visually separate statements.\n",
+        writeln!(
+            &mut content,
+            "-- Use '{}' to visually separate statements.",
             MIGRATION_SPLIT_MARKER
-        ));
+        )
+        .expect("writing to String cannot fail");
         content.push('\n');
 
         if let Some(sql) = sql_content {
@@ -845,20 +884,20 @@ impl MigrationManager {
 
 /// Sanitize a migration name to be filesystem-safe
 fn sanitize_migration_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        // Remove consecutive underscores
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
+    let mut out = String::with_capacity(name.len());
+    let mut last_was_dash = false;
+
+    for c in name.chars() {
+        if c.is_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    out.trim_matches('-').to_owned()
 }
 
 /// Generate a blank migration template with helpful comments
@@ -873,13 +912,17 @@ fn generate_blank_migration_template(
     is_down: bool,
 ) -> String {
     let mut content = String::new();
+    let marker_line = format!("-- {}\n", MIGRATION_SPLIT_MARKER);
 
     let direction = if is_down { "down" } else { "up" };
-    content.push_str(&format!(
-        "-- Migration: {} ({})\n",
+    writeln!(
+        &mut content,
+        "-- Migration: {} ({})",
         migration_name, direction
-    ));
-    content.push_str(&format!("-- Created at: {}\n", Utc::now().to_rfc3339()));
+    )
+    .expect("writing to String cannot fail");
+    writeln!(&mut content, "-- Created at: {}", Utc::now().to_rfc3339())
+        .expect("writing to String cannot fail");
     content.push_str("-- Type: manual\n");
     content.push_str("--\n");
 
@@ -894,10 +937,12 @@ fn generate_blank_migration_template(
     content.push_str("-- Tips:\n");
     content.push_str("-- - The entire migration runs in a single transaction\n");
     content.push_str("-- - If any statement fails, all changes are rolled back\n");
-    content.push_str(&format!(
-        "-- - Use '{}' to visually separate statements\n",
+    writeln!(
+        &mut content,
+        "-- - Use '{}' to visually separate statements",
         MIGRATION_SPLIT_MARKER
-    ));
+    )
+    .expect("writing to String cannot fail");
     content.push_str("-- - Remove these comments before committing\n");
     content.push_str("--\n");
 
@@ -908,23 +953,23 @@ fn generate_blank_migration_template(
                 content.push_str("-- Example PostgreSQL rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX CONCURRENTLY IF EXISTS idx_users_email;\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- ALTER TABLE posts DROP COLUMN IF EXISTS view_count;\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- DROP TYPE IF EXISTS status_type;\n");
             }
             SchemaDialect::Mysql => {
                 content.push_str("-- Example MySQL rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX idx_users_email ON users;\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- ALTER TABLE posts DROP COLUMN view_count;\n");
             }
             SchemaDialect::Sqlite => {
                 content.push_str("-- Example SQLite rollback statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- DROP INDEX IF EXISTS idx_users_email;\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- Note: SQLite doesn't support DROP COLUMN directly.\n");
                 content.push_str("-- You may need to recreate the table without the column.\n");
             }
@@ -935,23 +980,23 @@ fn generate_blank_migration_template(
                 content.push_str("-- Example PostgreSQL statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX CONCURRENTLY idx_users_email ON users(email);\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0;\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- CREATE TYPE status_type AS ENUM ('active', 'inactive');\n");
             }
             SchemaDialect::Mysql => {
                 content.push_str("-- Example MySQL statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX idx_users_email ON users(email);\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INT DEFAULT 0;\n");
             }
             SchemaDialect::Sqlite => {
                 content.push_str("-- Example SQLite statements:\n");
                 content.push_str("--\n");
                 content.push_str("-- CREATE INDEX idx_users_email ON users(email);\n");
-                content.push_str(&format!("-- {}\n", MIGRATION_SPLIT_MARKER));
+                content.push_str(&marker_line);
                 content.push_str("-- ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0;\n");
             }
         }
@@ -967,17 +1012,29 @@ pub fn read_migration(path: &Path) -> Result<String> {
     let content = std::fs::read_to_string(path)?;
 
     // Remove header comments
-    let lines: Vec<&str> = content
+    let mut sql = String::new();
+    for line in content
         .lines()
         .skip_while(|line| line.starts_with("--") || line.is_empty())
-        .collect();
+    {
+        if !sql.is_empty() {
+            sql.push('\n');
+        }
+        sql.push_str(line);
+    }
 
-    Ok(lines.join("\n"))
+    Ok(sql)
 }
 
 /// Truncate a SQL statement for display in error messages
 fn truncate_sql(sql: &str, max_len: usize) -> String {
-    let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut normalized = String::with_capacity(sql.len());
+    for token in sql.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(token);
+    }
 
     if normalized.len() <= max_len {
         normalized

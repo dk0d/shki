@@ -4,8 +4,8 @@ use mlua::{FromLua, Lua, Result as LuaResult, UserData, UserDataMethods, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::schema::types::{DataType, DefaultValue, ReferenceAction};
 use crate::schema::Column;
+use crate::schema::types::{DataType, DefaultValue, ReferenceAction};
 
 use super::helpers::{parse_data_type, parse_referential_action};
 

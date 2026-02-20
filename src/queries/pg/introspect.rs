@@ -4,6 +4,9 @@ use crate::{
 };
 use indexmap::IndexMap;
 use sqlx::{Pool, Postgres, Row};
+use std::collections::HashMap;
+
+type TableKey = (String, String);
 
 /// Introspect a PostgreSQL database
 pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {
@@ -150,13 +153,19 @@ async fn introspect_postgres_impl(
         .await?
     };
 
+    let mut columns_by_table = get_postgres_columns_batch(pool, target_schema).await?;
+    let mut constraints_by_table = get_postgres_constraints_batch(pool, target_schema).await?;
+    let mut indexes_by_table = get_postgres_indexes_batch(pool, target_schema).await?;
+
     for row in table_rows {
         let schema: String = row.get("table_schema");
         let table_name: String = row.get("table_name");
+        let key = (schema.clone(), table_name.clone());
 
-        let columns = get_postgres_columns(pool, &schema, &table_name).await?;
-        let constraints = get_postgres_constraints(pool, &schema, &table_name).await?;
-        let indexes = get_postgres_indexes(pool, &schema, &table_name).await?;
+        let columns = columns_by_table.remove(&key).unwrap_or_default();
+        let mut constraints = constraints_by_table.remove(&key).unwrap_or_default();
+        constraints.retain(|constraint| !is_redundant_not_null_constraint(constraint, &columns));
+        let indexes = indexes_by_table.remove(&key).unwrap_or_default();
 
         let table_snapshot = TableSnapshot {
             name: table_name.clone(),
@@ -173,14 +182,15 @@ async fn introspect_postgres_impl(
     Ok(snapshot)
 }
 
-async fn get_postgres_columns(
+async fn get_postgres_columns_batch(
     pool: &Pool<Postgres>,
-    schema: &str,
-    table: &str,
-) -> Result<IndexMap<String, ColumnSnapshot>> {
+    target_schema: Option<&str>,
+) -> Result<HashMap<TableKey, IndexMap<String, ColumnSnapshot>>> {
     let rows = sqlx::query(
         r#"
         SELECT 
+            c.table_schema,
+            c.table_name,
             c.column_name,
             c.data_type,
             c.udt_name,
@@ -194,18 +204,20 @@ async fn get_postgres_columns(
             c.is_generated,
             c.generation_expression
         FROM information_schema.columns c
-        WHERE c.table_schema = $1 AND c.table_name = $2
-        ORDER BY c.ordinal_position
+        WHERE ($1::text IS NULL OR c.table_schema = $1)
+            AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY c.table_schema, c.table_name, c.ordinal_position
         "#,
     )
-    .bind(schema)
-    .bind(table)
+    .bind(target_schema)
     .fetch_all(pool)
     .await?;
 
-    let mut columns = IndexMap::new();
+    let mut columns_by_table: HashMap<TableKey, IndexMap<String, ColumnSnapshot>> = HashMap::new();
 
     for row in rows {
+        let table_schema: String = row.get("table_schema");
+        let table_name: String = row.get("table_name");
         let column_name: String = row.get("column_name");
         let data_type: String = row.get("data_type");
         let udt_name: String = row.get("udt_name");
@@ -240,24 +252,27 @@ async fn get_postgres_columns(
             None
         };
 
-        columns.insert(
-            column_name.clone(),
-            ColumnSnapshot {
-                name: column_name,
-                data_type: full_type,
-                nullable: is_nullable == "YES",
-                default: column_default,
-                primary_key: false, // Will be set from constraints
-                unique: false,      // Will be set from constraints
-                generated,
-                identity,
-                comment: None,
-                collation: None,
-            },
-        );
+        columns_by_table
+            .entry((table_schema, table_name))
+            .or_default()
+            .insert(
+                column_name.clone(),
+                ColumnSnapshot {
+                    name: column_name,
+                    data_type: full_type,
+                    nullable: is_nullable == "YES",
+                    default: column_default,
+                    primary_key: false,
+                    unique: false,
+                    generated,
+                    identity,
+                    comment: None,
+                    collation: None,
+                },
+            );
     }
 
-    Ok(columns)
+    Ok(columns_by_table)
 }
 
 fn build_postgres_type(
@@ -292,14 +307,15 @@ fn build_postgres_type(
     }
 }
 
-async fn get_postgres_constraints(
+async fn get_postgres_constraints_batch(
     pool: &Pool<Postgres>,
-    schema: &str,
-    table: &str,
-) -> Result<Vec<ConstraintSnapshot>> {
+    target_schema: Option<&str>,
+) -> Result<HashMap<TableKey, Vec<ConstraintSnapshot>>> {
     let rows = sqlx::query(
         r#"
         SELECT 
+            tc.table_schema,
+            tc.table_name,
             tc.constraint_name,
             tc.constraint_type,
             kcu.column_name,
@@ -322,21 +338,28 @@ async fn get_postgres_constraints(
         LEFT JOIN information_schema.check_constraints cc
             ON tc.constraint_name = cc.constraint_name
             AND tc.table_schema = cc.constraint_schema
-        WHERE tc.table_schema = $1 AND tc.table_name = $2
-        ORDER BY tc.constraint_name, kcu.ordinal_position
+        WHERE ($1::text IS NULL OR tc.table_schema = $1)
+            AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY tc.table_schema, tc.table_name, tc.constraint_name, kcu.ordinal_position
         "#,
     )
-    .bind(schema)
-    .bind(table)
+    .bind(target_schema)
     .fetch_all(pool)
     .await?;
 
-    let mut constraint_map: IndexMap<String, ConstraintSnapshot> = IndexMap::new();
+    let mut constraints_by_table: HashMap<TableKey, IndexMap<String, ConstraintSnapshot>> =
+        HashMap::new();
 
     for row in rows {
+        let table_schema: String = row.get("table_schema");
+        let table_name: String = row.get("table_name");
         let constraint_name: String = row.get("constraint_name");
         let constraint_type: String = row.get("constraint_type");
         let column_name: Option<String> = row.get("column_name");
+
+        let constraint_map = constraints_by_table
+            .entry((table_schema, table_name))
+            .or_default();
 
         let entry = constraint_map
             .entry(constraint_name.clone())
@@ -383,17 +406,51 @@ async fn get_postgres_constraints(
         }
     }
 
-    Ok(constraint_map.into_values().collect())
+    Ok(constraints_by_table
+        .into_iter()
+        .map(|(key, constraints)| (key, constraints.into_values().collect()))
+        .collect())
 }
 
-async fn get_postgres_indexes(
+fn is_redundant_not_null_constraint(
+    constraint: &ConstraintSnapshot,
+    columns: &IndexMap<String, ColumnSnapshot>,
+) -> bool {
+    if constraint.constraint_type != ConstraintType::Check {
+        return false;
+    }
+
+    let Some(expr) = &constraint.expression else {
+        return false;
+    };
+
+    columns
+        .values()
+        .filter(|column| !column.nullable)
+        .any(|column| matches_not_null_check(expr, &column.name))
+}
+
+fn matches_not_null_check(expr: &str, column: &str) -> bool {
+    let normalized: String = expr
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '"' && *c != '(' && *c != ')')
+        .collect::<String>()
+        .to_ascii_lowercase();
+
+    let column = column.to_ascii_lowercase();
+    normalized == format!("{}isnotnull", column)
+        || (normalized.starts_with(&format!("{}::", column)) && normalized.ends_with("isnotnull"))
+}
+
+async fn get_postgres_indexes_batch(
     pool: &Pool<Postgres>,
-    schema: &str,
-    table: &str,
-) -> Result<IndexMap<String, IndexSnapshot>> {
+    target_schema: Option<&str>,
+) -> Result<HashMap<TableKey, IndexMap<String, IndexSnapshot>>> {
     let rows = sqlx::query(
         r#"
         SELECT
+            n.nspname AS table_schema,
+            t.relname AS table_name,
             i.relname AS index_name,
             ix.indisunique AS is_unique,
             am.amname AS index_method,
@@ -403,20 +460,21 @@ async fn get_postgres_indexes(
         JOIN pg_class t ON t.oid = ix.indrelid
         JOIN pg_namespace n ON n.oid = t.relnamespace
         JOIN pg_am am ON am.oid = i.relam
-        WHERE n.nspname = $1 
-            AND t.relname = $2
+        WHERE ($1::text IS NULL OR n.nspname = $1)
+            AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
             AND NOT ix.indisprimary
-        ORDER BY i.relname
+        ORDER BY n.nspname, t.relname, i.relname
         "#,
     )
-    .bind(schema)
-    .bind(table)
+    .bind(target_schema)
     .fetch_all(pool)
     .await?;
 
-    let mut indexes = IndexMap::new();
+    let mut indexes_by_table: HashMap<TableKey, IndexMap<String, IndexSnapshot>> = HashMap::new();
 
     for row in rows {
+        let table_schema: String = row.get("table_schema");
+        let table_name: String = row.get("table_name");
         let index_name: String = row.get("index_name");
         let is_unique: bool = row.get("is_unique");
         let index_method: String = row.get("index_method");
@@ -426,20 +484,23 @@ async fn get_postgres_indexes(
         let columns = parse_index_columns(&index_def);
         let where_clause = parse_index_where(&index_def);
 
-        indexes.insert(
-            index_name.clone(),
-            IndexSnapshot {
-                name: index_name,
-                columns,
-                unique: is_unique,
-                method: index_method,
-                where_clause,
-                include: Vec::new(),
-            },
-        );
+        indexes_by_table
+            .entry((table_schema, table_name))
+            .or_default()
+            .insert(
+                index_name.clone(),
+                IndexSnapshot {
+                    name: index_name,
+                    columns,
+                    unique: is_unique,
+                    method: index_method,
+                    where_clause,
+                    include: Vec::new(),
+                },
+            );
     }
 
-    Ok(indexes)
+    Ok(indexes_by_table)
 }
 
 fn parse_index_columns(index_def: &str) -> Vec<String> {

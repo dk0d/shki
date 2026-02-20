@@ -1,12 +1,13 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use heck::ToSnakeCase;
 
-use crate::commands::codegen::writer::CodeWriter;
-use crate::commands::codegen::CodegenConfig;
 use crate::Result;
+use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::writer::CodeWriter;
 
 use super::{GeneratedRust, RustStruct};
 
@@ -61,32 +62,30 @@ impl RustWriter {
 
     /// Collect imports needed for a struct
     fn collect_struct_imports(rust_struct: &RustStruct, code: &GeneratedRust) -> Vec<String> {
-        let mut imports = Vec::new();
+        let mut imports = BTreeSet::new();
 
         for field in &rust_struct.fields {
             // Check if the field type is a known enum
             for rust_enum in code.enums.values() {
                 if field.rust_type.contains(&rust_enum.name) {
                     let module_name = rust_enum.name.to_snake_case();
-                    imports.push(format!("use super::{}::{};", module_name, rust_enum.name));
+                    imports.insert(format!("use super::{}::{};", module_name, rust_enum.name));
                 }
             }
 
             // Standard library imports
             if field.rust_type.contains("chrono::") {
-                imports.push("use chrono;".to_string());
+                imports.insert("use chrono;".to_string());
             }
             if field.rust_type.contains("uuid::") {
-                imports.push("use uuid;".to_string());
+                imports.insert("use uuid;".to_string());
             }
             if field.rust_type.contains("serde_json::") {
-                imports.push("use serde_json;".to_string());
+                imports.insert("use serde_json;".to_string());
             }
         }
 
-        imports.sort();
-        imports.dedup();
-        imports
+        imports.into_iter().collect()
     }
 
     /// Create the module directory structure for Modules mode
