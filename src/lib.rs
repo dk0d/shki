@@ -1,3 +1,5 @@
+pub mod checksum;
+pub use checksum::*;
 pub mod migration;
 pub use migration::*;
 pub mod config;

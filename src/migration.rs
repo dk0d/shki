@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
 use sqlx::prelude::FromRow;
 
+use crate::checksum::sql_checksum;
 use crate::config::MigrationPrefix;
 use crate::schema::SchemaDialect;
 use crate::snapshot::Snapshot;
@@ -77,6 +78,8 @@ pub struct MigrationManager {
 pub struct MigrationRow {
     pub id: i64,
     pub name: String,
+    #[tabled(display("display::option", ""))]
+    pub checksum: Option<String>,
     pub applied_at: String,
 }
 
@@ -327,6 +330,9 @@ impl MigrationManager {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
 
+        // Calculate checksum of the SQL content
+        let checksum = sql_checksum(&sql);
+
         // Execute all statements within a transaction
         let mut tx = pool.begin().await?;
 
@@ -342,9 +348,10 @@ impl MigrationManager {
         // Build the SQL for recording the migration
         let query = queries::insert_migration(&self.dialect, &self.table_schema, &self.table_name);
 
-        // Record the migration within the same transaction
+        // Record the migration with checksum within the same transaction
         sqlx::query(&query)
             .bind(name)
+            .bind(&checksum)
             .execute(&mut *tx)
             .await
             .map_err(|e| {

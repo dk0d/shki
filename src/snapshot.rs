@@ -8,8 +8,8 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
 use crate::ShkiError;
+use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +29,10 @@ pub struct Snapshot {
 
     /// Timestamp when the snapshot was created
     pub created_at: DateTime<Utc>,
+
+    /// Migration that produced this snapshot (name and checksum)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration: Option<MigrationInfo>,
 
     /// Tables in the schema
     #[serde(default)]
@@ -188,6 +192,15 @@ pub struct ViewSnapshot {
     pub materialized: bool,
 }
 
+/// Information about a migration that produced this snapshot
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MigrationInfo {
+    /// Name of the migration file (without .sql extension)
+    pub name: String,
+    /// SHA-256 checksum of the migration SQL content
+    pub checksum: String,
+}
+
 impl Snapshot {
     /// Create a new empty snapshot
     pub fn new(dialect: SchemaDialect) -> Self {
@@ -197,6 +210,7 @@ impl Snapshot {
             prev_id: None,
             dialect,
             created_at: Utc::now(),
+            migration: None,
             tables: IndexMap::new(),
             enums: IndexMap::new(),
             sequences: IndexMap::new(),
@@ -260,6 +274,15 @@ impl Snapshot {
         }
 
         snapshot
+    }
+
+    /// Set migration info for this snapshot
+    pub fn with_migration(mut self, name: impl Into<String>, checksum: impl Into<String>) -> Self {
+        self.migration = Some(MigrationInfo {
+            name: name.into(),
+            checksum: checksum.into(),
+        });
+        self
     }
 
     /// Load a snapshot from JSON
@@ -337,6 +360,37 @@ impl Snapshot {
         }
 
         Ok(None)
+    }
+
+    /// Load all snapshots from a directory
+    ///
+    /// Returns snapshots sorted by creation time (oldest first).
+    pub fn load_all(dir: &std::path::Path) -> crate::Result<Vec<Self>> {
+        let meta_dir = dir.join("_meta");
+        if !meta_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut entries: Vec<_> = std::fs::read_dir(&meta_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "json")
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        // Sort by filename (which includes timestamp) - oldest first
+        entries.sort_by_key(|e| e.path());
+
+        let mut snapshots = Vec::new();
+        for entry in entries {
+            let content = std::fs::read_to_string(entry.path())?;
+            snapshots.push(Self::from_json(&content)?);
+        }
+        
+        Ok(snapshots)
     }
 
     /// Save snapshot to a directory
