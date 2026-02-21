@@ -342,24 +342,34 @@ impl Snapshot {
             return Ok(None);
         }
 
-        let mut snapshots: Vec<_> = std::fs::read_dir(&meta_dir)?
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map(|ext| ext == "json")
-                    .unwrap_or(false)
-            })
-            .collect();
+        let mut latest: Option<(Self, std::path::PathBuf)> = None;
 
-        snapshots.sort_by_key(|b| std::cmp::Reverse(b.path()));
+        for entry in std::fs::read_dir(&meta_dir)? {
+            let entry = entry?;
+            let path = entry.path();
 
-        if let Some(entry) = snapshots.first() {
-            let content = std::fs::read_to_string(entry.path())?;
-            return Ok(Some(Self::from_json(&content)?));
+            let is_json = path.extension().map(|ext| ext == "json").unwrap_or(false);
+            if !is_json {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path)?;
+            let snapshot = Self::from_json(&content)?;
+
+            let should_replace = match &latest {
+                None => true,
+                Some((current, current_path)) => {
+                    snapshot.created_at > current.created_at
+                        || (snapshot.created_at == current.created_at && path > *current_path)
+                }
+            };
+
+            if should_replace {
+                latest = Some((snapshot, path));
+            }
         }
 
-        Ok(None)
+        Ok(latest.map(|(snapshot, _)| snapshot))
     }
 
     /// Load all snapshots from a directory
@@ -583,5 +593,41 @@ impl IndexSnapshot {
             where_clause: index.where_clause.clone(),
             include: index.include.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_latest_prefers_snapshot_created_at_over_filename_order() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let meta_dir = dir.path().join("_meta");
+        std::fs::create_dir_all(&meta_dir).expect("failed to create _meta");
+
+        let older = Snapshot::new(SchemaDialect::Postgres);
+        let mut newer = Snapshot::new(SchemaDialect::Postgres);
+        newer.created_at = older.created_at + Duration::seconds(1);
+
+        // Intentionally write filenames in reverse lexical order relative to created_at.
+        std::fs::write(
+            meta_dir.join("99999999999999_old.json"),
+            older.to_json().expect("failed to serialize older snapshot"),
+        )
+        .expect("failed to write older snapshot");
+        std::fs::write(
+            meta_dir.join("00000000000000_new.json"),
+            newer.to_json().expect("failed to serialize newer snapshot"),
+        )
+        .expect("failed to write newer snapshot");
+
+        let latest = Snapshot::load_latest(dir.path())
+            .expect("failed to load latest snapshot")
+            .expect("latest snapshot should exist");
+
+        assert_eq!(latest.id, newer.id);
     }
 }

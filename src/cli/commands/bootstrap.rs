@@ -490,3 +490,99 @@ fn lua_string_vec(values: &[String]) -> String {
 fn normalize_ref_action(action: &str) -> String {
     action.trim().to_ascii_lowercase().replace(' ', "_")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::{EnumSnapshot, TableSnapshot};
+    use indexmap::IndexMap;
+
+    #[test]
+    fn test_parse_qualified_table() {
+        let (schema, table) = parse_qualified_table("public.schema_migrations");
+        assert_eq!(schema.as_deref(), Some("public"));
+        assert_eq!(table, "schema_migrations");
+
+        let (schema, table) = parse_qualified_table("\"public\".\"schema_migrations\"");
+        assert_eq!(schema.as_deref(), Some("public"));
+        assert_eq!(table, "schema_migrations");
+
+        let (schema, table) = parse_qualified_table("`schema_migrations`");
+        assert_eq!(schema, None);
+        assert_eq!(table, "schema_migrations");
+    }
+
+    #[test]
+    fn test_drop_table_if_exists_sql_qualified() {
+        let pg = drop_table_if_exists_sql(SchemaDialect::Postgres, Some("public"), "legacy");
+        assert_eq!(pg, "DROP TABLE IF EXISTS \"public\".\"legacy\"");
+
+        let mysql = drop_table_if_exists_sql(SchemaDialect::Mysql, Some("mydb"), "legacy");
+        assert_eq!(mysql, "DROP TABLE IF EXISTS `mydb`.`legacy`");
+    }
+
+    #[test]
+    fn test_render_lua_schema_basic() {
+        let mut snapshot = Snapshot::new(SchemaDialect::Postgres);
+        snapshot.schemas.push("public".to_string());
+        snapshot.enums.insert(
+            "status".to_string(),
+            EnumSnapshot {
+                name: "status".to_string(),
+                schema: Some("public".to_string()),
+                values: vec!["active".to_string(), "inactive".to_string()],
+                description: None,
+            },
+        );
+
+        let mut columns = IndexMap::new();
+        columns.insert(
+            "id".to_string(),
+            ColumnSnapshot {
+                name: "id".to_string(),
+                data_type: "INTEGER".to_string(),
+                nullable: false,
+                default: None,
+                primary_key: true,
+                unique: false,
+                generated: None,
+                identity: None,
+                comment: None,
+                collation: None,
+            },
+        );
+        columns.insert(
+            "state".to_string(),
+            ColumnSnapshot {
+                name: "state".to_string(),
+                data_type: "status".to_string(),
+                nullable: true,
+                default: None,
+                primary_key: false,
+                unique: false,
+                generated: None,
+                identity: None,
+                comment: None,
+                collation: None,
+            },
+        );
+
+        snapshot.tables.insert(
+            "users".to_string(),
+            TableSnapshot {
+                name: "users".to_string(),
+                schema: Some("public".to_string()),
+                columns,
+                constraints: Vec::new(),
+                indexes: IndexMap::new(),
+                comment: None,
+            },
+        );
+
+        let lua = render_lua_schema(&snapshot, SchemaDialect::Postgres);
+        assert!(lua.contains("local schema = pg.schema(\"public\")"));
+        assert!(lua.contains("EnumBuilder.new(\"status\")"));
+        assert!(lua.contains(":column(Col.integer(\"id\"):not_null():primary_key())"));
+        assert!(lua.contains(":column(Col.enum_type(\"state\", \"status\"))"));
+    }
+}

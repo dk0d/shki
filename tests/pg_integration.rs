@@ -11,6 +11,7 @@ use shki::migration::MigrationManager;
 use shki::queries::pg::introspect::introspect_postgres_schema;
 use shki::schema::SchemaDialect;
 use shki::snapshot::ConstraintType;
+use shki::{Cli, Commands, Snapshot, run};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AnyPool, Executor, Pool, Postgres};
 use std::time::Duration;
@@ -21,6 +22,186 @@ use uuid::Uuid;
 fn get_database_url() -> String {
     std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/shki".into())
+}
+
+mod squash_integration {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore] // Requires running PostgreSQL: `cargo test --test pg_integration -- --ignored`
+    async fn test_squash_command_archives_and_resets_to_single_migration() {
+        let pg_pool = create_pool().await;
+        let pool = create_any_pool().await;
+        let schema_name = unique_schema_name("squash");
+
+        setup_test_schema(&pg_pool, &schema_name).await;
+
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let out_dir = temp_dir.path().join("migrations");
+        let manager = MigrationManager::new(&out_dir, SchemaDialect::Postgres)
+            .with_table_name("__shki_migrations")
+            .with_prefix(shki::MigrationPrefix::Index)
+            .with_table_schema(&schema_name);
+
+        let lua_path = temp_dir.path().join("init.lua");
+        std::fs::write(
+            &lua_path,
+            format!(
+                r#"
+local schema = pg.schema("{schema}")
+local Table = TableBuilder
+local Col = ColumnBuilder
+
+schema:table(
+    Table.new("users")
+        :column(Col.integer("id"):primary_key())
+)
+
+return schema
+"#,
+                schema = schema_name
+            ),
+        )
+        .expect("failed to write init.lua (step 1)");
+        let snap1 = Snapshot::from_path(&lua_path).expect("failed to load lua snapshot step 1");
+
+        std::fs::write(
+            &lua_path,
+            format!(
+                r#"
+local schema = pg.schema("{schema}")
+local Table = TableBuilder
+local Col = ColumnBuilder
+
+schema:table(
+    Table.new("users")
+        :column(Col.integer("id"):primary_key())
+        :column(Col.text("email"))
+)
+
+return schema
+"#,
+                schema = schema_name
+            ),
+        )
+        .expect("failed to write init.lua (step 2)");
+        let snap2 = Snapshot::from_path(&lua_path).expect("failed to load lua snapshot step 2");
+
+        let (m1, _) = manager
+            .create_migration_with_down(
+                Some("create_users".to_string()),
+                &format!(
+                    "CREATE TABLE \"{}\".\"users\" (\"id\" INTEGER PRIMARY KEY);",
+                    schema_name
+                ),
+                None,
+                None,
+                &snap1,
+            )
+            .expect("failed to create migration 1");
+        manager
+            .apply_migration(&pool, &m1)
+            .await
+            .expect("failed to apply migration 1");
+
+        let (m2, _) = manager
+            .create_migration_with_down(
+                Some("add_email".to_string()),
+                &format!(
+                    "ALTER TABLE \"{}\".\"users\" ADD COLUMN \"email\" TEXT;",
+                    schema_name
+                ),
+                None,
+                Some(&snap1),
+                &snap2,
+            )
+            .expect("failed to create migration 2");
+        manager
+            .apply_migration(&pool, &m2)
+            .await
+            .expect("failed to apply migration 2");
+
+        let config_path = temp_dir.path().join("shki.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+root = "{}"
+dialect = "postgres"
+schema = "init.lua"
+out = "migrations"
+database_url = "{}"
+
+[migrations]
+table = "__shki_migrations"
+schema = "{}"
+prefix = "index"
+generate_down = false
+"#,
+                temp_dir.path().display(),
+                get_database_url(),
+                schema_name
+            ),
+        )
+        .expect("failed to write config");
+
+        let cli = Cli {
+            config: config_path,
+            dialect: None,
+            database_url: None,
+            out: None,
+            verbose: false,
+            command: Commands::Squash {
+                name: Some("squashed".to_string()),
+                dry_run: false,
+                force: false,
+            },
+        };
+
+        run(cli).await.expect("squash command failed");
+
+        let migrations = manager
+            .list_migrations()
+            .expect("failed to list migrations after squash");
+        assert_eq!(migrations.len(), 1);
+
+        let squashed_name = migrations[0]
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("missing migration filename")
+            .to_string();
+        assert!(squashed_name.contains("squashed"));
+
+        let archive_root = out_dir.join("_archive");
+        assert!(archive_root.exists());
+        let archive_entries: Vec<_> = std::fs::read_dir(&archive_root)
+            .expect("failed to read archive root")
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(archive_entries.len(), 1);
+
+        let archived_state = archive_entries[0].path();
+        let m1_name = m1
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("invalid migration filename");
+        let m2_name = m2
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("invalid migration filename");
+        assert!(archived_state.join(m1_name).exists());
+        assert!(archived_state.join(m2_name).exists());
+        assert!(archived_state.join("_meta").exists());
+
+        let applied = manager
+            .get_applied_migrations(&pool)
+            .await
+            .expect("failed to fetch applied migrations after squash");
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].name, squashed_name);
+
+        cleanup_test_schema(&pg_pool, &schema_name).await;
+    }
 }
 
 /// Create a connection pool for testing with retries

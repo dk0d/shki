@@ -187,3 +187,53 @@ async fn reset_migrations_table_to(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_is_migration_file() {
+        assert!(is_migration_file(Path::new("001_init.sql")));
+        assert!(is_migration_file(Path::new("001_init.down.sql")));
+        assert!(!is_migration_file(Path::new("README.md")));
+    }
+
+    #[test]
+    fn test_move_existing_to_archive_moves_sql_and_meta() {
+        let temp = TempDir::new().expect("failed to create temp dir");
+        let out_dir = temp.path().join("migrations");
+        fs::create_dir_all(out_dir.join("_meta")).expect("failed to create _meta");
+        fs::write(out_dir.join("0000_init.sql"), "SELECT 1;").expect("failed to write migration");
+        fs::write(out_dir.join("0000_init.down.sql"), "SELECT 1;")
+            .expect("failed to write down migration");
+        fs::write(out_dir.join("notes.txt"), "ignore").expect("failed to write notes file");
+
+        let archive_target = out_dir.join("_archive/20260101120000");
+        move_existing_to_archive(&out_dir, &archive_target).expect("failed to archive files");
+
+        assert!(!out_dir.join("0000_init.sql").exists());
+        assert!(!out_dir.join("0000_init.down.sql").exists());
+        assert!(!out_dir.join("_meta").exists());
+        assert!(out_dir.join("notes.txt").exists());
+
+        assert!(archive_target.join("0000_init.sql").exists());
+        assert!(archive_target.join("0000_init.down.sql").exists());
+        assert!(archive_target.join("_meta").exists());
+    }
+
+    #[test]
+    fn test_move_existing_to_archive_skips_archive_root() {
+        let temp = TempDir::new().expect("failed to create temp dir");
+        let out_dir = temp.path().join("migrations");
+        fs::create_dir_all(out_dir.join("_archive/old")).expect("failed to create _archive/old");
+        fs::write(out_dir.join("0001_next.sql"), "SELECT 1;").expect("failed to write migration");
+
+        let archive_target = out_dir.join("_archive/20260101120000");
+        move_existing_to_archive(&out_dir, &archive_target).expect("failed to archive files");
+
+        assert!(out_dir.join("_archive/old").exists());
+        assert!(archive_target.join("0001_next.sql").exists());
+    }
+}

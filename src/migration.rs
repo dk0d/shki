@@ -508,6 +508,8 @@ impl MigrationManager {
     /// Note: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
     /// run inside a transaction. For such cases, use separate migration files.
     pub async fn apply_migration(&self, pool: &AnyPool, migration_path: &Path) -> Result<()> {
+        self.ensure_migrations_table(pool).await?;
+
         let sql = std::fs::read_to_string(migration_path)?;
         let name = migration_path
             .file_stem()
