@@ -16,6 +16,12 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
         .with_table_name(&config.migrations.table)
         .with_prefix(config.migrations.prefix);
 
+    let migration_manager = if let Some(schema) = &config.migrations.schema {
+        migration_manager.with_table_schema(schema)
+    } else {
+        migration_manager
+    };
+
     // Get migrations that can be rolled back
     let rollback_migrations = migration_manager.get_rollback_migrations(&pool).await?;
 
