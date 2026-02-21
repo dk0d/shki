@@ -10,7 +10,7 @@ use petname::Generator;
 use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
 use sqlx::prelude::FromRow;
-use tabled::{Tabled, derive::display};
+use tabled::Tabled;
 
 use crate::checksum::sql_checksum;
 use crate::config::MigrationPrefix;
@@ -86,7 +86,7 @@ where
             let text = val.to_string();
             if text.len() > limit {
                 let text = tabled::settings::width::Truncate::truncate(&text, limit);
-                return text.into_owned();
+                return format!("{}...", &text);
             }
             text
         }
