@@ -37,7 +37,6 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
 
     if snapshots.is_empty() {
         println!("{}", "No snapshots found".red());
-        return Ok(());
     }
 
     // Try to get applied migrations if database URL is available
@@ -97,7 +96,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
                 .get(name)
                 .and_then(|m| m.checksum.as_deref())
                 .map(|c| format!("{}...", c.get(..5).unwrap_or(c)))
-                .unwrap_or_else(|| snapshot_checksum.unwrap_or_default());
+                .unwrap_or_else(|| format!("{}...", &snapshot_checksum.unwrap_or_default()[..5]));
 
             MigrationState {
                 status: status.to_string(),
@@ -152,6 +151,12 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     let migration_manager = MigrationManager::new(config.out_dir(), config.dialect)
         .with_table_name(&config.migrations.table);
 
+    let migration_manager = if let Some(schema) = &config.migrations.schema {
+        migration_manager.with_table_schema(schema)
+    } else {
+        migration_manager
+    };
+
     display_migrations(&migration_manager, config).await?;
 
     // Perform validation checks
@@ -188,8 +193,8 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
         if !missing_snapshots.is_empty() {
             println!();
-            println!();
-            println!("{}", "Database State".bright_red().bold());
+            println!("------\n{}", "Found missing snapshots".bright_red().bold());
+            println!("{}", "Database State".yellow());
 
             display_migration_rows(&applied);
 
@@ -205,7 +210,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
                 println!(
                     "  - {} ({})",
                     row.name.yellow(),
-                    row.checksum.clone().unwrap_or_default().dimmed()
+                    &row.checksum.clone().unwrap_or_default()[..5].dimmed()
                 );
             }
             println!();

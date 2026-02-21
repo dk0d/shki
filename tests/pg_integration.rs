@@ -1077,6 +1077,126 @@ mod migrations {
 
     #[tokio::test]
     #[ignore] // Requires running PostgreSQL
+    async fn test_cmd_migrate_creates_snapshot_for_manual_migrations() {
+        let pool = create_any_pool().await;
+        let pg_pool = create_pool().await;
+        let schema_name = unique_schema_name("manual_snapshots");
+        let suffix = &schema_name[16..24];
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+
+        setup_test_schema(&pg_pool, &schema_name).await;
+
+        let out_dir = temp_dir.path().join("migrations");
+        std::fs::create_dir_all(&out_dir).expect("failed to create migrations dir");
+
+        let migration_1 = format!(
+            r#"
+            CREATE TABLE "{schema}"."manual_users_{suffix}" (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            "#,
+            schema = schema_name,
+            suffix = suffix
+        );
+
+        let migration_2 = format!(
+            r#"
+            ALTER TABLE "{schema}"."manual_users_{suffix}"
+            ADD COLUMN email TEXT;
+            "#,
+            schema = schema_name,
+            suffix = suffix
+        );
+
+        std::fs::write(out_dir.join("0001_create_users.sql"), migration_1)
+            .expect("failed to write first manual migration");
+        std::fs::write(out_dir.join("0002_add_email.sql"), migration_2)
+            .expect("failed to write second manual migration");
+
+        let config_path = temp_dir.path().join("shki.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+root = "{}"
+dialect = "postgres"
+schema = "init.lua"
+out = "migrations"
+database_url = "{}"
+
+[migrations]
+table = "__shki_migrations"
+schema = "{}"
+prefix = "index"
+generate_down = false
+"#,
+                temp_dir.path().display(),
+                get_database_url(),
+                schema_name
+            ),
+        )
+        .expect("failed to write config");
+
+        let cli = Cli {
+            config: config_path,
+            dialect: None,
+            database_url: None,
+            out: None,
+            verbose: false,
+            command: Commands::Migrate { dry_run: false },
+        };
+
+        run(cli).await.expect("migrate command failed");
+
+        let manager = MigrationManager::new(&out_dir, SchemaDialect::Postgres)
+            .with_table_name("__shki_migrations")
+            .with_table_schema(&schema_name);
+
+        let applied = manager
+            .get_applied_migrations(&pool)
+            .await
+            .expect("failed to read applied migrations");
+        assert!(applied.iter().any(|m| m.name == "0001_create_users"));
+        assert!(applied.iter().any(|m| m.name == "0002_add_email"));
+
+        let snapshots = Snapshot::load_all(&out_dir).expect("failed to load snapshots");
+        assert_eq!(snapshots.len(), 2);
+
+        let first = snapshots
+            .iter()
+            .find(|s| {
+                s.migration
+                    .as_ref()
+                    .is_some_and(|m| m.name == "0001_create_users")
+            })
+            .expect("missing snapshot for first manual migration");
+
+        let second = snapshots
+            .iter()
+            .find(|s| {
+                s.migration
+                    .as_ref()
+                    .is_some_and(|m| m.name == "0002_add_email")
+            })
+            .expect("missing snapshot for second manual migration");
+
+        assert_eq!(second.prev_id.as_deref(), Some(first.id.as_str()));
+
+        let final_snapshot = introspect_postgres_schema(&pg_pool, &schema_name)
+            .await
+            .expect("failed to introspect final schema");
+        let users = final_snapshot
+            .tables
+            .get(&format!("manual_users_{}", suffix))
+            .expect("manual users table missing");
+        assert!(users.columns.contains_key("email"));
+
+        cleanup_test_schema(&pg_pool, &schema_name).await;
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_single() {
         let pool = create_any_pool().await;
         let pg_pool = create_pool().await;

@@ -77,11 +77,29 @@ pub struct MigrationManager {
     pub dialect: SchemaDialect,
 }
 
+pub fn option_truncate<T>(value: &Option<T>, default: &str, limit: usize) -> String
+where
+    T: ToString,
+{
+    match value {
+        Some(val) => {
+            let text = val.to_string();
+            if text.len() > limit {
+                let text = tabled::settings::width::Truncate::truncate(&text, limit);
+                return text.into_owned();
+            }
+            text
+        }
+        None => default.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, Tabled)]
 pub struct MigrationRow {
     pub id: i64,
     pub name: String,
-    #[tabled(display("display::option", ""))]
+
+    #[tabled(display("option_truncate", "", 5))]
     pub checksum: Option<String>,
     pub applied_at: String,
 }
@@ -287,12 +305,35 @@ impl MigrationManager {
 
         // Save the new snapshot with migration metadata
         // Use the full file content checksum so it matches what gets stored when applied.
-        let snapshot_with_migration = to_snapshot
+        let mut snapshot_with_migration = to_snapshot
             .clone()
             .with_migration(name.clone(), sql_checksum(&up_content));
+
+        if snapshot_with_migration.prev_id.is_none() {
+            snapshot_with_migration.prev_id = from_snapshot.map(|s| s.id.clone());
+        }
+
         snapshot_with_migration.save(&self.out_dir)?;
 
         Ok((up_path, down_path))
+    }
+
+    /// Save a post-migration snapshot with migration metadata.
+    ///
+    /// Used for manual migrations where the schema state is introspected
+    /// after applying SQL.
+    pub fn save_post_migration_snapshot(
+        &self,
+        mut snapshot: Snapshot,
+        migration_name: &str,
+        migration_checksum: &str,
+    ) -> Result<PathBuf> {
+        if snapshot.prev_id.is_none() {
+            snapshot.prev_id = self.load_latest_snapshot()?.map(|s| s.id);
+        }
+
+        let snapshot = snapshot.with_migration(migration_name, migration_checksum);
+        snapshot.save(&self.out_dir)
     }
 
     /// Create the migrations table if it doesn't exist
@@ -498,6 +539,27 @@ impl MigrationManager {
             .collect();
 
         Ok((applied, missing, checksums_match))
+    }
+
+    /// Ensure every applied migration has a corresponding snapshot entry.
+    pub async fn ensure_snapshot_coverage(&self, pool: &AnyPool) -> Result<()> {
+        let (_applied, missing, _checksums_match) =
+            self.find_migrations_without_snapshots(pool).await?;
+
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        let missing_names = missing
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Err(ShkiError::validation(format!(
+            "Applied migrations missing snapshots: {}. Each applied migration must have a snapshot in migrations/_meta. Run `shki status` for details.",
+            missing_names
+        )))
     }
 
     /// Apply a single migration within a transaction
@@ -1742,6 +1804,85 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
         assert_eq!(migration_info.name, expected_name);
         assert_eq!(migration_info.checksum.len(), 64);
+    }
+
+    #[test]
+    fn test_create_migration_sets_snapshot_prev_id() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let first_snapshot = crate::Snapshot::new(SchemaDialect::Postgres);
+        manager
+            .create_migration_with_down(
+                Some("first".to_string()),
+                "CREATE TABLE users (id SERIAL PRIMARY KEY);",
+                None,
+                None,
+                &first_snapshot,
+            )
+            .expect("failed to create first migration");
+
+        let previous = crate::Snapshot::load_latest(temp_dir.path())
+            .expect("failed to load latest snapshot")
+            .expect("expected first snapshot");
+
+        let second_snapshot = crate::Snapshot::new(SchemaDialect::Postgres);
+        manager
+            .create_migration_with_down(
+                Some("second".to_string()),
+                "ALTER TABLE users ADD COLUMN email TEXT;",
+                None,
+                Some(&previous),
+                &second_snapshot,
+            )
+            .expect("failed to create second migration");
+
+        let latest = crate::Snapshot::load_latest(temp_dir.path())
+            .expect("failed to load latest snapshot")
+            .expect("expected latest snapshot");
+
+        assert_eq!(latest.prev_id.as_deref(), Some(previous.id.as_str()));
+    }
+
+    #[test]
+    fn test_save_post_migration_snapshot_sets_prev_id_and_metadata() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let first = crate::Snapshot::new(SchemaDialect::Postgres);
+        manager
+            .save_post_migration_snapshot(first, "0000_initial", "abc123")
+            .expect("failed to save first snapshot");
+
+        let second = crate::Snapshot::new(SchemaDialect::Postgres);
+        manager
+            .save_post_migration_snapshot(second, "0001_next", "def456")
+            .expect("failed to save second snapshot");
+
+        let snapshots =
+            crate::Snapshot::load_all(temp_dir.path()).expect("failed to load snapshots");
+        assert_eq!(snapshots.len(), 2);
+
+        let first = &snapshots[0];
+        let second = &snapshots[1];
+
+        assert_eq!(
+            first
+                .migration
+                .as_ref()
+                .expect("first snapshot missing migration")
+                .name,
+            "0000_initial"
+        );
+        assert_eq!(
+            second
+                .migration
+                .as_ref()
+                .expect("second snapshot missing migration")
+                .name,
+            "0001_next"
+        );
+        assert_eq!(second.prev_id.as_deref(), Some(first.id.as_str()));
     }
 
     // ==================== Snapshot Validation Tests ====================

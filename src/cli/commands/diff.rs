@@ -10,8 +10,18 @@ pub async fn cmd_diff(
     schema_path: Option<&std::path::Path>,
     show_sql: bool,
 ) -> Result<()> {
-    println!("{}", "Introspecting database...".cyan());
+    println!("{}", "Introspecting database...".yellow());
+
     let db_snapshot = introspect_db(config).await?;
+
+    println!(
+        "URL: {}",
+        config
+            .database_url
+            .clone()
+            .unwrap_or_default()
+            .bright_green()
+    );
 
     // Load desired schema from file if provided, otherwise use latest snapshot
     let desired_snapshot = if let Some(path) = schema_path {
