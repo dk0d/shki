@@ -1,3 +1,4 @@
+mod bootstrap;
 pub mod codegen;
 mod create;
 mod diff;
@@ -77,6 +78,30 @@ pub async fn run(cli: Cli) -> Result<()> {
             output,
             with_migration_table,
         } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
+
+        Commands::Bootstrap {
+            name,
+            legacy_tables,
+            drop_legacy_tables,
+            write_lua,
+            lua_output,
+            no_mark_applied,
+            dry_run,
+            force,
+        } => {
+            bootstrap::cmd_bootstrap(
+                &config,
+                name,
+                legacy_tables,
+                drop_legacy_tables,
+                write_lua,
+                lua_output,
+                !no_mark_applied,
+                dry_run,
+                force,
+            )
+            .await
+        }
 
         Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
 

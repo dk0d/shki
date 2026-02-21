@@ -554,6 +554,42 @@ impl MigrationManager {
         Ok(())
     }
 
+    /// Record an existing migration file as applied without executing its SQL.
+    ///
+    /// This is useful for bootstrap/adoption workflows where the database already
+    /// matches the migration state and only tracking metadata should be inserted.
+    pub async fn mark_migration_applied(
+        &self,
+        pool: &AnyPool,
+        migration_path: &Path,
+    ) -> Result<()> {
+        self.ensure_migrations_table(pool).await?;
+
+        let sql = std::fs::read_to_string(migration_path)?;
+        let name = migration_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
+
+        let checksum = sql_checksum(&sql);
+        let query = queries::insert_migration(
+            &self.dialect,
+            self.table_schema.as_deref(),
+            &self.table_name,
+        );
+
+        sqlx::query(&query)
+            .bind(name)
+            .bind(&checksum)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
+            })?;
+
+        Ok(())
+    }
+
     /// Apply all pending migrations
     ///
     /// Validates both snapshots and applied migration checksums before applying
