@@ -9,6 +9,7 @@ mod init;
 pub mod introspect;
 mod migrate;
 mod pull;
+mod squash;
 mod status;
 
 use crate::config::Config;
@@ -102,6 +103,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
+
+        Commands::Squash {
+            name,
+            dry_run,
+            force,
+        } => squash::cmd_squash(&config, name, dry_run, force).await,
 
         Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
 

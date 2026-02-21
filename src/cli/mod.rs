@@ -255,6 +255,22 @@ pub enum Commands {
         force: bool,
     },
 
+    /// Squash existing shki migrations into a single baseline migration
+    #[command(visible_alias = "sq")]
+    Squash {
+        /// Migration name/suffix for the squashed migration
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Show what would happen without writing files or changing DB
+        #[arg(long, short)]
+        dry_run: bool,
+
+        /// Allow squash even if local outputs already look unusual
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+
     /// Show the diff between schema and database
     Diff {
         /// Path to schema file(s) or directory

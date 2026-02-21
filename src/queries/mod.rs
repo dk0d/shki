@@ -144,3 +144,12 @@ pub fn alter_migrations_add_checksum(
         SchemaDialect::Sqlite => format!("ALTER TABLE {} ADD COLUMN checksum TEXT", table_name),
     }
 }
+
+pub fn clear_migrations(
+    _dialect: &SchemaDialect,
+    schema_name: Option<&str>,
+    table_name: &str,
+) -> String {
+    let table_name = qualified_table(schema_name, table_name);
+    format!("DELETE FROM {}", table_name)
+}
