@@ -15,8 +15,38 @@ use crate::snapshot::Snapshot;
 use crate::{Config, Result};
 use std::path::PathBuf;
 
-use languages::{CodeGenerator, ProtobufWriter, RustWriter, TypeScriptWriter};
+use languages::{CodeGenerator, ProtobufWriter, RustWriter};
 use writer::CodeWriter;
+
+use self::languages::TypeScriptWriter;
+
+fn run_codegen<G, W>(
+    generator: G,
+    writer: W,
+    snapshot: &Snapshot,
+    config: &CodegenConfig,
+) -> Result<()>
+where
+    G: CodeGenerator,
+    W: CodeWriter<GeneratedCode = G::Output>,
+{
+    let generated = generator.generate(snapshot, config);
+
+    if config.verbose {
+        println!("{}", writer.format_preview(&generated));
+    }
+
+    if config.output.is_none() {
+        println!(
+            "{}",
+            "Generation skipped: no output path specified.".yellow()
+        );
+        return Ok(());
+    }
+
+    writer.write(&generated, config)?;
+    Ok(())
+}
 
 pub fn cmd_codegen(
     config: &Config,
@@ -49,58 +79,28 @@ pub fn cmd_codegen(
 
     match language {
         CodegenLanguage::Rust => {
-            let generated = languages::RustGenerator::generate(&snapshot, gen_config);
-            let writer = RustWriter;
-
-            if gen_config.verbose {
-                println!("{}", writer.format_preview(&generated));
-            }
-
-            if gen_config.output.is_none() {
-                println!(
-                    "{}",
-                    "Generation skipped: no output path specified.".yellow()
-                );
-                return Ok(());
-            }
-
-            writer.write(&generated, gen_config)?;
+            run_codegen(
+                languages::RustGenerator::new(),
+                RustWriter,
+                &snapshot,
+                gen_config,
+            )?;
         }
         CodegenLanguage::Protobuf => {
-            let generated = languages::ProtobufGenerator::generate(&snapshot, gen_config);
-            let writer = ProtobufWriter;
-
-            if gen_config.verbose {
-                println!("{}", writer.format_preview(&generated));
-            }
-
-            if gen_config.output.is_none() {
-                println!(
-                    "{}",
-                    "Generation skipped: no output path specified.".yellow()
-                );
-                return Ok(());
-            }
-
-            writer.write(&generated, gen_config)?;
+            run_codegen(
+                languages::ProtobufGenerator::new(),
+                ProtobufWriter,
+                &snapshot,
+                gen_config,
+            )?;
         }
-        CodegenLanguage::TypeScript => {
-            let generated = languages::TypeScriptGenerator::generate(&snapshot, gen_config);
-            let writer = TypeScriptWriter;
-
-            if gen_config.verbose {
-                println!("{}", writer.format_preview(&generated));
-            }
-
-            if gen_config.output.is_none() {
-                println!(
-                    "{}",
-                    "Generation skipped: no output path specified.".yellow()
-                );
-                return Ok(());
-            }
-
-            writer.write(&generated, gen_config)?;
+        CodegenLanguage::Typescript { flavor } => {
+            run_codegen(
+                languages::TypeScriptGenerator::new(flavor),
+                TypeScriptWriter::new(flavor),
+                &snapshot,
+                gen_config,
+            )?;
         }
     }
 

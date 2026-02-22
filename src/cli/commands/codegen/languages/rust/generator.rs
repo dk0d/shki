@@ -129,18 +129,25 @@ fn extract_imports(rust_type: &str, imports: &mut Vec<String>) {
 }
 
 /// Rust code generator
+#[derive(Default)]
 pub struct RustGenerator;
+
+impl RustGenerator {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 impl CodeGenerator for RustGenerator {
     type Output = GeneratedRust;
 
     /// Generate Rust code from a schema snapshot
-    fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedRust {
+    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedRust {
         let mut code = GeneratedRust::new();
 
         // Generate enums first (structs may depend on them)
         for (name, enum_snapshot) in &snapshot.enums {
-            let rust_enum = Self::generate_enum(name, enum_snapshot, config);
+            let rust_enum = self.generate_enum(name, enum_snapshot, config);
             code.enums.insert(name.clone(), rust_enum);
         }
 
@@ -149,7 +156,7 @@ impl CodeGenerator for RustGenerator {
             if !config.should_include_table(name) {
                 continue;
             }
-            let rust_struct = Self::generate_struct(name, table_snapshot, &snapshot.enums, config);
+            let rust_struct = self.generate_struct(name, table_snapshot, &snapshot.enums, config);
             code.structs.insert(name.clone(), rust_struct);
         }
 
@@ -159,8 +166,13 @@ impl CodeGenerator for RustGenerator {
 
 impl RustGenerator {
     /// Generate a Rust enum from an enum snapshot
-    fn generate_enum(name: &str, enum_snapshot: &EnumSnapshot, config: &CodegenConfig) -> RustEnum {
-        let rust_name = Self::transform_enum_name(name, config);
+    fn generate_enum(
+        &self,
+        name: &str,
+        enum_snapshot: &EnumSnapshot,
+        config: &CodegenConfig,
+    ) -> RustEnum {
+        let rust_name = self.transform_enum_name(name, config);
 
         let variants: Vec<RustEnumVariant> = enum_snapshot
             .values
@@ -187,17 +199,18 @@ impl RustGenerator {
 
     /// Generate a Rust struct from a table snapshot
     fn generate_struct(
+        &self,
         name: &str,
         table: &TableSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> RustStruct {
-        let rust_name = Self::transform_struct_name(name, config);
+        let rust_name = self.transform_struct_name(name, config);
 
         let fields: Vec<RustField> = table
             .columns
             .values()
-            .map(|col| Self::generate_field(col, enums, config))
+            .map(|col| self.generate_field(col, enums, config))
             .collect();
 
         RustStruct {
@@ -213,12 +226,13 @@ impl RustGenerator {
 
     /// Generate a Rust field from a column snapshot
     fn generate_field(
+        &self,
         col: &ColumnSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> RustField {
         let field_name = make_safe_field_name(&col.name);
-        let rust_type = Self::sql_type_to_rust(&col.data_type, col.nullable, enums, config);
+        let rust_type = self.sql_type_to_rust(&col.data_type, col.nullable, enums, config);
 
         RustField {
             name: field_name,
@@ -233,6 +247,7 @@ impl RustGenerator {
 
     /// Convert a SQL type string to a Rust type string
     pub fn sql_type_to_rust(
+        &self,
         sql_type: &str,
         nullable: bool,
         enums: &IndexMap<String, EnumSnapshot>,
@@ -264,7 +279,7 @@ impl RustGenerator {
 
         // Handle array types
         if let Some(inner) = sql_type.strip_suffix("[]") {
-            let inner_rust = Self::sql_type_to_rust(inner, false, enums, config);
+            let inner_rust = self.sql_type_to_rust(inner, false, enums, config);
             return format!("Vec<{}>", inner_rust);
         }
 
@@ -601,20 +616,22 @@ mod tests {
         let enums = IndexMap::new();
         let config = CodegenConfig::default();
 
+        let generator = RustGenerator;
+
         assert_eq!(
-            RustGenerator::sql_type_to_rust("INTEGER", false, &enums, &config),
+            generator.sql_type_to_rust("INTEGER", false, &enums, &config),
             "i32"
         );
         assert_eq!(
-            RustGenerator::sql_type_to_rust("TEXT", true, &enums, &config),
+            generator.sql_type_to_rust("TEXT", true, &enums, &config),
             "Option<String>"
         );
         assert_eq!(
-            RustGenerator::sql_type_to_rust("TIMESTAMP WITH TIME ZONE", false, &enums, &config),
+            generator.sql_type_to_rust("TIMESTAMP WITH TIME ZONE", false, &enums, &config),
             "chrono::DateTime<chrono::Utc>"
         );
         assert_eq!(
-            RustGenerator::sql_type_to_rust("UUID", false, &enums, &config),
+            generator.sql_type_to_rust("UUID", false, &enums, &config),
             "uuid::Uuid"
         );
     }

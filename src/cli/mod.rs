@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::schema::SchemaDialect;
 
 use self::commands::codegen::OutputMode;
+use self::commands::codegen::languages::TypescriptFlavor;
 pub use CodegenLanguage as LanguageArg;
 
 pub fn get_styles() -> clap::builder::Styles {
@@ -110,30 +111,19 @@ pub enum SchemaLanguage {
 }
 
 /// Output language for code generation
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    clap::ValueEnum,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[serde(rename_all = "lowercase")]
+/// Commands for specifying which language to generate code for
+/// also allows for language specific flags and configuration
+#[derive(Subcommand, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CodegenLanguage {
-    /// Generate Rust structs and enums
-    #[default]
     Rust,
 
-    /// Generate Protocol Buffer definitions (.proto files)
-    #[value(name = "proto", alias = "protobuf")]
-    Protobuf,
+    #[command(visible_alias = "ts")]
+    Typescript {
+        flavor: TypescriptFlavor,
+    },
 
-    /// Generate TypeScript interfaces and enums
-    #[value(name = "ts", alias = "typescript")]
-    TypeScript,
+    #[command(visible_alias = "proto")]
+    Protobuf,
 }
 
 /// CLI commands
@@ -288,6 +278,10 @@ pub enum Commands {
     /// Generate Rust structs/enums from database schema
     #[command(visible_alias = "code")]
     Codegen {
+        /// Output language (rust, protobuf, ts)
+        #[command(subcommand)]
+        language: CodegenLanguage,
+
         /// Path to output directory
         #[arg(short, long)]
         out: Option<PathBuf>,
@@ -300,10 +294,9 @@ pub enum Commands {
         #[arg(long, short)]
         mode: Option<OutputMode>,
 
-        /// Output language (rust or protobuf)
-        #[arg(long, short = 'L', value_enum, default_value = "rust")]
-        language: CodegenLanguage,
-
+        // Output language (rust or protobuf)
+        // #[arg(long, short = 'L', value_enum, default_value = "rust")]
+        // language: CodegenLanguage,
         /// Enable verbose output
         /// Will print the generated code to stdout as well as writing to files
         #[arg(short, long, default_value_t = false)]

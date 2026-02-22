@@ -5,8 +5,8 @@
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
-use crate::commands::codegen::CodegenConfig;
 use crate::commands::codegen::languages::generator::CodeGenerator;
+use crate::commands::codegen::CodegenConfig;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
 /// Generated Protocol Buffer code
@@ -79,13 +79,20 @@ pub struct ProtoField {
 }
 
 /// Protocol Buffer generator
+#[derive(Default)]
 pub struct ProtobufGenerator;
+
+impl ProtobufGenerator {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 impl CodeGenerator for ProtobufGenerator {
     type Output = GeneratedProto;
 
     /// Generate Protocol Buffer code from a schema snapshot
-    fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedProto {
+    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedProto {
         let mut proto = GeneratedProto {
             package: "schema".to_string(),
             ..Default::default()
@@ -93,7 +100,7 @@ impl CodeGenerator for ProtobufGenerator {
 
         // Generate enums first (messages may depend on them)
         for (name, enum_snapshot) in &snapshot.enums {
-            let proto_enum = Self::generate_enum(name, enum_snapshot, config);
+            let proto_enum = self.generate_enum(name, enum_snapshot, config);
             proto.enums.insert(name.clone(), proto_enum);
         }
 
@@ -103,7 +110,7 @@ impl CodeGenerator for ProtobufGenerator {
                 continue;
             }
             let (proto_message, imports) =
-                Self::generate_message(name, table_snapshot, &snapshot.enums, config);
+                self.generate_message(name, table_snapshot, &snapshot.enums, config);
             proto.messages.insert(name.clone(), proto_message);
 
             // Collect imports
@@ -122,11 +129,12 @@ impl CodeGenerator for ProtobufGenerator {
 impl ProtobufGenerator {
     /// Generate a Protocol Buffer enum from an enum snapshot
     fn generate_enum(
+        &self,
         name: &str,
         enum_snapshot: &EnumSnapshot,
         config: &CodegenConfig,
     ) -> ProtoEnum {
-        let proto_name = Self::transform_enum_name(name, config);
+        let proto_name = self.transform_enum_name(name, config);
 
         // Create UNSPECIFIED as the first value (proto3 requirement)
         let prefix = proto_name.to_shouty_snake_case();
@@ -157,12 +165,13 @@ impl ProtobufGenerator {
 
     /// Generate a Protocol Buffer message from a table snapshot
     fn generate_message(
+        &self,
         name: &str,
         table: &TableSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> (ProtoMessage, Vec<String>) {
-        let proto_name = Self::transform_struct_name(name, config);
+        let proto_name = self.transform_struct_name(name, config);
 
         let mut imports = Vec::new();
         let fields: Vec<ProtoField> = table

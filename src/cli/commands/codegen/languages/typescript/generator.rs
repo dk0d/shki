@@ -8,7 +8,6 @@ use indexmap::IndexMap;
 use crate::commands::codegen::CodegenConfig;
 use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
-
 /// Generated TypeScript code
 #[derive(Debug, Clone, Default)]
 pub struct GeneratedTypeScript {
@@ -51,6 +50,8 @@ pub struct TypeScriptInterface {
     pub properties: Vec<TypeScriptProperty>,
     /// Doc comment
     pub comment: Option<String>,
+    /// Export as interface or type
+    pub flavor: TypescriptFlavor,
 }
 
 /// A property in a TypeScript interface
@@ -80,19 +81,46 @@ impl GeneratedTypeScript {
     }
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TypescriptFlavor {
+    Type,
+    #[default]
+    Interface,
+}
+
 /// TypeScript code generator
-pub struct TypeScriptGenerator;
+#[derive(Default)]
+pub struct TypeScriptGenerator {
+    pub flavor: TypescriptFlavor,
+}
+
+impl TypeScriptGenerator {
+    pub fn new(flavor: TypescriptFlavor) -> Self {
+        Self { flavor }
+    }
+}
 
 impl CodeGenerator for TypeScriptGenerator {
     type Output = GeneratedTypeScript;
 
     /// Generate TypeScript code from a schema snapshot
-    fn generate(snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedTypeScript {
+    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedTypeScript {
         let mut code = GeneratedTypeScript::new();
 
         // Generate enums first (interfaces may depend on them)
         for (name, enum_snapshot) in &snapshot.enums {
-            let ts_enum = Self::generate_enum(name, enum_snapshot, config);
+            let ts_enum = self.generate_enum(name, enum_snapshot, config);
             code.enums.insert(name.clone(), ts_enum);
         }
 
@@ -102,7 +130,7 @@ impl CodeGenerator for TypeScriptGenerator {
                 continue;
             }
             let ts_interface =
-                Self::generate_interface(name, table_snapshot, &snapshot.enums, config);
+                self.generate_interface(name, table_snapshot, &snapshot.enums, config);
             code.interfaces.insert(name.clone(), ts_interface);
         }
 
@@ -113,11 +141,12 @@ impl CodeGenerator for TypeScriptGenerator {
 impl TypeScriptGenerator {
     /// Generate a TypeScript enum from an enum snapshot
     fn generate_enum(
+        &self,
         name: &str,
         enum_snapshot: &EnumSnapshot,
         config: &CodegenConfig,
     ) -> TypeScriptEnum {
-        let ts_name = Self::transform_enum_name(name, config);
+        let ts_name = self.transform_enum_name(name, config);
 
         let members: Vec<TypeScriptEnumMember> = enum_snapshot
             .values
@@ -138,17 +167,18 @@ impl TypeScriptGenerator {
 
     /// Generate a TypeScript interface from a table snapshot
     fn generate_interface(
+        &self,
         name: &str,
         table: &TableSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> TypeScriptInterface {
-        let ts_name = Self::transform_struct_name(name, config);
+        let ts_name = self.transform_struct_name(name, config);
 
         let properties: Vec<TypeScriptProperty> = table
             .columns
             .values()
-            .map(|col| Self::generate_property(col, enums, config))
+            .map(|col| self.generate_property(col, enums, config))
             .collect();
 
         TypeScriptInterface {
@@ -156,17 +186,19 @@ impl TypeScriptGenerator {
             table_name: name.to_string(),
             properties,
             comment: table.comment.clone(),
+            flavor: self.flavor,
         }
     }
 
     /// Generate a TypeScript property from a column snapshot
     fn generate_property(
+        &self,
         col: &ColumnSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
     ) -> TypeScriptProperty {
         let property_name = col.name.to_lower_camel_case();
-        let ts_type = Self::sql_type_to_typescript(&col.data_type, enums, config);
+        let ts_type = self.sql_type_to_typescript(&col.data_type, enums, config);
 
         TypeScriptProperty {
             name: property_name,
@@ -179,6 +211,7 @@ impl TypeScriptGenerator {
 
     /// Convert a SQL type to a TypeScript type
     pub fn sql_type_to_typescript(
+        &self,
         sql_type: &str,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
@@ -207,7 +240,7 @@ impl TypeScriptGenerator {
 
         // Handle array types
         if let Some(inner) = sql_type.strip_suffix("[]") {
-            let inner_ts = Self::sql_type_to_typescript(inner, enums, config);
+            let inner_ts = self.sql_type_to_typescript(inner, enums, config);
             return format!("{}[]", inner_ts);
         }
 
@@ -336,7 +369,10 @@ impl std::fmt::Display for TypeScriptInterface {
 
         // Table name annotation
         writeln!(f, "/** Table: {} */", self.table_name)?;
-        writeln!(f, "export interface {} {{", self.name)?;
+        match self.flavor {
+            TypescriptFlavor::Interface => writeln!(f, "export interface {} {{", self.name)?,
+            TypescriptFlavor::Type => writeln!(f, "export type {} = {{", self.name)?,
+        }
 
         for prop in &self.properties {
             write!(f, "{}", prop)?;
@@ -383,61 +419,59 @@ mod tests {
         let enums = IndexMap::new();
         let config = CodegenConfig::default();
 
+        let generator = TypeScriptGenerator::default();
+
         // Integer types -> number
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("INTEGER", &enums, &config),
+            generator.sql_type_to_typescript("INTEGER", &enums, &config),
             "number"
         );
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("BIGINT", &enums, &config),
+            generator.sql_type_to_typescript("BIGINT", &enums, &config),
             "number"
         );
 
         // Text types -> string
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("TEXT", &enums, &config),
+            generator.sql_type_to_typescript("TEXT", &enums, &config),
             "string"
         );
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("VARCHAR", &enums, &config),
+            generator.sql_type_to_typescript("VARCHAR", &enums, &config),
             "string"
         );
 
         // Boolean
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("BOOLEAN", &enums, &config),
+            generator.sql_type_to_typescript("BOOLEAN", &enums, &config),
             "boolean"
         );
 
         // Timestamp -> Date
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript(
-                "TIMESTAMP WITH TIME ZONE",
-                &enums,
-                &config
-            ),
+            generator.sql_type_to_typescript("TIMESTAMP WITH TIME ZONE", &enums, &config),
             "Date"
         );
 
         // UUID -> string
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("UUID", &enums, &config),
+            generator.sql_type_to_typescript("UUID", &enums, &config),
             "string"
         );
 
         // JSON -> unknown
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("JSONB", &enums, &config),
+            generator.sql_type_to_typescript("JSONB", &enums, &config),
             "unknown"
         );
 
         // Array types
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("INTEGER[]", &enums, &config),
+            generator.sql_type_to_typescript("INTEGER[]", &enums, &config),
             "number[]"
         );
         assert_eq!(
-            TypeScriptGenerator::sql_type_to_typescript("TEXT[]", &enums, &config),
+            generator.sql_type_to_typescript("TEXT[]", &enums, &config),
             "string[]"
         );
     }
@@ -496,6 +530,7 @@ mod tests {
                 },
             ],
             comment: None,
+            flavor: TypescriptFlavor::Interface,
         };
 
         let output = ts_interface.to_string();
