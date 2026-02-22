@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use colored::Colorize;
 use heck::ToSnakeCase;
 
 use crate::Result;
@@ -174,6 +175,17 @@ impl CodeWriter for TypeScriptWriter {
         output_dir: &Path,
         config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
+        println!();
+        println!("-");
+        println!(
+            "{}: Typescript codegen doesn't currently support {} setting",
+            "Warning".yellow().bold(),
+            "modules".cyan()
+        );
+        println!("Falling back to {}", "single-module".cyan().bold());
+        println!("-");
+        println!();
+
         // For TypeScript, modules mode is the same as single_module
         // (separate files with an index.ts barrel file)
         self.write_single_module(code, output_dir, config)
