@@ -8,8 +8,8 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::ShkiError;
 use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
+use crate::ShkiError;
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,7 +381,7 @@ impl Snapshot {
             return Ok(Vec::new());
         }
 
-        let mut entries: Vec<_> = std::fs::read_dir(&meta_dir)?
+        let entries: Vec<_> = std::fs::read_dir(&meta_dir)?
             .filter_map(|e| e.ok())
             .filter(|e| {
                 e.path()
@@ -391,16 +391,26 @@ impl Snapshot {
             })
             .collect();
 
-        // Sort by filename (which includes timestamp) - oldest first
-        entries.sort_by_key(|e| e.path());
-
-        let mut snapshots = Vec::new();
+        let mut snapshots_with_path = Vec::new();
         for entry in entries {
-            let content = std::fs::read_to_string(entry.path())?;
-            snapshots.push(Self::from_json(&content)?);
+            let path = entry.path();
+            let content = std::fs::read_to_string(&path)?;
+            let snapshot = Self::from_json(&content)?;
+            snapshots_with_path.push((snapshot, path));
         }
 
-        Ok(snapshots)
+        // Sort by snapshot creation time (oldest first).
+        // Fall back to file path for deterministic ordering when timestamps are equal.
+        snapshots_with_path.sort_by(|(a, a_path), (b, b_path)| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a_path.cmp(b_path))
+        });
+
+        Ok(snapshots_with_path
+            .into_iter()
+            .map(|(snapshot, _)| snapshot)
+            .collect())
     }
 
     /// Save snapshot to a directory

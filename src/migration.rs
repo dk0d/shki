@@ -1863,8 +1863,24 @@ ALTER TABLE users ADD COLUMN name TEXT;
             crate::Snapshot::load_all(temp_dir.path()).expect("failed to load snapshots");
         assert_eq!(snapshots.len(), 2);
 
-        let first = &snapshots[0];
-        let second = &snapshots[1];
+        let first = snapshots
+            .iter()
+            .find(|s| {
+                s.migration
+                    .as_ref()
+                    .map(|m| m.name.as_str() == "0000_initial")
+                    .unwrap_or(false)
+            })
+            .expect("missing first snapshot");
+        let second = snapshots
+            .iter()
+            .find(|s| {
+                s.migration
+                    .as_ref()
+                    .map(|m| m.name.as_str() == "0001_next")
+                    .unwrap_or(false)
+            })
+            .expect("missing second snapshot");
 
         assert_eq!(
             first
