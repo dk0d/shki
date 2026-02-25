@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use colored::Colorize;
 use heck::ToSnakeCase;
 
-use crate::Result;
-use crate::commands::codegen::CodegenConfig;
 use crate::commands::codegen::writer::CodeWriter;
+use crate::commands::codegen::CodegenConfig;
+use crate::Result;
 
 use super::{GeneratedTypeScript, TypeScriptInterface, TypescriptFlavor};
 
@@ -83,17 +83,35 @@ impl TypeScriptWriter {
     }
 
     /// Write an index.ts file that re-exports all types
-    fn write_index_file(&self, index_path: &Path, exports: &[(String, String)]) -> Result<()> {
+    fn write_index_file(&self, index_path: &Path, exports: &[ExportEntry]) -> Result<()> {
         let mut file = fs::File::create(index_path)?;
 
         writeln!(file, "{}", Self::HEADER)?;
         writeln!(file)?;
 
-        for (module_name, type_name) in exports {
-            writeln!(file, "export {{ {} }} from './{}';", type_name, module_name)?;
+        for export in exports {
+            writeln!(
+                file,
+                "export {{ {} }} from './{}';",
+                export.type_name, export.module_name
+            )?;
         }
 
         Ok(())
+    }
+}
+
+struct ExportEntry {
+    module_name: String,
+    type_name: String,
+}
+
+impl ExportEntry {
+    fn new(module_name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        Self {
+            module_name: module_name.into(),
+            type_name: type_name.into(),
+        }
     }
 }
 
@@ -139,7 +157,7 @@ impl CodeWriter for TypeScriptWriter {
         fs::create_dir_all(output_dir)?;
 
         let mut written_files = Vec::new();
-        let mut exports: Vec<(String, String)> = Vec::new();
+        let mut exports = Vec::new();
 
         // Write enum files
         for ts_enum in code.enums.values() {
@@ -151,7 +169,7 @@ impl CodeWriter for TypeScriptWriter {
             writeln!(file, "{}", ts_enum)?;
 
             written_files.push(file_path);
-            exports.push((module_name, ts_enum.name.clone()));
+            exports.push(ExportEntry::new(module_name, ts_enum.name.clone()));
         }
 
         // Write interface files
@@ -166,7 +184,7 @@ impl CodeWriter for TypeScriptWriter {
             writeln!(file, "{}", ts_interface)?;
 
             written_files.push(file_path);
-            exports.push((module_name, ts_interface.name.clone()));
+            exports.push(ExportEntry::new(module_name, ts_interface.name.clone()));
         }
 
         // Write index.ts

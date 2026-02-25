@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use heck::ToSnakeCase;
 
-use crate::commands::codegen::writer::CodeWriter;
-use crate::commands::codegen::CodegenConfig;
 use crate::Result;
+use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::writer::CodeWriter;
 
 use super::{GeneratedProto, ProtoEnum, ProtoMessage};
 

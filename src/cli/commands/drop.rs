@@ -73,8 +73,26 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
                 .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))?;
 
             if confirmed {
+                let down_path = migration_manager.get_down_migration_path(path);
+                let has_down = down_path.exists();
+
                 std::fs::remove_file(path)?;
+                if has_down {
+                    std::fs::remove_file(&down_path)?;
+                }
+                let removed_snapshots = migration_manager.remove_snapshots_for_migration(name)?;
+
                 println!("{} {}", "Dropped:".green(), name);
+                if has_down {
+                    println!("{} {}", "Dropped down:".green(), down_path.display());
+                }
+                if removed_snapshots > 0 {
+                    println!(
+                        "{} {}",
+                        "Dropped snapshot(s):".green(),
+                        removed_snapshots.to_string().cyan()
+                    );
+                }
             } else {
                 println!("{}", "Aborted".yellow());
             }

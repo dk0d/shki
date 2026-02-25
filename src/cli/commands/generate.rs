@@ -102,11 +102,25 @@ pub fn cmd_generate_sql_interactive(
             );
         }
 
-        if !down_diff.is_empty() {
-            Some(generator.generate_sql(&down_diff)?)
+        let mut content = if !down_diff.is_empty() {
+            generator.generate_sql(&down_diff)?
         } else {
-            None
+            String::new()
+        };
+
+        if !irreversible.is_empty() {
+            if !content.is_empty() {
+                content.push_str("\n\n");
+            }
+            content.push_str("-- Manual rollback required for irreversible statements:\n");
+            for stmt in &irreversible {
+                content.push_str("-- - ");
+                content.push_str(&format!("{}", stmt));
+                content.push('\n');
+            }
         }
+
+        Some(content)
     } else {
         None
     };

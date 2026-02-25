@@ -130,8 +130,12 @@ pub async fn cmd_bootstrap(
 
         if drop_legacy_tables {
             for legacy in &legacy_tables {
-                let (schema, table) = parse_qualified_table(legacy);
-                let sql = drop_table_if_exists_sql(config.dialect, schema.as_deref(), &table);
+                let qualified = parse_qualified_table(legacy);
+                let sql = drop_table_if_exists_sql(
+                    config.dialect,
+                    qualified.schema.as_deref(),
+                    &qualified.table,
+                );
                 sqlx::query(&sql).execute(&pool).await?;
                 println!("{} {}", "Dropped legacy table:".yellow(), legacy);
             }
@@ -153,20 +157,29 @@ fn build_migration_manager(config: &Config) -> MigrationManager {
     }
 }
 
-fn parse_qualified_table(input: &str) -> (Option<String>, String) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QualifiedTable {
+    schema: Option<String>,
+    table: String,
+}
+
+fn parse_qualified_table(input: &str) -> QualifiedTable {
     let trimmed = input.trim();
     if let Some((schema, table)) = trimmed.split_once('.') {
-        (
-            Some(unquote_identifier(schema).to_string()),
-            unquote_identifier(table).to_string(),
-        )
+        QualifiedTable {
+            schema: Some(unquote_identifier(schema).to_string()),
+            table: unquote_identifier(table).to_string(),
+        }
     } else {
-        (None, unquote_identifier(trimmed).to_string())
+        QualifiedTable {
+            schema: None,
+            table: unquote_identifier(trimmed).to_string(),
+        }
     }
 }
 
 fn table_basename(input: &str) -> String {
-    parse_qualified_table(input).1
+    parse_qualified_table(input).table
 }
 
 fn unquote_identifier(s: &str) -> &str {
@@ -499,17 +512,17 @@ mod tests {
 
     #[test]
     fn test_parse_qualified_table() {
-        let (schema, table) = parse_qualified_table("public.schema_migrations");
-        assert_eq!(schema.as_deref(), Some("public"));
-        assert_eq!(table, "schema_migrations");
+        let qualified = parse_qualified_table("public.schema_migrations");
+        assert_eq!(qualified.schema.as_deref(), Some("public"));
+        assert_eq!(qualified.table, "schema_migrations");
 
-        let (schema, table) = parse_qualified_table("\"public\".\"schema_migrations\"");
-        assert_eq!(schema.as_deref(), Some("public"));
-        assert_eq!(table, "schema_migrations");
+        let qualified = parse_qualified_table("\"public\".\"schema_migrations\"");
+        assert_eq!(qualified.schema.as_deref(), Some("public"));
+        assert_eq!(qualified.table, "schema_migrations");
 
-        let (schema, table) = parse_qualified_table("`schema_migrations`");
-        assert_eq!(schema, None);
-        assert_eq!(table, "schema_migrations");
+        let qualified = parse_qualified_table("`schema_migrations`");
+        assert_eq!(qualified.schema, None);
+        assert_eq!(qualified.table, "schema_migrations");
     }
 
     #[test]

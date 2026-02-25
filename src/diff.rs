@@ -451,6 +451,208 @@ impl DiffStatement {
     }
 }
 
+impl std::fmt::Display for DiffStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiffStatement::CreateSchema { name } => write!(f, "create schema {}", name),
+            DiffStatement::DropSchema { name, cascade } => {
+                write!(f, "drop schema {}", name)?;
+                if *cascade {
+                    write!(f, " cascade")?;
+                }
+                Ok(())
+            }
+            DiffStatement::RenameSchema { from, to } => {
+                write!(f, "rename schema {} -> {}", from, to)
+            }
+
+            DiffStatement::CreateEnum { name, schema, .. } => {
+                write!(f, "create enum {}", qualify(schema, name))
+            }
+            DiffStatement::DropEnum { name, schema, .. } => {
+                write!(f, "drop enum {}", qualify(schema, name))
+            }
+            DiffStatement::RenameEnum { from, to, schema } => {
+                write!(f, "rename enum {} -> {}", qualify(schema, from), to)
+            }
+            DiffStatement::AddEnumValue {
+                enum_name,
+                schema,
+                value,
+                position,
+            } => write!(
+                f,
+                "add enum value '{}' to {} ({:?})",
+                value,
+                qualify(schema, enum_name),
+                position
+            ),
+            DiffStatement::AlterEnumDescription { name, schema, .. } => {
+                write!(f, "alter enum description {}", qualify(schema, name))
+            }
+
+            DiffStatement::CreateSequence { sequence } => {
+                write!(
+                    f,
+                    "create sequence {}",
+                    qualify(&sequence.schema, &sequence.name)
+                )
+            }
+            DiffStatement::DropSequence { name, schema, .. } => {
+                write!(f, "drop sequence {}", qualify(schema, name))
+            }
+            DiffStatement::AlterSequence {
+                name,
+                schema,
+                changes,
+            } => write!(
+                f,
+                "alter sequence {} ({})",
+                qualify(schema, name),
+                changes.len()
+            ),
+
+            DiffStatement::CreateTable { table } => {
+                write!(f, "create table {}", qualify(&table.schema, &table.name))
+            }
+            DiffStatement::DropTable {
+                name,
+                schema,
+                cascade,
+                ..
+            } => {
+                write!(f, "drop table {}", qualify(schema, name))?;
+                if *cascade {
+                    write!(f, " cascade")?;
+                }
+                Ok(())
+            }
+            DiffStatement::RenameTable { from, to, schema } => {
+                write!(f, "rename table {} -> {}", qualify(schema, from), to)
+            }
+            DiffStatement::AlterTableComment { table, schema, .. } => {
+                write!(f, "alter table comment {}", qualify(schema, table))
+            }
+
+            DiffStatement::AddColumn {
+                table,
+                schema,
+                column,
+            } => write!(f, "add column {}.{}", qualify(schema, table), column.name),
+            DiffStatement::DropColumn {
+                table,
+                schema,
+                column,
+                cascade,
+                ..
+            } => {
+                write!(f, "drop column {}.{}", qualify(schema, table), column)?;
+                if *cascade {
+                    write!(f, " cascade")?;
+                }
+                Ok(())
+            }
+            DiffStatement::RenameColumn {
+                table,
+                schema,
+                from,
+                to,
+            } => write!(
+                f,
+                "rename column {}.{} -> {}",
+                qualify(schema, table),
+                from,
+                to
+            ),
+            DiffStatement::AlterColumn {
+                table,
+                schema,
+                column,
+                changes,
+            } => {
+                write!(f, "alter column {}.{}", qualify(schema, table), column)?;
+                if changes.is_empty() {
+                    return Ok(());
+                }
+                write!(f, " [")?;
+                for (idx, change) in changes.iter().enumerate() {
+                    if idx > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", change)?;
+                }
+                write!(f, "]")?;
+                Ok(())
+            }
+            DiffStatement::AlterColumnComment {
+                table,
+                schema,
+                column,
+                ..
+            } => write!(
+                f,
+                "alter column comment {}.{}",
+                qualify(schema, table),
+                column
+            ),
+
+            DiffStatement::CreateIndex {
+                table,
+                schema,
+                index,
+                ..
+            } => write!(
+                f,
+                "create index {} on {}",
+                index.name,
+                qualify(schema, table)
+            ),
+            DiffStatement::DropIndex {
+                table,
+                schema,
+                name,
+                ..
+            } => write!(f, "drop index {} on {}", name, qualify(schema, table)),
+
+            DiffStatement::AddConstraint {
+                table,
+                schema,
+                constraint,
+            } => write!(
+                f,
+                "add constraint {} on {}",
+                constraint.name.as_deref().unwrap_or("<unnamed>"),
+                qualify(schema, table)
+            ),
+            DiffStatement::DropConstraint {
+                table,
+                schema,
+                name,
+                ..
+            } => write!(f, "drop constraint {} on {}", name, qualify(schema, table)),
+
+            DiffStatement::CreateView { view, .. } => {
+                write!(f, "create view {}", qualify(&view.schema, &view.name))
+            }
+            DiffStatement::DropView { name, schema, .. } => {
+                write!(f, "drop view {}", qualify(schema, name))
+            }
+            DiffStatement::AlterView { name, schema, .. } => {
+                write!(f, "alter view {}", qualify(schema, name))
+            }
+            DiffStatement::CreateExtension(name) => write!(f, "create extension {}", name),
+            DiffStatement::DropExtension(name) => write!(f, "drop extension {}", name),
+        }
+    }
+}
+
+fn qualify(schema: &Option<String>, name: &str) -> String {
+    match schema {
+        Some(schema) => format!("{}.{}", schema, name),
+        None => name.to_string(),
+    }
+}
+
 // Supporting enums for statement fields
 #[derive(Debug, Clone)]
 pub enum EnumValuePosition {
@@ -478,6 +680,20 @@ pub enum ColumnChange {
     DropDefault,
     SetGenerated(String),
     DropGenerated,
+}
+
+impl std::fmt::Display for ColumnChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnChange::SetType(data_type) => write!(f, "set type {}", data_type),
+            ColumnChange::SetNotNull => write!(f, "set not null"),
+            ColumnChange::DropNotNull => write!(f, "drop not null"),
+            ColumnChange::SetDefault(default) => write!(f, "set default {}", default),
+            ColumnChange::DropDefault => write!(f, "drop default"),
+            ColumnChange::SetGenerated(expr) => write!(f, "set generated {}", expr),
+            ColumnChange::DropGenerated => write!(f, "drop generated"),
+        }
+    }
 }
 
 /// Compute the diff between two snapshots
@@ -815,7 +1031,11 @@ fn diff_column(from: &ColumnSnapshot, to: &ColumnSnapshot) -> Vec<ColumnChange> 
     match (&from.default, &to.default) {
         (None, Some(d)) => changes.push(ColumnChange::SetDefault(d.clone())),
         (Some(_), None) => changes.push(ColumnChange::DropDefault),
-        (Some(d1), Some(d2)) if d1 != d2 => changes.push(ColumnChange::SetDefault(d2.clone())),
+        (Some(d1), Some(d2))
+            if normalize_default_expression(d1) != normalize_default_expression(d2) =>
+        {
+            changes.push(ColumnChange::SetDefault(d2.clone()))
+        }
         _ => {}
     }
 
@@ -828,6 +1048,60 @@ fn diff_column(from: &ColumnSnapshot, to: &ColumnSnapshot) -> Vec<ColumnChange> 
     }
 
     changes
+}
+
+fn normalize_default_expression(expr: &str) -> String {
+    let mut normalized = expr.trim().to_string();
+
+    while has_wrapping_parentheses(&normalized) {
+        normalized = normalized[1..normalized.len() - 1].trim().to_string();
+    }
+
+    if let Some((value, cast)) = normalized.rsplit_once("::") {
+        let value = value.trim();
+        let cast = cast.trim();
+        if !cast.is_empty() && (is_quoted_literal(value) || is_scalar_literal(value)) {
+            return value.to_string();
+        }
+    }
+
+    normalized
+}
+
+fn has_wrapping_parentheses(expr: &str) -> bool {
+    if !(expr.starts_with('(') && expr.ends_with(')')) {
+        return false;
+    }
+
+    let inner = &expr[1..expr.len() - 1];
+    let mut depth = 0_i32;
+    for ch in inner.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+
+    depth == 0
+}
+
+fn is_quoted_literal(value: &str) -> bool {
+    value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'')
+}
+
+fn is_scalar_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower == "null"
+        || lower == "true"
+        || lower == "false"
+        || value.parse::<i64>().is_ok()
+        || value.parse::<f64>().is_ok()
 }
 
 fn diff_indexes(
@@ -1199,7 +1473,7 @@ impl std::fmt::Display for DiffSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rename::{RenameDecision, RenameDecisions, apply_renames};
+    use crate::rename::{ColumnId, RenameDecision, RenameDecisions, TableId, apply_renames};
     use crate::schema::SchemaDialect;
     use crate::snapshot::{ConstraintType, ForeignKeyReference};
 
@@ -1429,6 +1703,14 @@ mod tests {
             comment: comment.map(|s| s.to_string()),
             collation: None,
         }
+    }
+
+    fn tid(name: &str, schema: Option<&str>) -> TableId {
+        TableId::new(name, schema.map(str::to_owned))
+    }
+
+    fn cid(table: &str, schema: Option<&str>, column: &str) -> ColumnId {
+        ColumnId::new(tid(table, schema), column)
     }
 
     #[test]
@@ -2591,8 +2873,8 @@ mod tests {
 
         // With rename decision: should rename instead
         let mut renames = RenameDecisions::new();
-        renames.columns.insert(
-            ("users".to_string(), "old_name".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "old_name"),
             RenameDecision::Rename {
                 from: "old_name".to_string(),
                 to: "new_name".to_string(),
@@ -2645,8 +2927,8 @@ mod tests {
 
         // With rename decision: should rename instead
         let mut renames = RenameDecisions::new();
-        renames.tables.insert(
-            "old_table".to_string(),
+        renames.insert_table_decision(
+            &tid("old_table", None),
             RenameDecision::Rename {
                 from: "old_table".to_string(),
                 to: "new_table".to_string(),
@@ -2697,8 +2979,8 @@ mod tests {
 
         // With rename decision: should rename instead
         let mut renames = RenameDecisions::new();
-        renames.enums.insert(
-            "old_status".to_string(),
+        renames.insert_enum_decision(
+            &tid("old_status", None),
             RenameDecision::Rename {
                 from: "old_status".to_string(),
                 to: "new_status".to_string(),
@@ -2761,8 +3043,8 @@ mod tests {
 
         // With rename decision: should rename and also alter type
         let mut renames = RenameDecisions::new();
-        renames.columns.insert(
-            ("users".to_string(), "old_col".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "old_col"),
             RenameDecision::Rename {
                 from: "old_col".to_string(),
                 to: "new_col".to_string(),
@@ -2810,15 +3092,15 @@ mod tests {
 
         // Create rename decisions for both columns
         let mut renames = RenameDecisions::new();
-        renames.columns.insert(
-            ("users".to_string(), "col_a".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "col_a"),
             RenameDecision::Rename {
                 from: "col_a".to_string(),
                 to: "renamed_a".to_string(),
             },
         );
-        renames.columns.insert(
-            ("users".to_string(), "col_b".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "col_b"),
             RenameDecision::Rename {
                 from: "col_b".to_string(),
                 to: "renamed_b".to_string(),
@@ -2863,8 +3145,8 @@ mod tests {
 
         // Only rename col_a -> renamed_a, let col_b be dropped and new_c be added
         let mut renames = RenameDecisions::new();
-        renames.columns.insert(
-            ("users".to_string(), "col_a".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "col_a"),
             RenameDecision::Rename {
                 from: "col_a".to_string(),
                 to: "renamed_a".to_string(),
@@ -2922,23 +3204,23 @@ mod tests {
         // Create rename decisions: table rename + column renames
         // The column renames should be keyed by the ORIGINAL table name (old_users)
         let mut renames = RenameDecisions::new();
-        renames.tables.insert(
-            "old_users".to_string(),
+        renames.insert_table_decision(
+            &tid("old_users", None),
             RenameDecision::Rename {
                 from: "old_users".to_string(),
                 to: "new_accounts".to_string(),
             },
         );
         // Column renames - keyed by ORIGINAL table name
-        renames.columns.insert(
-            ("old_users".to_string(), "old_email".to_string()),
+        renames.insert_column_decision(
+            &cid("old_users", None, "old_email"),
             RenameDecision::Rename {
                 from: "old_email".to_string(),
                 to: "new_email".to_string(),
             },
         );
-        renames.columns.insert(
-            ("old_users".to_string(), "old_name".to_string()),
+        renames.insert_column_decision(
+            &cid("old_users", None, "old_name"),
             RenameDecision::Rename {
                 from: "old_name".to_string(),
                 to: "new_name".to_string(),
@@ -3035,15 +3317,15 @@ mod tests {
 
         // Table is renamed, only one column is renamed
         let mut renames = RenameDecisions::new();
-        renames.tables.insert(
-            "old_users".to_string(),
+        renames.insert_table_decision(
+            &tid("old_users", None),
             RenameDecision::Rename {
                 from: "old_users".to_string(),
                 to: "new_accounts".to_string(),
             },
         );
-        renames.columns.insert(
-            ("old_users".to_string(), "old_email".to_string()),
+        renames.insert_column_decision(
+            &cid("old_users", None, "old_email"),
             RenameDecision::Rename {
                 from: "old_email".to_string(),
                 to: "new_email".to_string(),
@@ -3143,8 +3425,8 @@ mod tests {
 
         // Create rename decision for the enum
         let mut renames = RenameDecisions::new();
-        renames.enums.insert(
-            "old_status".to_string(),
+        renames.insert_enum_decision(
+            &tid("old_status", None),
             RenameDecision::Rename {
                 from: "old_status".to_string(),
                 to: "new_status".to_string(),
@@ -3242,8 +3524,8 @@ mod tests {
 
         // Create rename decision for the enum
         let mut renames = RenameDecisions::new();
-        renames.enums.insert(
-            "old_status".to_string(),
+        renames.insert_enum_decision(
+            &tid("old_status", None),
             RenameDecision::Rename {
                 from: "old_status".to_string(),
                 to: "new_status".to_string(),
@@ -3327,8 +3609,8 @@ mod tests {
 
         // Create rename decision for the enum
         let mut renames = RenameDecisions::new();
-        renames.enums.insert(
-            "old_status".to_string(),
+        renames.insert_enum_decision(
+            &tid("old_status", Some("public")),
             RenameDecision::Rename {
                 from: "old_status".to_string(),
                 to: "new_status".to_string(),
@@ -3426,6 +3708,45 @@ mod tests {
             has_alter,
             "Expected AlterColumn with SetType for real type change. Got: {:?}",
             diff.statements
+        );
+    }
+
+    #[test]
+    fn test_column_change_display_formats_variants() {
+        assert_eq!(
+            ColumnChange::SetType("text".to_string()).to_string(),
+            "set type text"
+        );
+        assert_eq!(ColumnChange::SetNotNull.to_string(), "set not null");
+        assert_eq!(ColumnChange::DropNotNull.to_string(), "drop not null");
+        assert_eq!(
+            ColumnChange::SetDefault("'none'".to_string()).to_string(),
+            "set default 'none'"
+        );
+        assert_eq!(ColumnChange::DropDefault.to_string(), "drop default");
+        assert_eq!(
+            ColumnChange::SetGenerated("(a + b)".to_string()).to_string(),
+            "set generated (a + b)"
+        );
+        assert_eq!(ColumnChange::DropGenerated.to_string(), "drop generated");
+    }
+
+    #[test]
+    fn test_diff_statement_display_includes_column_changes() {
+        let stmt = DiffStatement::AlterColumn {
+            table: "users".to_string(),
+            schema: Some("public".to_string()),
+            column: "email".to_string(),
+            changes: vec![
+                ColumnChange::SetType("text".to_string()),
+                ColumnChange::SetNotNull,
+                ColumnChange::SetDefault("''".to_string()),
+            ],
+        };
+
+        assert_eq!(
+            stmt.to_string(),
+            "alter column public.users.email [set type text, set not null, set default '']"
         );
     }
 }

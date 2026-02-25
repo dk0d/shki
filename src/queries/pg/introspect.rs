@@ -6,7 +6,20 @@ use indexmap::IndexMap;
 use sqlx::{Pool, Postgres, Row};
 use std::collections::HashMap;
 
-type TableKey = (String, String);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TableKey {
+    schema: String,
+    name: String,
+}
+
+impl TableKey {
+    fn new(schema: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            schema: schema.into(),
+            name: name.into(),
+        }
+    }
+}
 
 /// Introspect a PostgreSQL database
 pub async fn introspect_postgres(pool: &Pool<Postgres>) -> Result<Snapshot> {
@@ -127,8 +140,13 @@ async fn introspect_postgres_impl(
             r#"
             SELECT 
                 t.table_schema,
-                t.table_name
+                t.table_name,
+                obj_description(c.oid, 'pg_class') AS table_comment
             FROM information_schema.tables t
+            JOIN pg_namespace n ON n.nspname = t.table_schema
+            JOIN pg_class c ON c.relname = t.table_name
+                AND c.relnamespace = n.oid
+                AND c.relkind = 'r'
             WHERE t.table_type = 'BASE TABLE'
                 AND t.table_schema = $1
             ORDER BY t.table_schema, t.table_name
@@ -142,8 +160,13 @@ async fn introspect_postgres_impl(
             r#"
             SELECT 
                 t.table_schema,
-                t.table_name
+                t.table_name,
+                obj_description(c.oid, 'pg_class') AS table_comment
             FROM information_schema.tables t
+            JOIN pg_namespace n ON n.nspname = t.table_schema
+            JOIN pg_class c ON c.relname = t.table_name
+                AND c.relnamespace = n.oid
+                AND c.relkind = 'r'
             WHERE t.table_type = 'BASE TABLE'
                 AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY t.table_schema, t.table_name
@@ -160,11 +183,27 @@ async fn introspect_postgres_impl(
     for row in table_rows {
         let schema: String = row.get("table_schema");
         let table_name: String = row.get("table_name");
-        let key = (schema.clone(), table_name.clone());
+        let table_comment: Option<String> = row.get("table_comment");
+        let key = TableKey::new(&schema, &table_name);
 
-        let columns = columns_by_table.remove(&key).unwrap_or_default();
+        let mut columns = columns_by_table.remove(&key).unwrap_or_default();
         let mut constraints = constraints_by_table.remove(&key).unwrap_or_default();
-        constraints.retain(|constraint| !is_redundant_not_null_constraint(constraint, &columns));
+
+        for constraint in &constraints {
+            if constraint.constraint_type == ConstraintType::PrimaryKey
+                && constraint.columns.len() == 1
+                && let Some(column) = columns.get_mut(&constraint.columns[0])
+            {
+                column.primary_key = true;
+            }
+        }
+
+        constraints.retain(|constraint| {
+            !is_redundant_not_null_constraint(constraint, &columns)
+                && !(constraint.constraint_type == ConstraintType::PrimaryKey
+                    && constraint.columns.len() == 1)
+        });
+
         let indexes = indexes_by_table.remove(&key).unwrap_or_default();
 
         let table_snapshot = TableSnapshot {
@@ -173,7 +212,7 @@ async fn introspect_postgres_impl(
             columns,
             constraints,
             indexes,
-            comment: None,
+            comment: table_comment,
         };
 
         snapshot.tables.insert(table_name, table_snapshot);
@@ -253,7 +292,7 @@ async fn get_postgres_columns_batch(
         };
 
         columns_by_table
-            .entry((table_schema, table_name))
+            .entry(TableKey::new(table_schema, table_name))
             .or_default()
             .insert(
                 column_name.clone(),
@@ -261,7 +300,7 @@ async fn get_postgres_columns_batch(
                     name: column_name,
                     data_type: full_type,
                     nullable: is_nullable == "YES",
-                    default: column_default,
+                    default: normalize_postgres_default(column_default),
                     primary_key: false,
                     unique: false,
                     generated,
@@ -273,6 +312,64 @@ async fn get_postgres_columns_batch(
     }
 
     Ok(columns_by_table)
+}
+
+fn normalize_postgres_default(default: Option<String>) -> Option<String> {
+    default.map(|expr| normalize_default_expression(&expr))
+}
+
+fn normalize_default_expression(expr: &str) -> String {
+    let mut normalized = expr.trim().to_string();
+
+    while has_wrapping_parentheses(&normalized) {
+        normalized = normalized[1..normalized.len() - 1].trim().to_string();
+    }
+
+    if let Some((value, cast)) = normalized.rsplit_once("::") {
+        let value = value.trim();
+        let cast = cast.trim();
+        if !cast.is_empty() && (is_quoted_literal(value) || is_scalar_literal(value)) {
+            return value.to_string();
+        }
+    }
+
+    normalized
+}
+
+fn has_wrapping_parentheses(expr: &str) -> bool {
+    if !(expr.starts_with('(') && expr.ends_with(')')) {
+        return false;
+    }
+
+    let inner = &expr[1..expr.len() - 1];
+    let mut depth = 0_i32;
+    for ch in inner.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+
+    depth == 0
+}
+
+fn is_quoted_literal(value: &str) -> bool {
+    value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'')
+}
+
+fn is_scalar_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower == "null"
+        || lower == "true"
+        || lower == "false"
+        || value.parse::<i64>().is_ok()
+        || value.parse::<f64>().is_ok()
 }
 
 fn build_postgres_type(
@@ -358,7 +455,7 @@ async fn get_postgres_constraints_batch(
         let column_name: Option<String> = row.get("column_name");
 
         let constraint_map = constraints_by_table
-            .entry((table_schema, table_name))
+            .entry(TableKey::new(table_schema, table_name))
             .or_default();
 
         let entry = constraint_map
@@ -485,7 +582,7 @@ async fn get_postgres_indexes_batch(
         let where_clause = parse_index_where(&index_def);
 
         indexes_by_table
-            .entry((table_schema, table_name))
+            .entry(TableKey::new(table_schema, table_name))
             .or_default()
             .insert(
                 index_name.clone(),

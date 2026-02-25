@@ -8,8 +8,8 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
 use crate::ShkiError;
+use crate::schema::{Column, Constraint, Index, Schema, SchemaDialect, Table};
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]

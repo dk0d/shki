@@ -5,8 +5,8 @@
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
-use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::languages::generator::CodeGenerator;
 use crate::snapshot::{ColumnSnapshot, EnumSnapshot, Snapshot, TableSnapshot};
 
 /// Generated Protocol Buffer code

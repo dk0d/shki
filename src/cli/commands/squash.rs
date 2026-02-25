@@ -7,6 +7,7 @@ use crate::{
 };
 use chrono::Utc;
 use colored::Colorize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -50,18 +51,17 @@ pub async fn cmd_squash(
     manager.validate_snapshots()?;
     manager.validate_checksums(&pool).await?;
 
-    let pending = manager.get_pending_migrations(&pool).await?;
-    if !pending.is_empty() {
-        return Err(ShkiError::config(
-            "Pending migrations exist in the local folder. Apply them before squashing.",
-        ));
-    }
-
     let applied = manager.get_applied_migrations(&pool).await?;
-    if applied.len() != existing_migrations.len() && !force {
-        return Err(ShkiError::config(
-            "Applied migration count does not match local files. Use --force if this is intentional.",
-        ));
+    let local_names = collect_migration_names(&existing_migrations)?;
+    let applied_names: BTreeSet<String> = applied.iter().map(|m| m.name.clone()).collect();
+    if local_names != applied_names && !force {
+        let local_only: Vec<String> = local_names.difference(&applied_names).cloned().collect();
+        let db_only: Vec<String> = applied_names.difference(&local_names).cloned().collect();
+        return Err(ShkiError::config(format!(
+            "Applied migrations do not match local files (local-only: {}; db-only: {}). Apply/fix drift before squashing or use --force if intentional.",
+            format_name_list(&local_only),
+            format_name_list(&db_only),
+        )));
     }
 
     println!("{}", "Introspecting database for squash baseline...".cyan());
@@ -78,7 +78,7 @@ pub async fn cmd_squash(
         )?)?;
 
     let archive_dir = archive_dir_path(config.out_dir().as_path());
-    let archive_target = archive_dir.join(Utc::now().format("%Y%m%d%H%M%S").to_string());
+    let archive_target = next_archive_target(&archive_dir);
 
     if dry_run {
         println!("\n{}", "Squash plan (dry run):".cyan());
@@ -94,7 +94,7 @@ pub async fn cmd_squash(
 
     move_existing_to_archive(config.out_dir().as_path(), &archive_target)?;
 
-    let migration_name = name.or_else(|| Some("squash".to_string()));
+    let migration_name = Some(name.unwrap_or_else(|| "squash".to_string()));
     let (up_path, _down_path) =
         manager.create_migration_with_down(migration_name, &sql, None, None, &baseline_snapshot)?;
 
@@ -121,6 +121,44 @@ fn build_migration_manager(config: &Config) -> MigrationManager {
 
 fn archive_dir_path(out_dir: &Path) -> PathBuf {
     out_dir.join("_archive")
+}
+
+fn next_archive_target(archive_dir: &Path) -> PathBuf {
+    let base = Utc::now().format("%Y%m%d%H%M%S").to_string();
+    let initial = archive_dir.join(&base);
+    if !initial.exists() {
+        return initial;
+    }
+
+    for idx in 1.. {
+        let candidate = archive_dir.join(format!("{}-{:02}", base, idx));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("archive suffix search should always find an unused path")
+}
+
+fn collect_migration_names(paths: &[PathBuf]) -> Result<BTreeSet<String>> {
+    paths
+        .iter()
+        .map(|path| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| {
+                    ShkiError::migration(format!("Invalid migration filename: {}", path.display()))
+                })
+        })
+        .collect()
+}
+
+fn format_name_list(names: &[String]) -> String {
+    if names.is_empty() {
+        return "none".to_string();
+    }
+    names.join(", ")
 }
 
 fn move_existing_to_archive(out_dir: &Path, archive_target: &Path) -> Result<()> {
@@ -235,5 +273,36 @@ mod tests {
 
         assert!(out_dir.join("_archive/old").exists());
         assert!(archive_target.join("0001_next.sql").exists());
+    }
+
+    #[test]
+    fn test_next_archive_target_avoids_collisions() {
+        let temp = TempDir::new().expect("failed to create temp dir");
+        let archive_dir = temp.path().join("_archive");
+        fs::create_dir_all(&archive_dir).expect("failed to create archive dir");
+
+        let first = next_archive_target(&archive_dir);
+        fs::create_dir_all(&first).expect("failed to create first target");
+
+        let second = next_archive_target(&archive_dir);
+        assert_ne!(first, second);
+        assert!(
+            second
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.contains('-'))
+        );
+    }
+
+    #[test]
+    fn test_collect_migration_names_from_paths() {
+        let names = collect_migration_names(&[
+            PathBuf::from("0000_init.sql"),
+            PathBuf::from("0001_add_users.sql"),
+        ])
+        .expect("failed to collect migration names");
+
+        assert!(names.contains("0000_init"));
+        assert!(names.contains("0001_add_users"));
     }
 }

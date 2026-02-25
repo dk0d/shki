@@ -328,12 +328,49 @@ impl MigrationManager {
         migration_name: &str,
         migration_checksum: &str,
     ) -> Result<PathBuf> {
+        self.remove_snapshots_for_migration(migration_name)?;
+
         if snapshot.prev_id.is_none() {
             snapshot.prev_id = self.load_latest_snapshot()?.map(|s| s.id);
         }
 
         let snapshot = snapshot.with_migration(migration_name, migration_checksum);
         snapshot.save(&self.out_dir)
+    }
+
+    /// Remove all snapshots linked to a migration name.
+    ///
+    /// Returns the number of snapshot files removed.
+    pub fn remove_snapshots_for_migration(&self, migration_name: &str) -> Result<usize> {
+        let meta_dir = self.out_dir.join("_meta");
+        if !meta_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut removed = 0usize;
+
+        for entry in std::fs::read_dir(&meta_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path)?;
+            let parsed = Snapshot::from_json(&content)?;
+            let is_match = parsed
+                .migration
+                .as_ref()
+                .map(|m| m.name == migration_name)
+                .unwrap_or(false);
+
+            if is_match {
+                std::fs::remove_file(path)?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
     }
 
     /// Create the migrations table if it doesn't exist
@@ -1899,6 +1936,83 @@ ALTER TABLE users ADD COLUMN name TEXT;
             "0001_next"
         );
         assert_eq!(second.prev_id.as_deref(), Some(first.id.as_str()));
+    }
+
+    #[test]
+    fn test_save_post_migration_snapshot_replaces_existing_migration_snapshot() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let baseline =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_initial", "abc123");
+        baseline
+            .save(temp_dir.path())
+            .expect("failed to save baseline snapshot");
+
+        let generated = crate::Snapshot::new(SchemaDialect::Postgres)
+            .with_migration("0001_add_users", "def456");
+        generated
+            .save(temp_dir.path())
+            .expect("failed to save generated snapshot");
+
+        let synced = crate::Snapshot::new(SchemaDialect::Postgres);
+        manager
+            .save_post_migration_snapshot(synced, "0001_add_users", "def456")
+            .expect("failed to save synced snapshot");
+
+        let snapshots =
+            crate::Snapshot::load_all(temp_dir.path()).expect("failed to load snapshots");
+        let matching = snapshots
+            .iter()
+            .filter(|s| {
+                s.migration
+                    .as_ref()
+                    .map(|m| m.name.as_str() == "0001_add_users")
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching.len(), 1, "expected one snapshot for migration");
+        assert_eq!(matching[0].prev_id.as_deref(), Some(baseline.id.as_str()));
+    }
+
+    #[test]
+    fn test_remove_snapshots_for_migration_removes_only_matching_snapshots() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+
+        let one =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_init", "aaa111");
+        one.save(temp_dir.path())
+            .expect("failed to save first snapshot");
+
+        let two =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0001_users", "bbb222");
+        two.save(temp_dir.path())
+            .expect("failed to save second snapshot");
+
+        let three =
+            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0001_users", "bbb222");
+        three
+            .save(temp_dir.path())
+            .expect("failed to save duplicate migration snapshot");
+
+        let removed = manager
+            .remove_snapshots_for_migration("0001_users")
+            .expect("failed to remove snapshots");
+        assert_eq!(removed, 2);
+
+        let snapshots =
+            crate::Snapshot::load_all(temp_dir.path()).expect("failed to load snapshots");
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0]
+                .migration
+                .as_ref()
+                .expect("missing migration info")
+                .name,
+            "0000_init"
+        );
     }
 
     // ==================== Snapshot Validation Tests ====================

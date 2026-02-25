@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use heck::ToSnakeCase;
 
-use crate::Result;
-use crate::commands::codegen::CodegenConfig;
 use crate::commands::codegen::writer::CodeWriter;
+use crate::commands::codegen::CodegenConfig;
+use crate::Result;
 
 use super::{GeneratedRust, RustStruct};
 
@@ -45,21 +45,25 @@ impl RustWriter {
     }
 
     /// Write mod.rs file for module modes
-    fn write_mod_file(&self, mod_path: &Path, mod_entries: &[(String, String)]) -> Result<()> {
+    fn write_mod_file(&self, mod_path: &Path, mod_entries: &[ModuleEntry]) -> Result<()> {
         let mut mod_file = fs::File::create(mod_path)?;
 
         writeln!(mod_file, "{}", Self::HEADER)?;
         writeln!(mod_file)?;
 
         // Write mod declarations
-        for (module_name, _) in mod_entries {
-            writeln!(mod_file, "mod {};", module_name)?;
+        for entry in mod_entries {
+            writeln!(mod_file, "mod {};", entry.module_name)?;
         }
         writeln!(mod_file)?;
 
         // Write pub use statements
-        for (module_name, type_name) in mod_entries {
-            writeln!(mod_file, "pub use {}::{};", module_name, type_name)?;
+        for entry in mod_entries {
+            writeln!(
+                mod_file,
+                "pub use {}::{};",
+                entry.module_name, entry.type_name
+            )?;
         }
 
         Ok(())
@@ -127,6 +131,20 @@ impl RustWriter {
     }
 }
 
+struct ModuleEntry {
+    module_name: String,
+    type_name: String,
+}
+
+impl ModuleEntry {
+    fn new(module_name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        Self {
+            module_name: module_name.into(),
+            type_name: type_name.into(),
+        }
+    }
+}
+
 impl CodeWriter for RustWriter {
     type GeneratedCode = GeneratedRust;
 
@@ -168,7 +186,7 @@ impl CodeWriter for RustWriter {
         fs::create_dir_all(output_dir)?;
 
         let mut written_files = Vec::new();
-        let mut mod_entries: Vec<(String, String)> = Vec::new();
+        let mut mod_entries = Vec::new();
 
         // Write enum files
         for rust_enum in code.enums.values() {
@@ -180,7 +198,7 @@ impl CodeWriter for RustWriter {
             writeln!(file, "{}", rust_enum.to_string_pretty())?;
 
             written_files.push(file_path);
-            mod_entries.push((module_name, rust_enum.name.clone()));
+            mod_entries.push(ModuleEntry::new(module_name, rust_enum.name.clone()));
         }
 
         // Write struct files
@@ -195,7 +213,7 @@ impl CodeWriter for RustWriter {
             writeln!(file, "{}", rust_struct.to_string_pretty())?;
 
             written_files.push(file_path);
-            mod_entries.push((module_name, rust_struct.name.clone()));
+            mod_entries.push(ModuleEntry::new(module_name, rust_struct.name.clone()));
         }
 
         // Write mod.rs
@@ -273,7 +291,7 @@ impl CodeWriter for RustWriter {
 
         let mod_defs = types
             .into_iter()
-            .map(|t| (t.module_name, t.type_name))
+            .map(|t| ModuleEntry::new(t.module_name, t.type_name))
             .collect::<Vec<_>>();
 
         self.write_mod_file(output_dir.join("mod.rs").as_path(), &mod_defs)?;

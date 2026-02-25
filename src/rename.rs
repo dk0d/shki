@@ -25,13 +25,13 @@ use crate::{Result, ShkiError};
 
 /// Identifier for a table, combining name and optional schema
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct TableId {
+pub struct TableId {
     name: String,
     schema: Option<String>,
 }
 
 impl TableId {
-    fn new(name: impl Into<String>, schema: Option<String>) -> Self {
+    pub fn new(name: impl Into<String>, schema: Option<String>) -> Self {
         Self {
             name: name.into(),
             schema,
@@ -43,6 +43,41 @@ impl TableId {
             name: name.into(),
             schema: self.schema.clone(),
         }
+    }
+
+    pub fn schema(&self) -> Option<&str> {
+        self.schema.as_deref()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn column(&self, name: impl Into<String>) -> ColumnId {
+        ColumnId::new(self.clone(), name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ColumnId {
+    table: TableId,
+    name: String,
+}
+
+impl ColumnId {
+    pub fn new(table: TableId, name: impl Into<String>) -> Self {
+        Self {
+            table,
+            name: name.into(),
+        }
+    }
+
+    pub fn table(&self) -> &TableId {
+        &self.table
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -88,12 +123,12 @@ pub enum RenameDecision {
 /// Collection of rename decisions made by the user
 #[derive(Debug, Clone, Default)]
 pub struct RenameDecisions {
-    /// Table renames: key is the dropped table name
-    pub tables: IndexMap<String, RenameDecision>,
-    /// Column renames: key is (original_table_name, dropped_column_name)
-    pub columns: IndexMap<(String, String), RenameDecision>,
-    /// Enum renames: key is the dropped enum name
-    pub enums: IndexMap<String, RenameDecision>,
+    /// Table renames: key is dropped table id
+    pub tables: IndexMap<TableId, RenameDecision>,
+    /// Column renames: key is dropped column id
+    pub columns: IndexMap<ColumnId, RenameDecision>,
+    /// Enum renames: key is dropped enum id
+    pub enums: IndexMap<TableId, RenameDecision>,
 }
 
 impl RenameDecisions {
@@ -101,10 +136,22 @@ impl RenameDecisions {
         Self::default()
     }
 
+    pub fn insert_table_decision(&mut self, dropped: &TableId, decision: RenameDecision) {
+        self.tables.insert(dropped.clone(), decision);
+    }
+
+    pub fn insert_column_decision(&mut self, dropped: &ColumnId, decision: RenameDecision) {
+        self.columns.insert(dropped.clone(), decision);
+    }
+
+    pub fn insert_enum_decision(&mut self, dropped: &TableId, decision: RenameDecision) {
+        self.enums.insert(dropped.clone(), decision);
+    }
+
     /// Get the new name if a table was renamed
-    pub fn get_table_new_name(&self, dropped_name: &str) -> Option<&str> {
+    pub fn get_table_new_name(&self, dropped: &TableId) -> Option<&str> {
         self.tables
-            .get(dropped_name)
+            .get(dropped)
             .and_then(|decision| match decision {
                 RenameDecision::Rename { to, .. } => Some(to.as_str()),
                 _ => None,
@@ -112,21 +159,22 @@ impl RenameDecisions {
     }
 
     /// Get the original table name for a given new table name (if it was renamed)
-    pub fn get_table_old_name(&self, new_name: &str) -> Option<&str> {
-        self.tables.iter().find_map(|(old_name, decision)| {
+    pub fn get_table_old_name<'a>(&'a self, added: &TableId) -> Option<&'a str> {
+        self.tables.iter().find_map(|(dropped, decision)| {
             if let RenameDecision::Rename { to, .. } = decision
-                && to == new_name
+                && dropped.schema() == added.schema()
+                && to == added.name()
             {
-                return Some(old_name.as_str());
+                return Some(dropped.name());
             }
             None
         })
     }
 
     /// Get the new name if a column was renamed (keyed by original table name)
-    pub fn get_column_new_name(&self, table: &str, dropped_column: &str) -> Option<&str> {
+    pub fn get_column_new_name(&self, dropped: &ColumnId) -> Option<&str> {
         self.columns
-            .get(&(table.to_owned(), dropped_column.to_owned()))
+            .get(dropped)
             .and_then(|decision| match decision {
                 RenameDecision::Rename { to, .. } => Some(to.as_str()),
                 _ => None,
@@ -134,34 +182,35 @@ impl RenameDecisions {
     }
 
     /// Get the new name if an enum was renamed
-    pub fn get_enum_new_name(&self, dropped_name: &str) -> Option<&str> {
-        self.enums
-            .get(dropped_name)
-            .and_then(|decision| match decision {
-                RenameDecision::Rename { to, .. } => Some(to.as_str()),
-                _ => None,
-            })
+    pub fn get_enum_new_name(&self, dropped: &TableId) -> Option<&str> {
+        self.enums.get(dropped).and_then(|decision| match decision {
+            RenameDecision::Rename { to, .. } => Some(to.as_str()),
+            _ => None,
+        })
     }
 
     /// Check if a table is the target of a rename
-    pub fn is_table_renamed(&self, added_name: &str) -> bool {
-        self.tables
-            .values()
-            .any(|d| matches!(d, RenameDecision::Rename { to, .. } if to == added_name))
+    pub fn is_table_renamed(&self, added: &TableId) -> bool {
+        self.tables.iter().any(|(dropped, d)| {
+            dropped.schema() == added.schema()
+                && matches!(d, RenameDecision::Rename { to, .. } if to == added.name())
+        })
     }
 
     /// Check if a column is the target of a rename
-    pub fn is_column_renamed(&self, table: &str, added_column: &str) -> bool {
-        self.columns.iter().any(|((t, _), d)| {
-            t == table && matches!(d, RenameDecision::Rename { to, .. } if to == added_column)
+    pub fn is_column_renamed(&self, added: &ColumnId) -> bool {
+        self.columns.iter().any(|(dropped, d)| {
+            dropped.table() == added.table()
+                && matches!(d, RenameDecision::Rename { to, .. } if to == added.name())
         })
     }
 
     /// Check if an enum is the target of a rename
-    pub fn is_enum_renamed(&self, added_name: &str) -> bool {
-        self.enums
-            .values()
-            .any(|d| matches!(d, RenameDecision::Rename { to, .. } if to == added_name))
+    pub fn is_enum_renamed(&self, added: &TableId) -> bool {
+        self.enums.iter().any(|(dropped, d)| {
+            dropped.schema() == added.schema()
+                && matches!(d, RenameDecision::Rename { to, .. } if to == added.name())
+        })
     }
 
     /// Check if there are any rename decisions
@@ -173,9 +222,9 @@ impl RenameDecisions {
     }
 
     /// Get the effective table name (after any rename)
-    fn effective_table_name(&self, original: &str) -> String {
+    fn effective_table_name(&self, original: &TableId) -> String {
         self.get_table_new_name(original)
-            .unwrap_or(original)
+            .unwrap_or(original.name())
             .to_owned()
     }
 }
@@ -188,8 +237,8 @@ impl RenameDecisions {
 struct Changes {
     tables: EntityChanges<TableSnapshot>,
     enums: EntityChanges<EnumSnapshot>,
-    /// Column changes grouped by original table name
-    columns: IndexMap<String, TableColumnChanges>,
+    /// Column changes grouped by original table id
+    columns: IndexMap<TableId, TableColumnChanges>,
 }
 
 struct EntityChanges<T> {
@@ -236,7 +285,7 @@ impl Changes {
     fn from_diff(diff: &SchemaDiff) -> Self {
         let mut tables = EntityChanges::new();
         let mut enums = EntityChanges::new();
-        let mut columns: IndexMap<String, TableColumnChanges> = IndexMap::new();
+        let mut columns: IndexMap<TableId, TableColumnChanges> = IndexMap::new();
 
         for stmt in &diff.statements {
             match stmt {
@@ -268,8 +317,9 @@ impl Changes {
                     prev,
                     ..
                 } => {
+                    let key = TableId::new(table, schema.clone());
                     columns
-                        .entry(table.clone())
+                        .entry(key)
                         .or_insert_with(|| TableColumnChanges::new(schema.clone()))
                         .dropped
                         .push(prev.clone());
@@ -279,8 +329,9 @@ impl Changes {
                     schema,
                     column,
                 } => {
+                    let key = TableId::new(table, schema.clone());
                     columns
-                        .entry(table.clone())
+                        .entry(key)
                         .or_insert_with(|| TableColumnChanges::new(schema.clone()))
                         .added
                         .push(column.clone());
@@ -378,7 +429,7 @@ impl RenameDetector {
 
         for dropped in &self.changes.tables.dropped {
             let decision = self.prompt_single_table_rename(dropped, decisions)?;
-            decisions.tables.insert(dropped.name.clone(), decision);
+            decisions.insert_table_decision(&TableId::from(dropped), decision);
         }
 
         Ok(())
@@ -393,19 +444,22 @@ impl RenameDetector {
 
         for dropped in &self.changes.enums.dropped {
             let decision = self.prompt_single_enum_rename(dropped, decisions)?;
-            decisions.enums.insert(dropped.name.clone(), decision);
+            decisions.insert_enum_decision(
+                &TableId::new(&dropped.name, dropped.schema.clone()),
+                decision,
+            );
         }
 
         Ok(())
     }
 
     fn prompt_column_renames(&self, decisions: &mut RenameDecisions) -> Result<()> {
-        for (table_name, col_changes) in &self.changes.columns {
+        for (table_id, col_changes) in &self.changes.columns {
             if !col_changes.has_potential_renames() {
                 continue;
             }
 
-            let effective_table = decisions.effective_table_name(table_name);
+            let effective_table = decisions.effective_table_name(table_id);
             let display_name = format_qualified_name(&effective_table, &col_changes.schema);
 
             println!(
@@ -423,12 +477,12 @@ impl RenameDetector {
                 let available: Vec<_> = col_changes
                     .added
                     .iter()
-                    .filter(|a| !decisions.is_column_renamed(table_name, &a.name))
+                    .filter(|a| !decisions.is_column_renamed(&table_id.column(&a.name)))
                     .collect();
 
                 if available.is_empty() {
-                    decisions.columns.insert(
-                        (table_name.clone(), dropped.name.clone()),
+                    decisions.insert_column_decision(
+                        &table_id.column(&dropped.name),
                         RenameDecision::KeepAddDrop,
                     );
                     continue;
@@ -436,9 +490,7 @@ impl RenameDetector {
 
                 let decision =
                     self.prompt_single_column_rename(&effective_table, dropped, &available)?;
-                decisions
-                    .columns
-                    .insert((table_name.clone(), dropped.name.clone()), decision);
+                decisions.insert_column_decision(&table_id.column(&dropped.name), decision);
             }
         }
 
@@ -457,7 +509,8 @@ impl RenameDetector {
             .tables
             .added
             .iter()
-            .filter(|a| !decisions.is_table_renamed(&a.name))
+            .filter(|a| a.schema == dropped.schema)
+            .filter(|a| !decisions.is_table_renamed(&TableId::from(*a)))
             .collect();
 
         if available.is_empty() {
@@ -521,7 +574,8 @@ impl RenameDetector {
             .enums
             .added
             .iter()
-            .filter(|a| !decisions.is_enum_renamed(&a.name))
+            .filter(|a| a.schema == dropped.schema)
+            .filter(|a| !decisions.is_enum_renamed(&TableId::new(&a.name, a.schema.clone())))
             .collect();
 
         if available.is_empty() {
@@ -632,8 +686,8 @@ impl RenameDetector {
 /// Context for applying renames - holds lookups and decisions
 struct RenameContext<'a> {
     renames: &'a RenameDecisions,
-    added_columns: IndexMap<(String, String), &'a ColumnSnapshot>,
-    created_tables: IndexMap<String, &'a TableSnapshot>,
+    added_columns: IndexMap<ColumnId, &'a ColumnSnapshot>,
+    created_tables: IndexMap<TableId, &'a TableSnapshot>,
 }
 
 impl<'a> RenameContext<'a> {
@@ -642,9 +696,14 @@ impl<'a> RenameContext<'a> {
             .statements
             .iter()
             .filter_map(|stmt| match stmt {
-                DiffStatement::AddColumn { table, column, .. } => {
-                    Some(((table.clone(), column.name.clone()), column))
-                }
+                DiffStatement::AddColumn {
+                    table,
+                    schema,
+                    column,
+                } => Some((
+                    ColumnId::new(TableId::new(table, schema.clone()), &column.name),
+                    column,
+                )),
                 _ => None,
             })
             .collect();
@@ -653,7 +712,7 @@ impl<'a> RenameContext<'a> {
             .statements
             .iter()
             .filter_map(|stmt| match stmt {
-                DiffStatement::CreateTable { table } => Some((table.name.clone(), table)),
+                DiffStatement::CreateTable { table } => Some((TableId::from(table), table)),
                 _ => None,
             })
             .collect();
@@ -686,8 +745,8 @@ pub fn apply_renames(diff: &SchemaDiff, renames: &RenameDecisions) -> SchemaDiff
             DiffStatement::DropTable {
                 name, schema, prev, ..
             } => {
-                if let Some(new_name) = ctx.renames.get_table_new_name(name) {
-                    let table_id = TableId::new(name, schema.clone());
+                let table_id = TableId::new(name, schema.clone());
+                if let Some(new_name) = ctx.renames.get_table_new_name(&table_id) {
                     statements.extend(emit_table_rename(table_id, new_name, prev, &ctx));
                 } else {
                     statements.push(stmt.clone());
@@ -695,7 +754,7 @@ pub fn apply_renames(diff: &SchemaDiff, renames: &RenameDecisions) -> SchemaDiff
             }
 
             DiffStatement::CreateTable { table } => {
-                if !ctx.renames.is_table_renamed(&table.name) {
+                if !ctx.renames.is_table_renamed(&TableId::from(table)) {
                     statements.push(stmt.clone());
                 }
             }
@@ -707,30 +766,40 @@ pub fn apply_renames(diff: &SchemaDiff, renames: &RenameDecisions) -> SchemaDiff
                 prev,
                 ..
             } => {
+                let table_id = TableId::new(table, schema.clone());
+
                 // Skip if table was renamed (handled in DropTable processing)
-                if ctx.renames.get_table_new_name(table).is_some() {
+                if ctx.renames.get_table_new_name(&table_id).is_some() {
                     continue;
                 }
 
-                if let Some(new_name) = ctx.renames.get_column_new_name(table, column) {
-                    let table_id = TableId::new(table, schema.clone());
+                if let Some(new_name) = ctx.renames.get_column_new_name(&table_id.column(column)) {
                     statements.extend(emit_column_rename(&table_id, column, new_name, prev, &ctx));
                 } else {
                     statements.push(stmt.clone());
                 }
             }
 
-            DiffStatement::AddColumn { table, column, .. } => {
+            DiffStatement::AddColumn {
+                table,
+                schema,
+                column,
+            } => {
+                let table_id = TableId::new(table, schema.clone());
+
                 // Skip if table was renamed or column is a rename target
-                if ctx.renames.get_table_new_name(table).is_none()
-                    && !ctx.renames.is_column_renamed(table, &column.name)
+                if ctx.renames.get_table_new_name(&table_id).is_none()
+                    && !ctx
+                        .renames
+                        .is_column_renamed(&table_id.column(&column.name))
                 {
                     statements.push(stmt.clone());
                 }
             }
 
             DiffStatement::DropEnum { name, schema, .. } => {
-                if let Some(new_name) = ctx.renames.get_enum_new_name(name) {
+                let enum_id = TableId::new(name, schema.clone());
+                if let Some(new_name) = ctx.renames.get_enum_new_name(&enum_id) {
                     statements.push(DiffStatement::RenameEnum {
                         from: name.clone(),
                         to: new_name.to_string(),
@@ -741,8 +810,11 @@ pub fn apply_renames(diff: &SchemaDiff, renames: &RenameDecisions) -> SchemaDiff
                 }
             }
 
-            DiffStatement::CreateEnum { name, .. } => {
-                if !ctx.renames.is_enum_renamed(name) {
+            DiffStatement::CreateEnum { name, schema, .. } => {
+                if !ctx
+                    .renames
+                    .is_enum_renamed(&TableId::new(name, schema.clone()))
+                {
                     statements.push(stmt.clone());
                 }
             }
@@ -787,7 +859,7 @@ fn emit_table_rename(
 ) -> Vec<DiffStatement> {
     let new_table_id = old_table.with_name(new_name);
 
-    let Some(new_table) = ctx.created_tables.get(new_name) else {
+    let Some(new_table) = ctx.created_tables.get(&new_table_id) else {
         // No corresponding new table found, just emit the rename
         return vec![DiffStatement::RenameTable {
             from: old_table.name,
@@ -802,7 +874,7 @@ fn emit_table_rename(
     for (old_col_name, old_col) in &prev.columns {
         if let Some(new_col_name) = ctx
             .renames
-            .get_column_new_name(&old_table.name, old_col_name)
+            .get_column_new_name(&old_table.column(old_col_name))
         {
             stmts.push(DiffStatement::RenameColumn {
                 table: old_table.name.clone(),
@@ -812,16 +884,35 @@ fn emit_table_rename(
             });
 
             if let Some(new_col) = new_table.columns.get(new_col_name) {
-                let changes = compute_column_changes(old_col, new_col, ctx.renames);
-                if !changes.is_empty() {
-                    stmts.push(DiffStatement::AlterColumn {
-                        table: old_table.name.clone(),
-                        schema: old_table.schema.clone(),
-                        column: new_col_name.to_string(),
-                        changes,
-                    });
-                }
+                stmts.extend(emit_column_alterations(
+                    &old_table,
+                    old_col,
+                    new_col_name,
+                    new_col,
+                    ctx.renames,
+                ));
             }
+        }
+    }
+
+    // Existing columns with unchanged names may still need alterations.
+    for (old_col_name, old_col) in &prev.columns {
+        if ctx
+            .renames
+            .get_column_new_name(&old_table.column(old_col_name))
+            .is_some()
+        {
+            continue;
+        }
+
+        if let Some(new_col) = new_table.columns.get(old_col_name) {
+            stmts.extend(emit_column_alterations(
+                &old_table,
+                old_col,
+                old_col_name,
+                new_col,
+                ctx.renames,
+            ));
         }
     }
 
@@ -836,7 +927,7 @@ fn emit_table_rename(
     for (old_col_name, old_col) in &prev.columns {
         if ctx
             .renames
-            .get_column_new_name(&old_table.name, old_col_name)
+            .get_column_new_name(&old_table.column(old_col_name))
             .is_none()
             && !new_table.columns.contains_key(old_col_name)
         {
@@ -852,7 +943,9 @@ fn emit_table_rename(
 
     // Added columns (not a rename target, not in old table) - use new table name
     for (new_col_name, new_col) in &new_table.columns {
-        if !ctx.renames.is_column_renamed(&old_table.name, new_col_name)
+        if !ctx
+            .renames
+            .is_column_renamed(&old_table.column(new_col_name))
             && !prev.columns.contains_key(new_col_name)
         {
             stmts.push(DiffStatement::AddColumn {
@@ -882,19 +975,14 @@ fn emit_column_rename(
     }];
 
     // Add AlterColumn if properties changed
-    if let Some(new_col) = ctx
-        .added_columns
-        .get(&(table.name.clone(), new_name.to_string()))
-    {
-        let changes = compute_column_changes(prev, new_col, ctx.renames);
-        if !changes.is_empty() {
-            stmts.push(DiffStatement::AlterColumn {
-                table: table.name.clone(),
-                schema: table.schema.clone(),
-                column: new_name.to_string(),
-                changes,
-            });
-        }
+    if let Some(new_col) = ctx.added_columns.get(&table.column(new_name)) {
+        stmts.extend(emit_column_alterations(
+            table,
+            prev,
+            new_name,
+            new_col,
+            ctx.renames,
+        ));
     }
 
     stmts
@@ -944,6 +1032,38 @@ fn compute_column_changes(
     changes
 }
 
+fn emit_column_alterations(
+    table: &TableId,
+    from: &ColumnSnapshot,
+    to_name: &str,
+    to: &ColumnSnapshot,
+    renames: &RenameDecisions,
+) -> Vec<DiffStatement> {
+    let mut stmts = Vec::new();
+
+    let changes = compute_column_changes(from, to, renames);
+    if !changes.is_empty() {
+        stmts.push(DiffStatement::AlterColumn {
+            table: table.name.clone(),
+            schema: table.schema.clone(),
+            column: to_name.to_string(),
+            changes,
+        });
+    }
+
+    if from.comment != to.comment {
+        stmts.push(DiffStatement::AlterColumnComment {
+            table: table.name.clone(),
+            schema: table.schema.clone(),
+            column: to_name.to_string(),
+            comment: to.comment.clone(),
+            prev_comment: from.comment.clone(),
+        });
+    }
+
+    stmts
+}
+
 /// Check if a type change is due to an enum being renamed
 fn is_enum_rename_type_change(from: &str, to: &str, renames: &RenameDecisions) -> bool {
     let (from_base, from_suffix) = split_type_suffix(from);
@@ -956,14 +1076,16 @@ fn is_enum_rename_type_change(from: &str, to: &str, renames: &RenameDecisions) -
     let (from_schema, from_name) = split_schema_name(from_base);
     let (to_schema, to_name) = split_schema_name(to_base);
 
-    from_schema == to_schema && renames.get_enum_new_name(from_name) == Some(to_name)
+    from_schema == to_schema
+        && renames.get_enum_new_name(&TableId::new(from_name, from_schema.map(str::to_owned)))
+            == Some(to_name)
 }
 
 /// Check if a type is the target of an enum rename
 fn is_renamed_enum_type(type_str: &str, renames: &RenameDecisions) -> bool {
     let (base, _) = split_type_suffix(type_str);
-    let (_, name) = split_schema_name(base);
-    renames.is_enum_renamed(name)
+    let (schema, name) = split_schema_name(base);
+    renames.is_enum_renamed(&TableId::new(name, schema.map(str::to_owned)))
 }
 
 /// Split type into base and suffix (e.g., "status[]" -> ("status", "[]"))
@@ -1018,6 +1140,14 @@ mod tests {
             indexes: IndexMap::new(),
             comment: None,
         }
+    }
+
+    fn tid(name: &str, schema: Option<&str>) -> TableId {
+        TableId::new(name, schema.map(str::to_owned))
+    }
+
+    fn cid(table: &str, schema: Option<&str>, column: &str) -> ColumnId {
+        ColumnId::new(tid(table, schema), column)
     }
 
     #[test]
@@ -1109,8 +1239,8 @@ mod tests {
         };
 
         let mut renames = RenameDecisions::new();
-        renames.tables.insert(
-            "old_users".to_string(),
+        renames.insert_table_decision(
+            &tid("old_users", None),
             RenameDecision::Rename {
                 from: "old_users".to_string(),
                 to: "new_users".to_string(),
@@ -1147,8 +1277,8 @@ mod tests {
         };
 
         let mut renames = RenameDecisions::new();
-        renames.columns.insert(
-            ("users".to_string(), "old_name".to_string()),
+        renames.insert_column_decision(
+            &cid("users", None, "old_name"),
             RenameDecision::Rename {
                 from: "old_name".to_string(),
                 to: "new_name".to_string(),
@@ -1189,8 +1319,8 @@ mod tests {
         };
 
         let mut renames = RenameDecisions::new();
-        renames.enums.insert(
-            "old_status".to_string(),
+        renames.insert_enum_decision(
+            &tid("old_status", None),
             RenameDecision::Rename {
                 from: "old_status".to_string(),
                 to: "new_status".to_string(),
@@ -1233,8 +1363,8 @@ mod tests {
     fn test_rename_decisions_basic() {
         let mut decisions = RenameDecisions::new();
 
-        decisions.columns.insert(
-            ("users".to_string(), "old_col".to_string()),
+        decisions.insert_column_decision(
+            &cid("users", None, "old_col"),
             RenameDecision::Rename {
                 from: "old_col".to_string(),
                 to: "new_col".to_string(),
@@ -1242,18 +1372,18 @@ mod tests {
         );
 
         assert_eq!(
-            decisions.get_column_new_name("users", "old_col"),
+            decisions.get_column_new_name(&cid("users", None, "old_col")),
             Some("new_col")
         );
-        assert!(decisions.is_column_renamed("users", "new_col"));
-        assert!(!decisions.is_column_renamed("users", "other_col"));
+        assert!(decisions.is_column_renamed(&cid("users", None, "new_col")));
+        assert!(!decisions.is_column_renamed(&cid("users", None, "other_col")));
     }
 
     #[test]
     fn test_get_original_table_name() {
         let mut decisions = RenameDecisions::new();
-        decisions.tables.insert(
-            "old_users".to_string(),
+        decisions.insert_table_decision(
+            &tid("old_users", None),
             RenameDecision::Rename {
                 from: "old_users".to_string(),
                 to: "new_accounts".to_string(),
@@ -1261,10 +1391,13 @@ mod tests {
         );
 
         assert_eq!(
-            decisions.get_table_old_name("new_accounts"),
+            decisions.get_table_old_name(&tid("new_accounts", None)),
             Some("old_users")
         );
-        assert_eq!(decisions.get_table_old_name("other_table"), None);
+        assert_eq!(
+            decisions.get_table_old_name(&tid("other_table", None)),
+            None
+        );
     }
 
     #[test]
@@ -1286,16 +1419,16 @@ mod tests {
         };
 
         let mut renames = RenameDecisions::new();
-        renames.tables.insert(
-            "old_users".to_string(),
+        renames.insert_table_decision(
+            &tid("old_users", None),
             RenameDecision::Rename {
                 from: "old_users".to_string(),
                 to: "new_users".to_string(),
             },
         );
         // Column renames keyed by ORIGINAL table name
-        renames.columns.insert(
-            ("old_users".to_string(), "old_name".to_string()),
+        renames.insert_column_decision(
+            &cid("old_users", None, "old_name"),
             RenameDecision::Rename {
                 from: "old_name".to_string(),
                 to: "new_name".to_string(),
@@ -1322,5 +1455,165 @@ mod tests {
             has_column_rename,
             "Expected RenameColumn statement with original table name"
         );
+    }
+
+    #[test]
+    fn test_table_rename_keeps_same_name_column_alters() {
+        let mut old_price = col("price", "integer");
+        old_price.comment = Some("old comment".to_string());
+
+        let mut new_price = col("price", "bigint");
+        new_price.comment = Some("new comment".to_string());
+
+        let mut old_columns = IndexMap::new();
+        old_columns.insert("price".to_string(), old_price);
+
+        let mut new_columns = IndexMap::new();
+        new_columns.insert("price".to_string(), new_price);
+
+        let mut diff = SchemaDiff { statements: vec![] };
+        diff.statements.push(DiffStatement::DropTable {
+            name: "orders_old".to_string(),
+            schema: None,
+            cascade: false,
+            prev: TableSnapshot {
+                name: "orders_old".to_string(),
+                schema: None,
+                columns: old_columns,
+                constraints: Vec::new(),
+                indexes: IndexMap::new(),
+                comment: None,
+            },
+        });
+        diff.statements.push(DiffStatement::CreateTable {
+            table: TableSnapshot {
+                name: "orders".to_string(),
+                schema: None,
+                columns: new_columns,
+                constraints: Vec::new(),
+                indexes: IndexMap::new(),
+                comment: None,
+            },
+        });
+
+        let mut renames = RenameDecisions::new();
+        renames.insert_table_decision(
+            &tid("orders_old", None),
+            RenameDecision::Rename {
+                from: "orders_old".to_string(),
+                to: "orders".to_string(),
+            },
+        );
+
+        let result = apply_renames(&diff, &renames);
+
+        let has_table_rename = result.statements.iter().any(|s| {
+            matches!(s, DiffStatement::RenameTable { from, to, .. } if from == "orders_old" && to == "orders")
+        });
+        let has_column_alter = result.statements.iter().any(|s| {
+            matches!(s, DiffStatement::AlterColumn { table, column, changes, .. }
+                if table == "orders_old" && column == "price"
+                && changes.iter().any(|c| matches!(c, ColumnChange::SetType(t) if t == "bigint")))
+        });
+        let has_comment_alter = result.statements.iter().any(|s| {
+            matches!(s, DiffStatement::AlterColumnComment { table, column, comment, .. }
+                if table == "orders_old" && column == "price" && comment.as_deref() == Some("new comment"))
+        });
+
+        assert!(has_table_rename, "Expected RenameTable statement");
+        assert!(
+            has_column_alter,
+            "Expected AlterColumn for same-name column in renamed table"
+        );
+        assert!(
+            has_comment_alter,
+            "Expected AlterColumnComment for same-name column in renamed table"
+        );
+    }
+
+    #[test]
+    fn test_column_rename_emits_comment_alter() {
+        let mut old_col = col("full_name", "text");
+        old_col.comment = Some("legacy".to_string());
+
+        let mut new_col = col("name", "text");
+        new_col.comment = Some("canonical".to_string());
+
+        let diff = SchemaDiff {
+            statements: vec![
+                DiffStatement::DropColumn {
+                    table: "users".to_string(),
+                    schema: None,
+                    column: "full_name".to_string(),
+                    cascade: false,
+                    prev: old_col,
+                },
+                DiffStatement::AddColumn {
+                    table: "users".to_string(),
+                    schema: None,
+                    column: new_col,
+                },
+            ],
+        };
+
+        let mut renames = RenameDecisions::new();
+        renames.insert_column_decision(
+            &cid("users", None, "full_name"),
+            RenameDecision::Rename {
+                from: "full_name".to_string(),
+                to: "name".to_string(),
+            },
+        );
+
+        let result = apply_renames(&diff, &renames);
+
+        let has_comment_alter = result.statements.iter().any(|s| {
+            matches!(s, DiffStatement::AlterColumnComment { table, column, comment, .. }
+                if table == "users" && column == "name" && comment.as_deref() == Some("canonical"))
+        });
+
+        assert!(
+            has_comment_alter,
+            "Expected AlterColumnComment to be emitted after rename"
+        );
+    }
+
+    #[test]
+    fn test_schema_scoped_table_rename_lookup() {
+        let mut decisions = RenameDecisions::new();
+        decisions.insert_table_decision(
+            &tid("users", Some("sales")),
+            RenameDecision::Rename {
+                from: "users".to_string(),
+                to: "accounts".to_string(),
+            },
+        );
+
+        assert_eq!(
+            decisions.get_table_new_name(&tid("users", Some("sales"))),
+            Some("accounts")
+        );
+        assert_eq!(
+            decisions.get_table_new_name(&tid("users", Some("public"))),
+            None
+        );
+    }
+
+    #[test]
+    fn test_schema_scoped_enum_rename_lookup() {
+        let mut decisions = RenameDecisions::new();
+        decisions.insert_enum_decision(
+            &tid("status", Some("billing")),
+            RenameDecision::Rename {
+                from: "status".to_string(),
+                to: "invoice_status".to_string(),
+            },
+        );
+
+        assert_eq!(
+            decisions.get_enum_new_name(&tid("status", Some("billing"))),
+            Some("invoice_status")
+        );
+        assert_eq!(decisions.get_enum_new_name(&tid("status", None)), None);
     }
 }

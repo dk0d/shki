@@ -303,8 +303,6 @@ pub enum Commands {
         verbose: bool,
     },
 
-    // Check migration files for consistency
-    // Check,
     /// Drop a migration file
     #[command()]
     Drop {
@@ -313,6 +311,17 @@ pub enum Commands {
         migration: Option<String>,
     },
 
+    /// Rollback (undo) applied migrations using down migration files
+    Down {
+        /// Number of migrations to rollback (default: 1)
+        count: Option<usize>,
+
+        /// Only show what would be rolled back
+        #[arg(long)]
+        dry_run: bool,
+    },
+    // Check migration files for consistency
+    // Check,
     // Export schema as SQL
     // Export {
     //     /// Path to schema file(s) or directory
@@ -323,13 +332,4 @@ pub enum Commands {
     //     #[arg(long)]
     //     output: Option<PathBuf>,
     // },
-    /// Rollback (undo) applied migrations using down migration files
-    Down {
-        /// Number of migrations to rollback (default: 1)
-        count: Option<usize>,
-
-        /// Only show what would be rolled back
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
