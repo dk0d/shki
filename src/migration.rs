@@ -1187,6 +1187,84 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    struct MigrationFixture<'a> {
+        name: &'a str,
+        up_sql: &'a str,
+        down_sql: Option<&'a str>,
+    }
+
+    fn test_manager(dialect: SchemaDialect) -> (TempDir, MigrationManager) {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let manager = MigrationManager::new(temp_dir.path(), dialect);
+        (temp_dir, manager)
+    }
+
+    async fn sqlite_test_ctx() -> (TempDir, MigrationManager, sqlx::AnyPool) {
+        let (temp_dir, manager) = test_manager(SchemaDialect::Sqlite);
+        manager.ensure_dir().expect("failed to ensure dir");
+
+        let pool = crate::create_any_pool_opts()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("failed to create sqlite any pool");
+
+        (temp_dir, manager, pool)
+    }
+
+    fn write_migration_fixture(
+        dir: &Path,
+        fixture: &MigrationFixture<'_>,
+    ) -> (PathBuf, Option<PathBuf>) {
+        let up_path = dir.join(format!("{}.sql", fixture.name));
+        fs::write(&up_path, fixture.up_sql).expect("failed to write up migration");
+
+        let down_path = fixture.down_sql.map(|sql| {
+            let path = dir.join(format!("{}.down.sql", fixture.name));
+            fs::write(&path, sql).expect("failed to write down migration");
+            path
+        });
+
+        (up_path, down_path)
+    }
+
+    async fn table_exists(pool: &sqlx::AnyPool, table: &str) -> bool {
+        let sql = format!(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '{}'",
+            table
+        );
+        let exists: Option<String> = sqlx::query_scalar(&sql)
+            .fetch_optional(pool)
+            .await
+            .expect("failed to check table existence");
+        exists.is_some()
+    }
+
+    async fn applied_migration_names(
+        manager: &MigrationManager,
+        pool: &sqlx::AnyPool,
+    ) -> Vec<String> {
+        manager
+            .get_applied_migrations(pool)
+            .await
+            .expect("failed to load applied migrations")
+            .into_iter()
+            .map(|m| m.name)
+            .collect()
+    }
+
+    fn save_snapshot_with_migration(
+        dir: &Path,
+        dialect: SchemaDialect,
+        migration_name: &str,
+        checksum: &str,
+    ) {
+        crate::Snapshot::new(dialect)
+            .with_migration(migration_name, checksum)
+            .save(dir)
+            .expect("failed to save snapshot");
+    }
+
     #[test]
     fn test_sanitize_migration_name() {
         let cases = vec![
@@ -1881,6 +1959,137 @@ ALTER TABLE users ADD COLUMN name TEXT;
         assert_eq!(latest.prev_id.as_deref(), Some(previous.id.as_str()));
     }
 
+    #[tokio::test]
+    async fn test_rollback_migration_removes_record_and_reverts_sql() {
+        let (temp_dir, manager, pool) = sqlite_test_ctx().await;
+        let fixture = MigrationFixture {
+            name: "0000_create_users",
+            up_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+            down_sql: Some("DROP TABLE users;"),
+        };
+        let (up_path, down_path) = write_migration_fixture(temp_dir.path(), &fixture);
+        let down_path = down_path.expect("down migration should exist");
+
+        manager
+            .apply_migration(&pool, &up_path)
+            .await
+            .expect("failed to apply up migration");
+
+        assert!(table_exists(&pool, "users").await);
+
+        manager
+            .rollback_migration(&pool, &down_path)
+            .await
+            .expect("failed to rollback migration");
+
+        assert!(
+            !table_exists(&pool, "users").await,
+            "users table should be dropped"
+        );
+        assert!(
+            applied_migration_names(&manager, &pool).await.is_empty(),
+            "migration record should be removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rollback_all_rolls_back_in_reverse_order() {
+        let (temp_dir, manager, pool) = sqlite_test_ctx().await;
+        let (up0, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0000_users",
+                up_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+                down_sql: Some("DROP TABLE users;"),
+            },
+        );
+        let (up1, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0001_posts",
+                up_sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id));",
+                down_sql: Some("DROP TABLE posts;"),
+            },
+        );
+
+        manager
+            .apply_migration(&pool, &up0)
+            .await
+            .expect("failed to apply first migration");
+        manager
+            .apply_migration(&pool, &up1)
+            .await
+            .expect("failed to apply second migration");
+
+        let rolled_back = manager
+            .rollback_all(&pool)
+            .await
+            .expect("failed to rollback all migrations");
+
+        assert_eq!(rolled_back, vec!["0001_posts", "0000_users"]);
+
+        assert!(
+            !table_exists(&pool, "users").await,
+            "users table should be dropped"
+        );
+        assert!(
+            !table_exists(&pool, "posts").await,
+            "posts table should be dropped"
+        );
+
+        let applied = applied_migration_names(&manager, &pool).await;
+        assert!(
+            applied.is_empty(),
+            "all migration records should be removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rollback_count_rolls_back_only_requested_number() {
+        let (temp_dir, manager, pool) = sqlite_test_ctx().await;
+        let (up0, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0000_users",
+                up_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+                down_sql: Some("DROP TABLE users;"),
+            },
+        );
+        let (up1, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0001_posts",
+                up_sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id));",
+                down_sql: Some("DROP TABLE posts;"),
+            },
+        );
+
+        manager
+            .apply_migration(&pool, &up0)
+            .await
+            .expect("failed to apply first migration");
+        manager
+            .apply_migration(&pool, &up1)
+            .await
+            .expect("failed to apply second migration");
+
+        let rolled_back = manager
+            .rollback_count(&pool, 1)
+            .await
+            .expect("failed to rollback one migration");
+
+        assert_eq!(rolled_back, vec!["0001_posts"]);
+
+        assert!(table_exists(&pool, "users").await);
+        assert!(
+            !table_exists(&pool, "posts").await,
+            "posts table should be dropped"
+        );
+
+        let applied_names = applied_migration_names(&manager, &pool).await;
+        assert_eq!(applied_names, vec!["0000_users"]);
+    }
+
     #[test]
     fn test_save_post_migration_snapshot_sets_prev_id_and_metadata() {
         let temp_dir = TempDir::new().expect("failed to create temp directory");
@@ -2017,6 +2226,104 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     // ==================== Snapshot Validation Tests ====================
 
+    #[tokio::test]
+    async fn test_validate_checksums_detects_mismatch() {
+        let (temp_dir, manager, pool) = sqlite_test_ctx().await;
+        let (migration_path, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0000_test",
+                up_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+                down_sql: None,
+            },
+        );
+
+        manager
+            .mark_migration_applied(&pool, &migration_path)
+            .await
+            .expect("failed to mark migration applied");
+
+        fs::write(
+            &migration_path,
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);",
+        )
+        .expect("failed to rewrite migration");
+
+        let result = manager.validate_checksums(&pool).await;
+        assert!(result.is_err(), "expected checksum validation to fail");
+
+        let message = result
+            .expect_err("expected checksum mismatch error")
+            .to_string();
+        assert!(message.contains("0000_test"));
+        assert!(message.to_ascii_lowercase().contains("checksum"));
+    }
+
+    #[tokio::test]
+    async fn test_find_migrations_without_snapshots_reports_missing_and_checksum_matches() {
+        let (temp_dir, manager, pool) = sqlite_test_ctx().await;
+        let (up0, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0000_users",
+                up_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+                down_sql: None,
+            },
+        );
+        let (up1, _) = write_migration_fixture(
+            temp_dir.path(),
+            &MigrationFixture {
+                name: "0001_posts",
+                up_sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY);",
+                down_sql: None,
+            },
+        );
+
+        manager
+            .mark_migration_applied(&pool, &up0)
+            .await
+            .expect("failed to mark first migration applied");
+        manager
+            .mark_migration_applied(&pool, &up1)
+            .await
+            .expect("failed to mark second migration applied");
+
+        let users_sql = fs::read_to_string(&up0).expect("failed to read first migration");
+        let posts_sql = fs::read_to_string(&up1).expect("failed to read second migration");
+
+        let users_checksum = crate::checksum::sql_checksum(&users_sql);
+        let posts_checksum = crate::checksum::sql_checksum(&posts_sql);
+
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Sqlite,
+            "0000_users",
+            &users_checksum,
+        );
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Sqlite,
+            "0001_posts_renamed",
+            &posts_checksum,
+        );
+
+        let (applied, missing, checksums_match) = manager
+            .find_migrations_without_snapshots(&pool)
+            .await
+            .expect("failed to find migrations without snapshots");
+
+        let applied_names = applied.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(applied_names, vec!["0000_users", "0001_posts"]);
+
+        let missing_names = missing.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(missing_names, vec!["0001_posts"]);
+
+        assert_eq!(
+            checksums_match,
+            vec![("0001_posts".to_string(), "0001_posts_renamed".to_string())]
+        );
+    }
+
     #[test]
     fn test_validate_snapshots_empty_dir() {
         let temp_dir = TempDir::new().expect("failed to create temp directory");
@@ -2048,8 +2355,7 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_validate_snapshots_matching_checksum() {
-        let temp_dir = TempDir::new().expect("failed to create temp directory");
-        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        let (temp_dir, manager) = test_manager(SchemaDialect::Postgres);
         manager.ensure_dir().expect("failed to ensure dir");
 
         // Create a migration file
@@ -2061,11 +2367,12 @@ ALTER TABLE users ADD COLUMN name TEXT;
         let checksum = crate::checksum::sql_checksum(sql);
 
         // Create a snapshot with matching migration info
-        let snapshot =
-            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_test", &checksum);
-        snapshot
-            .save(temp_dir.path())
-            .expect("failed to save snapshot");
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Postgres,
+            "0000_test",
+            &checksum,
+        );
 
         // Should pass - checksum matches
         manager
@@ -2075,8 +2382,7 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_validate_snapshots_checksum_mismatch() {
-        let temp_dir = TempDir::new().expect("failed to create temp directory");
-        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        let (temp_dir, manager) = test_manager(SchemaDialect::Postgres);
         manager.ensure_dir().expect("failed to ensure dir");
 
         // Create a migration file
@@ -2085,13 +2391,12 @@ ALTER TABLE users ADD COLUMN name TEXT;
         fs::write(&migration_path, sql).expect("failed to write migration");
 
         // Create a snapshot with wrong checksum
-        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Postgres,
             "0000_test",
             "0000000000000000000000000000000000000000000000000000000000000000",
         );
-        snapshot
-            .save(temp_dir.path())
-            .expect("failed to save snapshot");
 
         // Should fail - checksum mismatch
         let result = manager.validate_snapshots();
@@ -2104,18 +2409,16 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_validate_snapshots_missing_migration_file() {
-        let temp_dir = TempDir::new().expect("failed to create temp directory");
-        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        let (temp_dir, manager) = test_manager(SchemaDialect::Postgres);
         manager.ensure_dir().expect("failed to ensure dir");
 
         // Create a snapshot referencing a non-existent migration
-        let snapshot = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Postgres,
             "0000_nonexistent",
             "0000000000000000000000000000000000000000000000000000000000000000",
         );
-        snapshot
-            .save(temp_dir.path())
-            .expect("failed to save snapshot");
 
         // Should fail - migration file not found
         let result = manager.validate_snapshots();
@@ -2128,8 +2431,7 @@ ALTER TABLE users ADD COLUMN name TEXT;
 
     #[test]
     fn test_validate_snapshots_multiple_snapshots_mixed() {
-        let temp_dir = TempDir::new().expect("failed to create temp directory");
-        let manager = MigrationManager::new(temp_dir.path(), SchemaDialect::Postgres);
+        let (temp_dir, manager) = test_manager(SchemaDialect::Postgres);
         manager.ensure_dir().expect("failed to ensure dir");
 
         // Create migration files
@@ -2141,22 +2443,22 @@ ALTER TABLE users ADD COLUMN name TEXT;
         let checksum1 = crate::checksum::sql_checksum(sql1);
 
         // Create snapshots - one matching, one mismatched
-        let snapshot1 =
-            crate::Snapshot::new(SchemaDialect::Postgres).with_migration("0000_users", &checksum1);
-        snapshot1
-            .save(temp_dir.path())
-            .expect("failed to save snapshot1");
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Postgres,
+            "0000_users",
+            &checksum1,
+        );
 
         // Wait a tiny bit to ensure different timestamps
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let snapshot2 = crate::Snapshot::new(SchemaDialect::Postgres).with_migration(
+        save_snapshot_with_migration(
+            temp_dir.path(),
+            SchemaDialect::Postgres,
             "0001_posts",
             "wrongchecksum0000000000000000000000000000000000000000000000000000",
         );
-        snapshot2
-            .save(temp_dir.path())
-            .expect("failed to save snapshot2");
 
         // Should fail - one mismatch
         let result = manager.validate_snapshots();
