@@ -21,6 +21,18 @@ impl LuaSchema {
         }
     }
 
+    pub fn postgres(name: String) -> Self {
+        Self::new(Schema::postgres(name))
+    }
+
+    pub fn mysql(name: String) -> Self {
+        Self::new(Schema::mysql(name))
+    }
+
+    pub fn sqlite() -> Self {
+        Self::new(Schema::sqlite())
+    }
+
     pub fn into_schema(self) -> Schema {
         Rc::try_unwrap(self.inner)
             .map(|cell| cell.into_inner())
@@ -89,16 +101,16 @@ impl FromLua for LuaSchema {
 }
 
 /// pg.schema(name) -> LuaSchema
-pub fn pg_schema(_lua: &Lua, name: String) -> LuaResult<LuaSchema> {
-    Ok(LuaSchema::new(Schema::postgres(name)))
+pub fn pg_schema(_: &Lua, name: String) -> LuaResult<LuaSchema> {
+    Ok(LuaSchema::postgres(name))
 }
 
 /// mysql.schema(name) -> LuaSchema
-pub fn mysql_schema(_lua: &Lua, name: String) -> LuaResult<LuaSchema> {
-    Ok(LuaSchema::new(Schema::mysql(name)))
+pub fn mysql_schema(_: &Lua, name: String) -> LuaResult<LuaSchema> {
+    Ok(LuaSchema::mysql(name))
 }
 
 /// sqlite.schema() -> LuaSchema
-pub fn sqlite_schema(_lua: &Lua, _: ()) -> LuaResult<LuaSchema> {
-    Ok(LuaSchema::new(Schema::sqlite()))
+pub fn sqlite_schema(_: &Lua, _: ()) -> LuaResult<LuaSchema> {
+    Ok(LuaSchema::sqlite())
 }

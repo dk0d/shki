@@ -232,6 +232,7 @@ impl Column {
 /// // Using generic constructor
 /// let custom = ColumnBuilder::new("custom", DataType::Integer).not_null();
 /// ```
+#[derive(Clone)]
 pub struct ColumnBuilder {
     column: Column,
 }

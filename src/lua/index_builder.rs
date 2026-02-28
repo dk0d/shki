@@ -5,28 +5,39 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::schema::Index;
-use crate::schema::index::IndexColumn;
+use crate::schema::IndexBuilder;
 
-use super::LuaIndexColumn;
 use super::helpers::parse_index_method;
+use super::LuaIndexColumn;
 
 /// Lua wrapper for IndexBuilder
 #[derive(Clone)]
 pub struct LuaIndexBuilder {
-    inner: Rc<RefCell<Index>>,
+    inner: Rc<RefCell<IndexBuilder>>,
 }
 
 impl LuaIndexBuilder {
     pub fn new(name: String) -> Self {
         Self {
-            inner: Rc::new(RefCell::new(Index::new(name, Vec::<String>::new()))),
+            inner: Rc::new(RefCell::new(IndexBuilder::new(name))),
         }
+    }
+
+    fn transform<F>(&self, f: F)
+    where
+        F: FnOnce(IndexBuilder) -> IndexBuilder,
+    {
+        let updated = {
+            let current = self.inner.borrow().clone();
+            f(current)
+        };
+        *self.inner.borrow_mut() = updated;
     }
 
     pub fn build(self) -> Index {
         Rc::try_unwrap(self.inner)
-            .map(|cell| cell.into_inner())
-            .unwrap_or_else(|rc| rc.borrow().clone())
+            .map(|cell| cell.into_inner().build())
+            .unwrap_or_else(|rc| rc.borrow().clone().build())
     }
 }
 
@@ -34,78 +45,67 @@ impl UserData for LuaIndexBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         // column(name) -> self
         methods.add_method("column", |_, this, name: String| {
-            this.inner
-                .borrow_mut()
-                .columns
-                .push(IndexColumn::column(name));
+            this.transform(|builder| builder.column(name));
             Ok(this.clone())
         });
 
         // columns(names) -> self
         methods.add_method("columns", |_, this, names: Vec<String>| {
-            for name in names {
-                this.inner
-                    .borrow_mut()
-                    .columns
-                    .push(IndexColumn::column(name));
-            }
+            this.transform(|builder| builder.columns(names));
             Ok(this.clone())
         });
 
         // expression(expr) -> self
         methods.add_method("expression", |_, this, expr: String| {
-            this.inner
-                .borrow_mut()
-                .columns
-                .push(IndexColumn::expression(expr));
+            this.transform(|builder| builder.expression(expr));
             Ok(this.clone())
         });
 
         // index_column(lua_index_column) -> self
         methods.add_method("index_column", |_, this, col: LuaIndexColumn| {
-            this.inner.borrow_mut().columns.push(col.into_inner());
+            this.transform(|builder| builder.index_column(col.into_inner()));
             Ok(this.clone())
         });
 
         // unique() -> self
         methods.add_method("unique", |_, this, ()| {
-            this.inner.borrow_mut().unique = true;
+            this.transform(|builder| builder.unique());
             Ok(this.clone())
         });
 
         // using(method) -> self
         methods.add_method("using", |_, this, method: String| {
-            this.inner.borrow_mut().method = parse_index_method(&method);
+            this.transform(|builder| builder.using(parse_index_method(&method)));
             Ok(this.clone())
         });
 
         // where_clause(clause) -> self
         methods.add_method("where_clause", |_, this, clause: String| {
-            this.inner.borrow_mut().where_clause = Some(clause);
+            this.transform(|builder| builder.where_clause(clause));
             Ok(this.clone())
         });
 
         // include(columns) -> self
         methods.add_method("include", |_, this, columns: Vec<String>| {
-            this.inner.borrow_mut().include = columns;
+            this.transform(|builder| builder.include(columns));
             Ok(this.clone())
         });
 
         // concurrently() -> self
         methods.add_method("concurrently", |_, this, ()| {
-            this.inner.borrow_mut().concurrently = true;
+            this.transform(|builder| builder.concurrently());
             Ok(this.clone())
         });
 
         // tablespace(name) -> self
         methods.add_method("tablespace", |_, this, tablespace: String| {
-            this.inner.borrow_mut().tablespace = Some(tablespace);
+            this.transform(|builder| builder.tablespace(tablespace));
             Ok(this.clone())
         });
 
         // option(key, value) -> self
         methods.add_method("option", |_, this, (key, value): (String, String)| {
-            this.inner.borrow_mut().options.push((key, value));
+            this.transform(|builder| builder.option(key, value));
             Ok(this.clone())
         });
     }
@@ -125,6 +125,6 @@ impl FromLua for LuaIndexBuilder {
 }
 
 /// IndexBuilder.new(name) -> LuaIndexBuilder
-pub fn index_builder_new(_lua: &Lua, name: String) -> LuaResult<LuaIndexBuilder> {
+pub fn index_builder_new(_: &Lua, name: String) -> LuaResult<LuaIndexBuilder> {
     Ok(LuaIndexBuilder::new(name))
 }

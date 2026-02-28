@@ -4,7 +4,7 @@ use mlua::{FromLua, Lua, Result as LuaResult, UserData, UserDataMethods, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::schema::{Index, Table};
+use crate::schema::{Table, TableBuilder};
 
 use super::helpers::parse_referential_action;
 use super::{LuaColumnBuilder, LuaIndexBuilder};
@@ -12,20 +12,31 @@ use super::{LuaColumnBuilder, LuaIndexBuilder};
 /// Lua wrapper for TableBuilder
 #[derive(Clone)]
 pub struct LuaTableBuilder {
-    inner: Rc<RefCell<Table>>,
+    inner: Rc<RefCell<TableBuilder>>,
 }
 
 impl LuaTableBuilder {
     pub fn new(name: String) -> Self {
         Self {
-            inner: Rc::new(RefCell::new(Table::new(name))),
+            inner: Rc::new(RefCell::new(TableBuilder::new(name))),
         }
+    }
+
+    fn transform<F>(&self, f: F)
+    where
+        F: FnOnce(TableBuilder) -> TableBuilder,
+    {
+        let updated = {
+            let current = self.inner.borrow().clone();
+            f(current)
+        };
+        *self.inner.borrow_mut() = updated;
     }
 
     pub fn build(self) -> Table {
         Rc::try_unwrap(self.inner)
-            .map(|cell| cell.into_inner())
-            .unwrap_or_else(|rc| rc.borrow().clone())
+            .map(|cell| cell.into_inner().build())
+            .unwrap_or_else(|rc| rc.borrow().clone().build())
     }
 }
 
@@ -33,44 +44,38 @@ impl UserData for LuaTableBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         // schema(name) -> self
         methods.add_method("schema", |_, this, schema: String| {
-            this.inner.borrow_mut().schema = Some(schema);
+            this.transform(|builder| builder.schema(schema));
             Ok(this.clone())
         });
 
         // description(desc) -> self  (alias for comment)
         methods.add_method("description", |_, this, desc: String| {
-            this.inner.borrow_mut().comment = Some(desc);
+            this.transform(|builder| builder.description(desc));
             Ok(this.clone())
         });
 
         // comment(text) -> self
         methods.add_method("comment", |_, this, comment: String| {
-            this.inner.borrow_mut().comment = Some(comment);
+            this.transform(|builder| builder.comment(comment));
             Ok(this.clone())
         });
 
         // column(column_builder) -> self
         methods.add_method("column", |_, this, column: LuaColumnBuilder| {
             let col = column.build();
-            this.inner.borrow_mut().column(col);
+            this.transform(|builder| builder.column(col));
             Ok(this.clone())
         });
 
         // primary_key(columns) -> self
         methods.add_method("primary_key", |_, this, columns: Vec<String>| {
-            use crate::schema::{Constraint, PrimaryKeyConstraint};
-            this.inner
-                .borrow_mut()
-                .constraint(Constraint::PrimaryKey(PrimaryKeyConstraint::new(columns)));
+            this.transform(|builder| builder.primary_key(columns));
             Ok(this.clone())
         });
 
         // unique_constraint(columns) -> self
         methods.add_method("unique_constraint", |_, this, columns: Vec<String>| {
-            use crate::schema::{Constraint, UniqueConstraint};
-            this.inner
-                .borrow_mut()
-                .constraint(Constraint::Unique(UniqueConstraint::new(columns)));
+            this.transform(|builder| builder.unique_constraint(columns));
             Ok(this.clone())
         });
 
@@ -78,10 +83,7 @@ impl UserData for LuaTableBuilder {
         methods.add_method(
             "foreign_key",
             |_, this, (columns, ref_table, ref_columns): (Vec<String>, String, Vec<String>)| {
-                use crate::schema::{Constraint, ForeignKeyConstraint};
-                this.inner.borrow_mut().constraint(Constraint::ForeignKey(
-                    ForeignKeyConstraint::new(columns, ref_table, ref_columns),
-                ));
+                this.transform(|builder| builder.foreign_key(columns, ref_table, ref_columns));
                 Ok(this.clone())
             },
         );
@@ -98,23 +100,24 @@ impl UserData for LuaTableBuilder {
                 String,
                 String,
             )| {
-                use crate::schema::{Constraint, ForeignKeyConstraint};
-                let mut fk = ForeignKeyConstraint::new(columns, ref_table, ref_columns);
-                fk.on_delete = parse_referential_action(&on_delete);
-                fk.on_update = parse_referential_action(&on_update);
-                this.inner
-                    .borrow_mut()
-                    .constraint(Constraint::ForeignKey(fk));
+                let on_delete = parse_referential_action(&on_delete);
+                let on_update = parse_referential_action(&on_update);
+                this.transform(|builder| {
+                    builder.foreign_key_with_actions(
+                        columns,
+                        ref_table,
+                        ref_columns,
+                        on_delete,
+                        on_update,
+                    )
+                });
                 Ok(this.clone())
             },
         );
 
         // check(expression) -> self
         methods.add_method("check", |_, this, expression: String| {
-            use crate::schema::{CheckConstraint, Constraint};
-            this.inner
-                .borrow_mut()
-                .constraint(Constraint::Check(CheckConstraint::new(expression)));
+            this.transform(|builder| builder.check(expression));
             Ok(this.clone())
         });
 
@@ -122,8 +125,7 @@ impl UserData for LuaTableBuilder {
         methods.add_method(
             "index",
             |_, this, (name, columns): (String, Vec<String>)| {
-                let index = Index::new(name, columns);
-                this.inner.borrow_mut().index(index);
+                this.transform(|builder| builder.index(name, columns));
                 Ok(this.clone())
             },
         );
@@ -132,8 +134,7 @@ impl UserData for LuaTableBuilder {
         methods.add_method(
             "unique_index",
             |_, this, (name, columns): (String, Vec<String>)| {
-                let index = Index::new(name, columns).unique();
-                this.inner.borrow_mut().index(index);
+                this.transform(|builder| builder.unique_index(name, columns));
                 Ok(this.clone())
             },
         );
@@ -141,7 +142,7 @@ impl UserData for LuaTableBuilder {
         // index_with(index_builder) -> self
         methods.add_method("index_with", |_, this, index: LuaIndexBuilder| {
             let idx = index.build();
-            this.inner.borrow_mut().index(idx);
+            this.transform(|builder| builder.index_with(idx));
             Ok(this.clone())
         });
     }
@@ -161,6 +162,6 @@ impl FromLua for LuaTableBuilder {
 }
 
 /// TableBuilder.new(name) -> LuaTableBuilder
-pub fn table_builder_new(_lua: &Lua, name: String) -> LuaResult<LuaTableBuilder> {
+pub fn table_builder_new(_: &Lua, name: String) -> LuaResult<LuaTableBuilder> {
     Ok(LuaTableBuilder::new(name))
 }

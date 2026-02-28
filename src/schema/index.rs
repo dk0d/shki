@@ -288,6 +288,7 @@ impl Index {
 }
 
 /// Builder for creating indexes
+#[derive(Clone)]
 pub struct IndexBuilder {
     index: Index,
 }
@@ -331,6 +332,12 @@ impl IndexBuilder {
         self
     }
 
+    /// Add a pre-built index column
+    pub fn index_column(mut self, column: IndexColumn) -> Self {
+        self.index.columns.push(column);
+        self
+    }
+
     /// Make unique
     pub fn unique(mut self) -> Self {
         self.index.unique = true;
@@ -346,6 +353,30 @@ impl IndexBuilder {
     /// Add WHERE clause
     pub fn where_clause(mut self, clause: impl Into<String>) -> Self {
         self.index.where_clause = Some(clause.into());
+        self
+    }
+
+    /// Create index concurrently
+    pub fn concurrently(mut self) -> Self {
+        self.index.concurrently = true;
+        self
+    }
+
+    /// Include columns in the index
+    pub fn include(mut self, columns: Vec<impl Into<String>>) -> Self {
+        self.index.include = columns.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Set index tablespace
+    pub fn tablespace(mut self, tablespace: impl Into<String>) -> Self {
+        self.index.tablespace = Some(tablespace.into());
+        self
+    }
+
+    /// Add index option
+    pub fn option(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.index.options.push((key.into(), value.into()));
         self
     }
 

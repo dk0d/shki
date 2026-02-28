@@ -1,36 +1,39 @@
 //! Lua wrapper for ViewBuilder
 
 use mlua::{FromLua, Lua, Result as LuaResult, UserData, UserDataMethods, Value};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-use crate::schema::View;
+use crate::schema::{View, ViewBuilder};
 
 /// Lua wrapper for building Views
 #[derive(Clone)]
 pub struct LuaViewBuilder {
-    name: String,
-    schema: Option<String>,
-    definition: String,
-    materialized: bool,
+    inner: Rc<RefCell<ViewBuilder>>,
 }
 
 impl LuaViewBuilder {
     pub fn new(name: String, definition: String) -> Self {
         Self {
-            name,
-            schema: None,
-            definition,
-            materialized: false,
+            inner: Rc::new(RefCell::new(ViewBuilder::new(name, definition))),
         }
     }
 
+    fn transform<F>(&self, f: F)
+    where
+        F: FnOnce(ViewBuilder) -> ViewBuilder,
+    {
+        let updated = {
+            let current = self.inner.borrow().clone();
+            f(current)
+        };
+        *self.inner.borrow_mut() = updated;
+    }
+
     pub fn build(self) -> View {
-        View {
-            name: self.name,
-            schema: self.schema,
-            definition: self.definition,
-            materialized: self.materialized,
-            columns: Vec::new(), // Columns are typically inferred from the definition
-        }
+        Rc::try_unwrap(self.inner)
+            .map(|cell| cell.into_inner().build())
+            .unwrap_or_else(|rc| rc.borrow().clone().build())
     }
 }
 
@@ -38,16 +41,14 @@ impl UserData for LuaViewBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         // schema(name) -> self
         methods.add_method("schema", |_, this, schema: String| {
-            let mut new = this.clone();
-            new.schema = Some(schema);
-            Ok(new)
+            this.transform(|builder| builder.schema(schema));
+            Ok(this.clone())
         });
 
         // materialized() -> self
         methods.add_method("materialized", |_, this, ()| {
-            let mut new = this.clone();
-            new.materialized = true;
-            Ok(new)
+            this.transform(|builder| builder.materialized());
+            Ok(this.clone())
         });
     }
 }
@@ -67,7 +68,7 @@ impl FromLua for LuaViewBuilder {
 
 /// ViewBuilder.new(name, definition) -> LuaViewBuilder
 pub fn view_builder_new(
-    _lua: &Lua,
+    _: &Lua,
     (name, definition): (String, String),
 ) -> LuaResult<LuaViewBuilder> {
     Ok(LuaViewBuilder::new(name, definition))

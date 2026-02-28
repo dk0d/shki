@@ -4,29 +4,36 @@ use mlua::{FromLua, Lua, Result as LuaResult, UserData, UserDataMethods, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::schema::Sequence;
+use crate::schema::{Sequence, SequenceBuilder};
 
 /// Lua wrapper for building Sequences
 #[derive(Clone)]
 pub struct LuaSequenceBuilder {
-    inner: Rc<RefCell<Sequence>>,
+    inner: Rc<RefCell<SequenceBuilder>>,
 }
 
 impl LuaSequenceBuilder {
     pub fn new(name: String) -> Self {
-        let seq = Sequence {
-            name,
-            ..Sequence::default()
-        };
         Self {
-            inner: Rc::new(RefCell::new(seq)),
+            inner: Rc::new(RefCell::new(SequenceBuilder::new(name))),
         }
+    }
+
+    fn transform<F>(&self, f: F)
+    where
+        F: FnOnce(SequenceBuilder) -> SequenceBuilder,
+    {
+        let updated = {
+            let current = self.inner.borrow().clone();
+            f(current)
+        };
+        *self.inner.borrow_mut() = updated;
     }
 
     pub fn build(self) -> Sequence {
         Rc::try_unwrap(self.inner)
-            .map(|cell| cell.into_inner())
-            .unwrap_or_else(|rc| rc.borrow().clone())
+            .map(|cell| cell.into_inner().build())
+            .unwrap_or_else(|rc| rc.borrow().clone().build())
     }
 }
 
@@ -34,49 +41,49 @@ impl UserData for LuaSequenceBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         // schema(name) -> self
         methods.add_method("schema", |_, this, schema: String| {
-            this.inner.borrow_mut().schema = Some(schema);
+            this.transform(|builder| builder.schema(schema));
             Ok(this.clone())
         });
 
         // increment(value) -> self
         methods.add_method("increment", |_, this, increment: i64| {
-            this.inner.borrow_mut().increment = increment;
+            this.transform(|builder| builder.increment(increment));
             Ok(this.clone())
         });
 
         // min_value(value) -> self
         methods.add_method("min_value", |_, this, min_value: i64| {
-            this.inner.borrow_mut().min_value = min_value;
+            this.transform(|builder| builder.min_value(min_value));
             Ok(this.clone())
         });
 
         // max_value(value) -> self
         methods.add_method("max_value", |_, this, max_value: i64| {
-            this.inner.borrow_mut().max_value = Some(max_value);
+            this.transform(|builder| builder.max_value(max_value));
             Ok(this.clone())
         });
 
         // start(value) -> self
         methods.add_method("start", |_, this, start: i64| {
-            this.inner.borrow_mut().start = start;
+            this.transform(|builder| builder.start(start));
             Ok(this.clone())
         });
 
         // cache(value) -> self
         methods.add_method("cache", |_, this, cache: i64| {
-            this.inner.borrow_mut().cache = cache;
+            this.transform(|builder| builder.cache(cache));
             Ok(this.clone())
         });
 
         // cycle() -> self
         methods.add_method("cycle", |_, this, ()| {
-            this.inner.borrow_mut().cycle = true;
+            this.transform(|builder| builder.cycle());
             Ok(this.clone())
         });
 
         // no_cycle() -> self
         methods.add_method("no_cycle", |_, this, ()| {
-            this.inner.borrow_mut().cycle = false;
+            this.transform(|builder| builder.no_cycle());
             Ok(this.clone())
         });
     }
@@ -96,6 +103,6 @@ impl FromLua for LuaSequenceBuilder {
 }
 
 /// SequenceBuilder.new(name) -> LuaSequenceBuilder
-pub fn sequence_builder_new(_lua: &Lua, name: String) -> LuaResult<LuaSequenceBuilder> {
+pub fn sequence_builder_new(_: &Lua, name: String) -> LuaResult<LuaSequenceBuilder> {
     Ok(LuaSequenceBuilder::new(name))
 }

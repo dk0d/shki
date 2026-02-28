@@ -1,9 +1,11 @@
 use super::{
     CheckConstraint, Column, ColumnBuilder, Constraint, DataType, EnumType, ForeignKeyConstraint,
-    Index, IndexBuilder, PrimaryKeyConstraint, ReferenceAction, Schema, Table, UniqueConstraint,
+    Index, IndexBuilder, PrimaryKeyConstraint, ReferenceAction, Schema, Sequence, Table,
+    UniqueConstraint, View,
 };
 
 /// Builder for creating schemas with a fluent API
+#[derive(Clone)]
 pub struct SchemaBuilder {
     schema: Schema,
 }
@@ -71,6 +73,7 @@ impl SchemaBuilder {
 ///     .index("users_email_idx", vec!["email"])
 ///     .build();
 /// ```
+#[derive(Clone)]
 pub struct TableBuilder {
     table: Table,
 }
@@ -213,6 +216,12 @@ impl TableBuilder {
         self
     }
 
+    /// Add an index directly
+    pub fn index_with(mut self, index: Index) -> Self {
+        self.table.index(index);
+        self
+    }
+
     /// Set a comment on the table
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.table.comment = Some(comment.into());
@@ -250,6 +259,7 @@ impl TableBuilder {
 ///     .values(["admin", "moderator", "user", "guest"])
 ///     .build();
 /// ```
+#[derive(Clone)]
 pub struct EnumBuilder {
     enum_type: EnumType,
 }
@@ -296,5 +306,114 @@ impl EnumBuilder {
 impl From<EnumBuilder> for EnumType {
     fn from(builder: EnumBuilder) -> Self {
         builder.build()
+    }
+}
+
+/// Builder for creating sequences with a fluent API
+#[derive(Clone)]
+pub struct SequenceBuilder {
+    sequence: Sequence,
+}
+
+impl SequenceBuilder {
+    /// Create a new sequence builder
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            sequence: Sequence {
+                name: name.into(),
+                ..Sequence::default()
+            },
+        }
+    }
+
+    /// Set sequence schema
+    pub fn schema(mut self, schema: impl Into<String>) -> Self {
+        self.sequence.schema = Some(schema.into());
+        self
+    }
+
+    /// Set increment value
+    pub fn increment(mut self, increment: i64) -> Self {
+        self.sequence.increment = increment;
+        self
+    }
+
+    /// Set minimum value
+    pub fn min_value(mut self, min_value: i64) -> Self {
+        self.sequence.min_value = min_value;
+        self
+    }
+
+    /// Set maximum value
+    pub fn max_value(mut self, max_value: i64) -> Self {
+        self.sequence.max_value = Some(max_value);
+        self
+    }
+
+    /// Set start value
+    pub fn start(mut self, start: i64) -> Self {
+        self.sequence.start = start;
+        self
+    }
+
+    /// Set cache value
+    pub fn cache(mut self, cache: i64) -> Self {
+        self.sequence.cache = cache;
+        self
+    }
+
+    /// Enable cycling
+    pub fn cycle(mut self) -> Self {
+        self.sequence.cycle = true;
+        self
+    }
+
+    /// Disable cycling
+    pub fn no_cycle(mut self) -> Self {
+        self.sequence.cycle = false;
+        self
+    }
+
+    /// Build sequence
+    pub fn build(self) -> Sequence {
+        self.sequence
+    }
+}
+
+/// Builder for creating views with a fluent API
+#[derive(Clone)]
+pub struct ViewBuilder {
+    view: View,
+}
+
+impl ViewBuilder {
+    /// Create a new view builder
+    pub fn new(name: impl Into<String>, definition: impl Into<String>) -> Self {
+        Self {
+            view: View {
+                name: name.into(),
+                schema: None,
+                definition: definition.into(),
+                materialized: false,
+                columns: Vec::new(),
+            },
+        }
+    }
+
+    /// Set view schema
+    pub fn schema(mut self, schema: impl Into<String>) -> Self {
+        self.view.schema = Some(schema.into());
+        self
+    }
+
+    /// Mark as materialized view
+    pub fn materialized(mut self) -> Self {
+        self.view.materialized = true;
+        self
+    }
+
+    /// Build view
+    pub fn build(self) -> View {
+        self.view
     }
 }
