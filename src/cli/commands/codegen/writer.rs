@@ -3,9 +3,11 @@
 //! This module provides a trait-based system for writing generated code to files,
 //! supporting multiple output languages and file organization modes.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{Result, ShkiError};
+use colored::Colorize;
 
 use super::config::{CodegenConfig, OutputMode};
 
@@ -51,13 +53,19 @@ pub trait CodeWriter {
         config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>>;
 
+    /// Default to single module when not specifically implemented
     /// Write generated code to a nested module structure
     fn write_modules(
         &self,
         code: &Self::GeneratedCode,
         output_dir: &Path,
         config: &CodegenConfig,
-    ) -> Result<Vec<PathBuf>>;
+    ) -> Result<Vec<PathBuf>> {
+        println!("Falling back to {}", "single-module".cyan().bold());
+        println!("-");
+        println!();
+        self.write_single_module(code, output_dir, config)
+    }
 
     /// Format generated code as a string for preview/stdout
     fn format_preview(&self, code: &Self::GeneratedCode) -> String;
@@ -67,4 +75,19 @@ pub trait CodeWriter {
 
     /// Get the default output filename (without extension)
     fn default_filename(&self) -> &str;
+
+    /// Ensure output directory exists
+    fn ensure_output_dir(&self, output_dir: &Path) -> Result<()> {
+        fs::create_dir_all(output_dir)?;
+        Ok(())
+    }
+
+    /// Build the default output path for single-file mode
+    fn output_file_path(&self, output_dir: &Path) -> PathBuf {
+        output_dir.join(format!(
+            "{}.{}",
+            self.default_filename(),
+            self.file_extension()
+        ))
+    }
 }

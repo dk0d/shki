@@ -113,34 +113,44 @@ impl TypeScriptGenerator {
 
 impl CodeGenerator for TypeScriptGenerator {
     type Output = GeneratedTypeScript;
+    type EnumDef = TypeScriptEnum;
+    type TableDef = TypeScriptInterface;
 
-    /// Generate TypeScript code from a schema snapshot
-    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedTypeScript {
-        let mut code = GeneratedTypeScript::new();
+    fn init_output(&self, _config: &CodegenConfig) -> Self::Output {
+        GeneratedTypeScript::new()
+    }
 
-        // Generate enums first (interfaces may depend on them)
-        for (name, enum_snapshot) in &snapshot.enums {
-            let ts_enum = self.generate_enum(name, enum_snapshot, config);
-            code.enums.insert(name.clone(), ts_enum);
-        }
+    fn generate_enum(
+        &self,
+        name: &str,
+        enum_snapshot: &EnumSnapshot,
+        config: &CodegenConfig,
+    ) -> Self::EnumDef {
+        self.build_enum(name, enum_snapshot, config)
+    }
 
-        // Generate interfaces from tables
-        for (name, table_snapshot) in &snapshot.tables {
-            if !config.should_include_table(name) {
-                continue;
-            }
-            let ts_interface =
-                self.generate_interface(name, table_snapshot, &snapshot.enums, config);
-            code.interfaces.insert(name.clone(), ts_interface);
-        }
+    fn generate_table(
+        &self,
+        name: &str,
+        table_snapshot: &TableSnapshot,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_interface(name, table_snapshot, &snapshot.enums, config)
+    }
 
-        code
+    fn insert_enum(&self, output: &mut Self::Output, name: &str, def: Self::EnumDef) {
+        output.enums.insert(name.to_string(), def);
+    }
+
+    fn insert_table(&self, output: &mut Self::Output, name: &str, def: Self::TableDef) {
+        output.interfaces.insert(name.to_string(), def);
     }
 }
 
 impl TypeScriptGenerator {
     /// Generate a TypeScript enum from an enum snapshot
-    fn generate_enum(
+    fn build_enum(
         &self,
         name: &str,
         enum_snapshot: &EnumSnapshot,
@@ -166,7 +176,7 @@ impl TypeScriptGenerator {
     }
 
     /// Generate a TypeScript interface from a table snapshot
-    fn generate_interface(
+    fn build_interface(
         &self,
         name: &str,
         table: &TableSnapshot,
@@ -217,25 +227,13 @@ impl TypeScriptGenerator {
         config: &CodegenConfig,
     ) -> String {
         // Check for type overrides first
-        let normalized = sql_type.to_lowercase();
-        if let Some(override_type) = config.type_overrides.get(&normalized) {
+        let normalized = self.normalized_sql_type(sql_type);
+        if let Some(override_type) = self.overridden_type(&normalized, config) {
             return override_type.clone();
         }
 
-        // Strip quotes from the type name for enum lookup
-        let unquoted = sql_type
-            .trim_matches('"')
-            .split('.')
-            .next_back()
-            .unwrap_or(sql_type)
-            .trim_matches('"');
-
-        // Check if it's a known enum type
-        if enums.contains_key(sql_type) {
-            return sql_type.to_upper_camel_case();
-        }
-        if enums.contains_key(unquoted) {
-            return unquoted.to_upper_camel_case();
+        if let Some(enum_name) = self.enum_type_name(sql_type, enums) {
+            return enum_name;
         }
 
         // Handle array types

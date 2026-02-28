@@ -4,9 +4,10 @@
 //! database schema snapshots into language-specific code.
 
 use heck::ToUpperCamelCase;
+use indexmap::IndexMap;
 
 use crate::commands::codegen::CodegenConfig;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{EnumSnapshot, Snapshot, TableSnapshot};
 
 /// Singularize a table name (e.g., "users" -> "user")
 pub fn singularize(name: &str) -> String {
@@ -21,8 +22,100 @@ pub trait CodeGenerator: Default {
     /// The output type produced by this generator
     type Output;
 
+    /// Language-specific enum representation
+    type EnumDef;
+
+    /// Language-specific table/message representation
+    type TableDef;
+
+    /// Create an empty output container
+    fn init_output(&self, config: &CodegenConfig) -> Self::Output;
+
+    /// Build one enum definition from schema data
+    fn generate_enum(
+        &self,
+        name: &str,
+        enum_snapshot: &EnumSnapshot,
+        config: &CodegenConfig,
+    ) -> Self::EnumDef;
+
+    /// Build one table/message definition from schema data
+    fn generate_table(
+        &self,
+        name: &str,
+        table_snapshot: &TableSnapshot,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef;
+
+    /// Insert a generated enum into output
+    fn insert_enum(&self, output: &mut Self::Output, name: &str, def: Self::EnumDef);
+
+    /// Insert a generated table/message into output
+    fn insert_table(&self, output: &mut Self::Output, name: &str, def: Self::TableDef);
+
     /// Generate code from a schema snapshot
-    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> Self::Output;
+    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> Self::Output {
+        let mut output = self.init_output(config);
+
+        for (name, enum_snapshot) in &snapshot.enums {
+            let generated_enum = self.generate_enum(name, enum_snapshot, config);
+            self.insert_enum(&mut output, name, generated_enum);
+        }
+
+        for (name, table_snapshot) in &snapshot.tables {
+            if !config.should_include_table(name) {
+                continue;
+            }
+
+            let generated_table = self.generate_table(name, table_snapshot, snapshot, config);
+            self.insert_table(&mut output, name, generated_table);
+        }
+
+        output
+    }
+
+    /// Normalize a SQL type name for matching
+    fn normalized_sql_type(&self, sql_type: &str) -> String {
+        sql_type.to_lowercase()
+    }
+
+    /// Resolve type override if present
+    fn overridden_type<'a>(
+        &self,
+        normalized_sql_type: &str,
+        config: &'a CodegenConfig,
+    ) -> Option<&'a String> {
+        config.type_overrides.get(normalized_sql_type)
+    }
+
+    /// Remove schema qualifier and quotes from SQL type names
+    fn unqualified_sql_type<'a>(&self, sql_type: &'a str) -> &'a str {
+        sql_type
+            .trim_matches('"')
+            .split('.')
+            .next_back()
+            .unwrap_or(sql_type)
+            .trim_matches('"')
+    }
+
+    /// Resolve enum type name using both raw and unqualified names
+    fn enum_type_name(
+        &self,
+        sql_type: &str,
+        enums: &IndexMap<String, EnumSnapshot>,
+    ) -> Option<String> {
+        if enums.contains_key(sql_type) {
+            return Some(sql_type.to_upper_camel_case());
+        }
+
+        let unqualified = self.unqualified_sql_type(sql_type);
+        if enums.contains_key(unqualified) {
+            return Some(unqualified.to_upper_camel_case());
+        }
+
+        None
+    }
 
     /// Transform a table name into a struct/message name.
     ///
@@ -95,8 +188,31 @@ mod tests {
 
     impl CodeGenerator for TestGenerator {
         type Output = ();
+        type EnumDef = ();
+        type TableDef = ();
 
-        fn generate(&self, _snapshot: &Snapshot, _config: &CodegenConfig) -> Self::Output {}
+        fn init_output(&self, _config: &CodegenConfig) -> Self::Output {}
+
+        fn generate_enum(
+            &self,
+            _name: &str,
+            _enum_snapshot: &EnumSnapshot,
+            _config: &CodegenConfig,
+        ) -> Self::EnumDef {
+        }
+
+        fn generate_table(
+            &self,
+            _name: &str,
+            _table_snapshot: &TableSnapshot,
+            _snapshot: &Snapshot,
+            _config: &CodegenConfig,
+        ) -> Self::TableDef {
+        }
+
+        fn insert_enum(&self, _output: &mut Self::Output, _name: &str, _def: Self::EnumDef) {}
+
+        fn insert_table(&self, _output: &mut Self::Output, _name: &str, _def: Self::TableDef) {}
     }
 
     #[test]

@@ -140,33 +140,44 @@ impl RustGenerator {
 
 impl CodeGenerator for RustGenerator {
     type Output = GeneratedRust;
+    type EnumDef = RustEnum;
+    type TableDef = RustStruct;
 
-    /// Generate Rust code from a schema snapshot
-    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedRust {
-        let mut code = GeneratedRust::new();
+    fn init_output(&self, _config: &CodegenConfig) -> Self::Output {
+        GeneratedRust::new()
+    }
 
-        // Generate enums first (structs may depend on them)
-        for (name, enum_snapshot) in &snapshot.enums {
-            let rust_enum = self.generate_enum(name, enum_snapshot, config);
-            code.enums.insert(name.clone(), rust_enum);
-        }
+    fn generate_enum(
+        &self,
+        name: &str,
+        enum_snapshot: &EnumSnapshot,
+        config: &CodegenConfig,
+    ) -> Self::EnumDef {
+        self.build_enum(name, enum_snapshot, config)
+    }
 
-        // Generate structs from tables
-        for (name, table_snapshot) in &snapshot.tables {
-            if !config.should_include_table(name) {
-                continue;
-            }
-            let rust_struct = self.generate_struct(name, table_snapshot, &snapshot.enums, config);
-            code.structs.insert(name.clone(), rust_struct);
-        }
+    fn generate_table(
+        &self,
+        name: &str,
+        table_snapshot: &TableSnapshot,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_struct(name, table_snapshot, &snapshot.enums, config)
+    }
 
-        code
+    fn insert_enum(&self, output: &mut Self::Output, name: &str, def: Self::EnumDef) {
+        output.enums.insert(name.to_string(), def);
+    }
+
+    fn insert_table(&self, output: &mut Self::Output, name: &str, def: Self::TableDef) {
+        output.structs.insert(name.to_string(), def);
     }
 }
 
 impl RustGenerator {
     /// Generate a Rust enum from an enum snapshot
-    fn generate_enum(
+    fn build_enum(
         &self,
         name: &str,
         enum_snapshot: &EnumSnapshot,
@@ -198,7 +209,7 @@ impl RustGenerator {
     }
 
     /// Generate a Rust struct from a table snapshot
-    fn generate_struct(
+    fn build_struct(
         &self,
         name: &str,
         table: &TableSnapshot,
@@ -254,26 +265,12 @@ impl RustGenerator {
         config: &CodegenConfig,
     ) -> String {
         // Check for type overrides first
-        let normalized = sql_type.to_lowercase();
-        if let Some(override_type) = config.type_overrides.get(&normalized) {
+        let normalized = self.normalized_sql_type(sql_type);
+        if let Some(override_type) = self.overridden_type(&normalized, config) {
             return wrap_nullable(override_type, nullable);
         }
 
-        // Strip quotes from the type name for enum lookup
-        let unquoted = sql_type
-            .trim_matches('"')
-            .split('.')
-            .next_back()
-            .unwrap_or(sql_type)
-            .trim_matches('"');
-
-        // Check if it's a known enum type (by original name or unquoted name)
-        if enums.contains_key(sql_type) {
-            let enum_name = sql_type.to_upper_camel_case();
-            return wrap_nullable(&enum_name, nullable);
-        }
-        if enums.contains_key(unquoted) {
-            let enum_name = unquoted.to_upper_camel_case();
+        if let Some(enum_name) = self.enum_type_name(sql_type, enums) {
             return wrap_nullable(&enum_name, nullable);
         }
 

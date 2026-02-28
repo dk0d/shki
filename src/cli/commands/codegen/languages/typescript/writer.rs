@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use colored::Colorize;
 use heck::ToSnakeCase;
 
-use crate::commands::codegen::writer::CodeWriter;
-use crate::commands::codegen::CodegenConfig;
 use crate::Result;
+use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::writer::CodeWriter;
 
 use super::{GeneratedTypeScript, TypeScriptInterface, TypescriptFlavor};
 
@@ -82,6 +82,14 @@ impl TypeScriptWriter {
         Ok(())
     }
 
+    fn write_type_file(&self, file_path: &Path, imports: &[String], content: &str) -> Result<()> {
+        let mut file = fs::File::create(file_path)?;
+        self.write_header(&mut file)?;
+        self.write_imports(&mut file, imports)?;
+        writeln!(file, "{}", content)?;
+        Ok(())
+    }
+
     /// Write an index.ts file that re-exports all types
     fn write_index_file(&self, index_path: &Path, exports: &[ExportEntry]) -> Result<()> {
         let mut file = fs::File::create(index_path)?;
@@ -99,6 +107,28 @@ impl TypeScriptWriter {
 
         Ok(())
     }
+
+    fn collect_generated_items(&self, code: &GeneratedTypeScript) -> Vec<GeneratedItem> {
+        code.enums
+            .values()
+            .map(|e| {
+                GeneratedItem::new(
+                    e.name.to_snake_case(),
+                    e.name.clone(),
+                    vec![],
+                    e.to_string(),
+                )
+            })
+            .chain(code.interfaces.values().map(|i| {
+                GeneratedItem::new(
+                    i.name.to_snake_case(),
+                    i.name.clone(),
+                    self.collect_interface_imports(i, code),
+                    i.to_string(),
+                )
+            }))
+            .collect()
+    }
 }
 
 struct ExportEntry {
@@ -115,6 +145,29 @@ impl ExportEntry {
     }
 }
 
+struct GeneratedItem {
+    module_name: String,
+    type_name: String,
+    imports: Vec<String>,
+    content: String,
+}
+
+impl GeneratedItem {
+    fn new(
+        module_name: impl Into<String>,
+        type_name: impl Into<String>,
+        imports: Vec<String>,
+        content: String,
+    ) -> Self {
+        Self {
+            module_name: module_name.into(),
+            type_name: type_name.into(),
+            imports,
+            content,
+        }
+    }
+}
+
 impl CodeWriter for TypeScriptWriter {
     type GeneratedCode = GeneratedTypeScript;
 
@@ -124,23 +177,15 @@ impl CodeWriter for TypeScriptWriter {
         output_dir: &Path,
         _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
-        let file_path = output_dir.join(format!(
-            "{}.{}",
-            self.default_filename(),
-            self.file_extension()
-        ));
+        let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
 
         self.write_header(&mut file)?;
 
-        // Write enums first, then interfaces
-        for ts_enum in code.enums.values() {
-            writeln!(file, "{}", ts_enum)?;
-        }
-        for ts_interface in code.interfaces.values() {
-            writeln!(file, "{}", ts_interface)?;
+        for item in self.collect_generated_items(code) {
+            writeln!(file, "{}", item.content)?;
         }
 
         println!("Generated TypeScript types: {}", file_path.display());
@@ -154,37 +199,18 @@ impl CodeWriter for TypeScriptWriter {
         output_dir: &Path,
         _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
+        let items = self.collect_generated_items(code);
         let mut written_files = Vec::new();
         let mut exports = Vec::new();
 
-        // Write enum files
-        for ts_enum in code.enums.values() {
-            let module_name = ts_enum.name.to_snake_case();
-            let file_path = output_dir.join(format!("{}.{}", module_name, self.file_extension()));
-
-            let mut file = fs::File::create(&file_path)?;
-            self.write_header(&mut file)?;
-            writeln!(file, "{}", ts_enum)?;
-
+        for item in &items {
+            let file_path =
+                output_dir.join(format!("{}.{}", item.module_name, self.file_extension()));
+            self.write_type_file(&file_path, &item.imports, &item.content)?;
             written_files.push(file_path);
-            exports.push(ExportEntry::new(module_name, ts_enum.name.clone()));
-        }
-
-        // Write interface files
-        for ts_interface in code.interfaces.values() {
-            let module_name = ts_interface.name.to_snake_case();
-            let file_path = output_dir.join(format!("{}.{}", module_name, self.file_extension()));
-            let imports = self.collect_interface_imports(ts_interface, code);
-
-            let mut file = fs::File::create(&file_path)?;
-            self.write_header(&mut file)?;
-            self.write_imports(&mut file, &imports)?;
-            writeln!(file, "{}", ts_interface)?;
-
-            written_files.push(file_path);
-            exports.push(ExportEntry::new(module_name, ts_interface.name.clone()));
+            exports.push(ExportEntry::new(&item.module_name, &item.type_name));
         }
 
         // Write index.ts
@@ -229,15 +255,8 @@ impl CodeWriter for TypeScriptWriter {
         output.push_str(Self::HEADER);
         output.push_str("\n\n");
 
-        // Enums
-        for ts_enum in code.enums.values() {
-            output.push_str(&ts_enum.to_string());
-            output.push('\n');
-        }
-
-        // Interfaces
-        for ts_interface in code.interfaces.values() {
-            output.push_str(&ts_interface.to_string());
+        for item in self.collect_generated_items(code) {
+            output.push_str(&item.content);
             output.push('\n');
         }
 

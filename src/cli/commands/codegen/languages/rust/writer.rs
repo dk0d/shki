@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use heck::ToSnakeCase;
 
-use crate::commands::codegen::writer::CodeWriter;
-use crate::commands::codegen::CodegenConfig;
 use crate::Result;
+use crate::commands::codegen::CodegenConfig;
+use crate::commands::codegen::writer::CodeWriter;
 
 use super::{GeneratedRust, RustStruct};
 
@@ -41,6 +41,14 @@ impl RustWriter {
             }
             writeln!(file)?;
         }
+        Ok(())
+    }
+
+    fn write_type_file(&self, file_path: &Path, imports: &[String], content: &str) -> Result<()> {
+        let mut file = fs::File::create(file_path)?;
+        self.write_header(&mut file)?;
+        self.write_imports(&mut file, imports)?;
+        writeln!(file, "{}", content)?;
         Ok(())
     }
 
@@ -129,11 +137,56 @@ impl RustWriter {
 
         Ok(())
     }
+
+    fn collect_generated_items(&self, code: &GeneratedRust) -> Vec<GeneratedItem> {
+        code.enums
+            .values()
+            .map(|e| {
+                GeneratedItem::new(
+                    e.name.to_snake_case(),
+                    e.name.clone(),
+                    vec![],
+                    e.to_string_pretty(),
+                )
+            })
+            .chain(code.structs.values().map(|s| {
+                GeneratedItem::new(
+                    s.name.to_snake_case(),
+                    s.name.clone(),
+                    self.collect_struct_imports(s, code),
+                    s.to_string_pretty(),
+                )
+            }))
+            .collect()
+    }
 }
 
 struct ModuleEntry {
     module_name: String,
     type_name: String,
+}
+
+struct GeneratedItem {
+    module_name: String,
+    type_name: String,
+    imports: Vec<String>,
+    content: String,
+}
+
+impl GeneratedItem {
+    fn new(
+        module_name: impl Into<String>,
+        type_name: impl Into<String>,
+        imports: Vec<String>,
+        content: String,
+    ) -> Self {
+        Self {
+            module_name: module_name.into(),
+            type_name: type_name.into(),
+            imports,
+            content,
+        }
+    }
 }
 
 impl ModuleEntry {
@@ -154,24 +207,16 @@ impl CodeWriter for RustWriter {
         output_dir: &Path,
         _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
-        let file_path = output_dir.join(format!(
-            "{}.{}",
-            self.default_filename(),
-            self.file_extension()
-        ));
+        let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
 
         self.write_header(&mut file)?;
         self.write_imports(&mut file, &code.required_imports())?;
 
-        // Write enums first, then structs
-        for rust_enum in code.enums.values() {
-            writeln!(file, "{}", rust_enum.to_string_pretty())?;
-        }
-        for rust_struct in code.structs.values() {
-            writeln!(file, "{}", rust_struct.to_string_pretty())?;
+        for item in self.collect_generated_items(code) {
+            writeln!(file, "{}", item.content)?;
         }
 
         Ok(vec![file_path])
@@ -183,37 +228,19 @@ impl CodeWriter for RustWriter {
         output_dir: &Path,
         _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
+        let items = self.collect_generated_items(code);
         let mut written_files = Vec::new();
         let mut mod_entries = Vec::new();
 
-        // Write enum files
-        for rust_enum in code.enums.values() {
-            let module_name = rust_enum.name.to_snake_case();
-            let file_path = output_dir.join(format!("{}.{}", module_name, self.file_extension()));
-
-            let mut file = fs::File::create(&file_path)?;
-            self.write_header(&mut file)?;
-            writeln!(file, "{}", rust_enum.to_string_pretty())?;
+        for item in &items {
+            let file_path =
+                output_dir.join(format!("{}.{}", item.module_name, self.file_extension()));
+            self.write_type_file(&file_path, &item.imports, &item.content)?;
 
             written_files.push(file_path);
-            mod_entries.push(ModuleEntry::new(module_name, rust_enum.name.clone()));
-        }
-
-        // Write struct files
-        for rust_struct in code.structs.values() {
-            let module_name = rust_struct.name.to_snake_case();
-            let file_path = output_dir.join(format!("{}.{}", module_name, self.file_extension()));
-            let imports = self.collect_struct_imports(rust_struct, code);
-
-            let mut file = fs::File::create(&file_path)?;
-            self.write_header(&mut file)?;
-            self.write_imports(&mut file, &imports)?;
-            writeln!(file, "{}", rust_struct.to_string_pretty())?;
-
-            written_files.push(file_path);
-            mod_entries.push(ModuleEntry::new(module_name, rust_struct.name.clone()));
+            mod_entries.push(ModuleEntry::new(&item.module_name, &item.type_name));
         }
 
         // Write mod.rs
@@ -230,33 +257,9 @@ impl CodeWriter for RustWriter {
         output_dir: &Path,
         config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
-        /// Information about a type to be written
-        struct TypeModuleInfo {
-            module_name: String,
-            type_name: String,
-            imports: Vec<String>,
-            content: String,
-        }
-
-        // Collect all types to write
-        let types: Vec<TypeModuleInfo> = code
-            .enums
-            .values()
-            .map(|e| TypeModuleInfo {
-                module_name: e.name.to_snake_case(),
-                type_name: e.name.clone(),
-                imports: vec![],
-                content: e.to_string_pretty(),
-            })
-            .chain(code.structs.values().map(|s| TypeModuleInfo {
-                module_name: s.name.to_snake_case(),
-                type_name: s.name.clone(),
-                imports: self.collect_struct_imports(s, code),
-                content: s.to_string_pretty(),
-            }))
-            .collect();
+        let types = self.collect_generated_items(code);
 
         let mut written_files = Vec::new();
 
@@ -281,10 +284,7 @@ impl CodeWriter for RustWriter {
                 type_info.module_name,
                 self.file_extension()
             ));
-            let mut file = fs::File::create(&file_path)?;
-            self.write_header(&mut file)?;
-            self.write_imports(&mut file, &type_info.imports)?;
-            writeln!(file, "{}", type_info.content)?;
+            self.write_type_file(&file_path, &type_info.imports, &type_info.content)?;
 
             written_files.push(file_path);
         }
@@ -314,15 +314,8 @@ impl CodeWriter for RustWriter {
             output.push('\n');
         }
 
-        // Enums
-        for rust_enum in code.enums.values() {
-            output.push_str(&rust_enum.to_string_pretty());
-            output.push('\n');
-        }
-
-        // Structs
-        for rust_struct in code.structs.values() {
-            output.push_str(&rust_struct.to_string_pretty());
+        for item in self.collect_generated_items(code) {
+            output.push_str(&item.content);
             output.push('\n');
         }
 

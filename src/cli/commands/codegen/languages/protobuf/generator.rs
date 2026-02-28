@@ -2,7 +2,7 @@
 //!
 //! Generates .proto files from database schema snapshots.
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::ToSnakeCase;
 use indexmap::IndexMap;
 
 use crate::commands::codegen::CodegenConfig;
@@ -90,45 +90,53 @@ impl ProtobufGenerator {
 
 impl CodeGenerator for ProtobufGenerator {
     type Output = GeneratedProto;
+    type EnumDef = ProtoEnum;
+    type TableDef = ProtoMessage;
 
-    /// Generate Protocol Buffer code from a schema snapshot
-    fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> GeneratedProto {
-        let mut proto = GeneratedProto {
+    fn init_output(&self, _config: &CodegenConfig) -> Self::Output {
+        GeneratedProto {
             package: "schema".to_string(),
             ..Default::default()
-        };
-
-        // Generate enums first (messages may depend on them)
-        for (name, enum_snapshot) in &snapshot.enums {
-            let proto_enum = self.generate_enum(name, enum_snapshot, config);
-            proto.enums.insert(name.clone(), proto_enum);
         }
+    }
 
-        // Generate messages from tables
-        for (name, table_snapshot) in &snapshot.tables {
-            if !config.should_include_table(name) {
-                continue;
-            }
-            let (proto_message, imports) =
-                self.generate_message(name, table_snapshot, &snapshot.enums, config);
-            proto.messages.insert(name.clone(), proto_message);
+    fn generate_enum(
+        &self,
+        name: &str,
+        enum_snapshot: &EnumSnapshot,
+        config: &CodegenConfig,
+    ) -> Self::EnumDef {
+        self.build_enum(name, enum_snapshot, config)
+    }
 
-            // Collect imports
-            for import in imports {
-                if !proto.imports.contains(&import) {
-                    proto.imports.push(import);
-                }
+    fn generate_table(
+        &self,
+        name: &str,
+        table_snapshot: &TableSnapshot,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_message(name, table_snapshot, &snapshot.enums, config)
+    }
+
+    fn insert_enum(&self, output: &mut Self::Output, name: &str, def: Self::EnumDef) {
+        output.enums.insert(name.to_string(), def);
+    }
+
+    fn insert_table(&self, output: &mut Self::Output, name: &str, def: Self::TableDef) {
+        for import in self.collect_message_imports(&def) {
+            if !output.imports.contains(&import) {
+                output.imports.push(import);
             }
         }
-
-        proto.imports.sort();
-        proto
+        output.messages.insert(name.to_string(), def);
+        output.imports.sort();
     }
 }
 
 impl ProtobufGenerator {
     /// Generate a Protocol Buffer enum from an enum snapshot
-    fn generate_enum(
+    fn build_enum(
         &self,
         name: &str,
         enum_snapshot: &EnumSnapshot,
@@ -164,179 +172,166 @@ impl ProtobufGenerator {
     }
 
     /// Generate a Protocol Buffer message from a table snapshot
-    fn generate_message(
+    fn build_message(
         &self,
         name: &str,
         table: &TableSnapshot,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
-    ) -> (ProtoMessage, Vec<String>) {
+    ) -> ProtoMessage {
         let proto_name = self.transform_struct_name(name, config);
 
-        let mut imports = Vec::new();
         let fields: Vec<ProtoField> = table
             .columns
             .values()
             .enumerate()
-            .map(|(i, col)| {
-                let (field, field_imports) = Self::generate_field(col, i + 1, enums, config);
-                imports.extend(field_imports);
-                field
-            })
+            .map(|(i, col)| self.generate_field(col, i + 1, enums, config))
             .collect();
 
-        (
-            ProtoMessage {
-                name: proto_name,
-                table_name: name.to_string(),
-                fields,
-                comment: table.comment.clone(),
-            },
-            imports,
-        )
+        ProtoMessage {
+            name: proto_name,
+            table_name: name.to_string(),
+            fields,
+            comment: table.comment.clone(),
+        }
+    }
+
+    fn collect_message_imports(&self, message: &ProtoMessage) -> Vec<String> {
+        let mut imports = Vec::new();
+
+        for field in &message.fields {
+            if field.proto_type.starts_with("google.protobuf.") {
+                let import = match field.proto_type.as_str() {
+                    "google.protobuf.Timestamp" => "google/protobuf/timestamp.proto",
+                    "google.protobuf.Duration" => "google/protobuf/duration.proto",
+                    "google.protobuf.Struct" => "google/protobuf/struct.proto",
+                    "google.protobuf.Any" => "google/protobuf/any.proto",
+                    _ => continue,
+                };
+                imports.push(import.to_string());
+            }
+        }
+
+        imports.sort();
+        imports.dedup();
+        imports
     }
 
     /// Generate a Protocol Buffer field from a column snapshot
     fn generate_field(
+        &self,
         col: &ColumnSnapshot,
         field_number: usize,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
-    ) -> (ProtoField, Vec<String>) {
+    ) -> ProtoField {
         let field_name = col.name.to_snake_case();
-        let (proto_type, repeated, imports) =
-            Self::sql_type_to_proto(&col.data_type, enums, config);
+        let (proto_type, repeated) = self.sql_type_to_proto(&col.data_type, enums, config);
 
-        (
-            ProtoField {
-                name: field_name,
-                db_name: col.name.clone(),
-                proto_type,
-                number: field_number as i32,
-                optional: col.nullable,
-                repeated,
-                comment: col.comment.clone(),
-            },
-            imports,
-        )
+        ProtoField {
+            name: field_name,
+            db_name: col.name.clone(),
+            proto_type,
+            number: field_number as i32,
+            optional: col.nullable,
+            repeated,
+            comment: col.comment.clone(),
+        }
     }
 
     /// Convert a SQL type to a Protocol Buffer type
     ///
-    /// Returns (proto_type, is_repeated, required_imports)
+    /// Returns (proto_type, is_repeated)
     fn sql_type_to_proto(
+        &self,
         sql_type: &str,
         enums: &IndexMap<String, EnumSnapshot>,
         config: &CodegenConfig,
-    ) -> (String, bool, Vec<String>) {
+    ) -> (String, bool) {
         // Check for type overrides first
-        let normalized = sql_type.to_lowercase();
-        if let Some(override_type) = config.type_overrides.get(&normalized) {
-            return (override_type.clone(), false, vec![]);
+        let normalized = self.normalized_sql_type(sql_type);
+        if let Some(override_type) = self.overridden_type(&normalized, config) {
+            return (override_type.clone(), false);
         }
 
-        // Strip quotes from the type name for enum lookup
-        let unquoted = sql_type
-            .trim_matches('"')
-            .split('.')
-            .next_back()
-            .unwrap_or(sql_type)
-            .trim_matches('"');
-
-        // Check if it's a known enum type
-        if enums.contains_key(sql_type) {
-            return (sql_type.to_upper_camel_case(), false, vec![]);
-        }
-        if enums.contains_key(unquoted) {
-            return (unquoted.to_upper_camel_case(), false, vec![]);
+        if let Some(enum_name) = self.enum_type_name(sql_type, enums) {
+            return (enum_name, false);
         }
 
         // Handle array types
         if let Some(inner) = sql_type.strip_suffix("[]") {
-            let (inner_type, _, imports) = Self::sql_type_to_proto(inner, enums, config);
-            return (inner_type, true, imports);
+            let (inner_type, _) = self.sql_type_to_proto(inner, enums, config);
+            return (inner_type, true);
         }
 
         // Map SQL types to Protocol Buffer types
         match normalized.as_str() {
             // Boolean
-            "bool" | "boolean" => ("bool".to_string(), false, vec![]),
+            "bool" | "boolean" => ("bool".to_string(), false),
 
             // Integers
-            "smallint" | "int2" | "smallserial" => ("int32".to_string(), false, vec![]),
-            "integer" | "int" | "int4" | "serial" => ("int32".to_string(), false, vec![]),
-            "bigint" | "int8" | "bigserial" => ("int64".to_string(), false, vec![]),
+            "smallint" | "int2" | "smallserial" => ("int32".to_string(), false),
+            "integer" | "int" | "int4" | "serial" => ("int32".to_string(), false),
+            "bigint" | "int8" | "bigserial" => ("int64".to_string(), false),
 
             // Floating point
-            "real" | "float4" => ("float".to_string(), false, vec![]),
-            "double precision" | "float8" => ("double".to_string(), false, vec![]),
+            "real" | "float4" => ("float".to_string(), false),
+            "double precision" | "float8" => ("double".to_string(), false),
 
             // Numeric/Decimal - use string to preserve precision
-            "numeric" | "decimal" | "money" => ("string".to_string(), false, vec![]),
+            "numeric" | "decimal" | "money" => ("string".to_string(), false),
 
             // Text types
             "text" | "varchar" | "char" | "character varying" | "character" | "citext" | "name" => {
-                ("string".to_string(), false, vec![])
+                ("string".to_string(), false)
             }
 
             // Binary
-            "bytea" | "blob" => ("bytes".to_string(), false, vec![]),
+            "bytea" | "blob" => ("bytes".to_string(), false),
 
             // UUID - use string representation
-            "uuid" => ("string".to_string(), false, vec![]),
+            "uuid" => ("string".to_string(), false),
 
             // JSON - use google.protobuf.Struct or string
-            "json" | "jsonb" => (
-                "google.protobuf.Struct".to_string(),
-                false,
-                vec!["google/protobuf/struct.proto".to_string()],
-            ),
+            "json" | "jsonb" => ("google.protobuf.Struct".to_string(), false),
 
             // Date/Time - use google.protobuf.Timestamp
             "timestamp"
             | "timestamp without time zone"
             | "timestamp with time zone"
             | "timestamptz"
-            | "datetime" => (
-                "google.protobuf.Timestamp".to_string(),
-                false,
-                vec!["google/protobuf/timestamp.proto".to_string()],
-            ),
+            | "datetime" => ("google.protobuf.Timestamp".to_string(), false),
 
             // Date - use string (ISO 8601 format) or custom message
-            "date" => ("string".to_string(), false, vec![]),
+            "date" => ("string".to_string(), false),
 
             // Time - use string (ISO 8601 format)
             "time" | "time without time zone" | "time with time zone" => {
-                ("string".to_string(), false, vec![])
+                ("string".to_string(), false)
             }
 
             // Interval - use google.protobuf.Duration
-            "interval" => (
-                "google.protobuf.Duration".to_string(),
-                false,
-                vec!["google/protobuf/duration.proto".to_string()],
-            ),
+            "interval" => ("google.protobuf.Duration".to_string(), false),
 
             // Network types - use string
-            "inet" | "cidr" | "macaddr" | "macaddr8" => ("string".to_string(), false, vec![]),
+            "inet" | "cidr" | "macaddr" | "macaddr8" => ("string".to_string(), false),
 
             // Geometric types - use string or custom messages
             "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle" => {
-                ("string".to_string(), false, vec![])
+                ("string".to_string(), false)
             }
 
             // Text search types - use string
-            "tsquery" | "tsvector" => ("string".to_string(), false, vec![]),
+            "tsquery" | "tsvector" => ("string".to_string(), false),
 
             // XML - use string
-            "xml" => ("string".to_string(), false, vec![]),
+            "xml" => ("string".to_string(), false),
 
             // MySQL specific
-            "tinyint" => ("int32".to_string(), false, vec![]),
-            "mediumint" => ("int32".to_string(), false, vec![]),
-            "year" => ("int32".to_string(), false, vec![]),
-            "enum" => ("string".to_string(), false, vec![]), // MySQL inline enums
+            "tinyint" => ("int32".to_string(), false),
+            "mediumint" => ("int32".to_string(), false),
+            "year" => ("int32".to_string(), false),
+            "enum" => ("string".to_string(), false), // MySQL inline enums
 
             // Default handling
             _ => {
@@ -348,18 +343,14 @@ impl ProtobufGenerator {
                     || normalized.starts_with("numeric")
                     || normalized.starts_with("decimal")
                 {
-                    ("string".to_string(), false, vec![])
+                    ("string".to_string(), false)
                 } else if normalized.starts_with("timestamp") {
-                    (
-                        "google.protobuf.Timestamp".to_string(),
-                        false,
-                        vec!["google/protobuf/timestamp.proto".to_string()],
-                    )
+                    ("google.protobuf.Timestamp".to_string(), false)
                 } else if normalized.starts_with("time") {
-                    ("string".to_string(), false, vec![])
+                    ("string".to_string(), false)
                 } else {
                     // Fallback to string for unknown types
-                    ("string".to_string(), false, vec![])
+                    ("string".to_string(), false)
                 }
             }
         }
@@ -494,28 +485,28 @@ mod tests {
         let config = CodegenConfig::default();
 
         // Integer types
-        let (t, r, _) = ProtobufGenerator::sql_type_to_proto("INTEGER", &enums, &config);
+        let generator = ProtobufGenerator::default();
+
+        let (t, r) = generator.sql_type_to_proto("INTEGER", &enums, &config);
         assert_eq!(t, "int32");
         assert!(!r);
 
-        let (t, r, _) = ProtobufGenerator::sql_type_to_proto("BIGINT", &enums, &config);
+        let (t, r) = generator.sql_type_to_proto("BIGINT", &enums, &config);
         assert_eq!(t, "int64");
         assert!(!r);
 
         // Text types
-        let (t, r, _) = ProtobufGenerator::sql_type_to_proto("TEXT", &enums, &config);
+        let (t, r) = generator.sql_type_to_proto("TEXT", &enums, &config);
         assert_eq!(t, "string");
         assert!(!r);
 
-        // Timestamp with import
-        let (t, r, imports) =
-            ProtobufGenerator::sql_type_to_proto("TIMESTAMP WITH TIME ZONE", &enums, &config);
+        // Timestamp
+        let (t, r) = generator.sql_type_to_proto("TIMESTAMP WITH TIME ZONE", &enums, &config);
         assert_eq!(t, "google.protobuf.Timestamp");
         assert!(!r);
-        assert!(imports.contains(&"google/protobuf/timestamp.proto".to_string()));
 
         // Array types
-        let (t, r, _) = ProtobufGenerator::sql_type_to_proto("INTEGER[]", &enums, &config);
+        let (t, r) = generator.sql_type_to_proto("INTEGER[]", &enums, &config);
         assert_eq!(t, "int32");
         assert!(r);
     }

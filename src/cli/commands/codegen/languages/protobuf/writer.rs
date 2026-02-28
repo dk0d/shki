@@ -103,13 +103,9 @@ impl CodeWriter for ProtobufWriter {
         output_dir: &Path,
         _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
-        let file_path = output_dir.join(format!(
-            "{}.{}",
-            self.default_filename(),
-            self.file_extension()
-        ));
+        let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
 
         writeln!(file, "{}", Self::HEADER)?;
@@ -132,7 +128,7 @@ impl CodeWriter for ProtobufWriter {
     ) -> Result<Vec<PathBuf>> {
         // For protobuf, single_module and modules mode are the same:
         // separate files per message/enum
-        fs::create_dir_all(output_dir)?;
+        self.ensure_output_dir(output_dir)?;
 
         let mut written_files = Vec::new();
 
@@ -166,16 +162,6 @@ impl CodeWriter for ProtobufWriter {
         );
 
         Ok(written_files)
-    }
-
-    fn write_modules(
-        &self,
-        code: &Self::GeneratedCode,
-        output_dir: &Path,
-        config: &CodegenConfig,
-    ) -> Result<Vec<PathBuf>> {
-        // For protobuf, modules mode is the same as single_module
-        self.write_single_module(code, output_dir, config)
     }
 
     fn format_preview(&self, code: &Self::GeneratedCode) -> String {
