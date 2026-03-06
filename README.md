@@ -3,7 +3,8 @@
 </div>
 
 > [!WARNING]
-> shki is still a work in progress. PostgreSQL is the only fully implemented dialect right now.
+> `shki` is still a work in progress. PostgreSQL is the only supported dialect.
+> Planned features may not be fully finished or entirely missing.
 
 # shki
 
