@@ -1,6 +1,6 @@
-<dp align="center">
+<div align="center">
 <img src="/assets/shki-logo.png" alt="shki-logo" style="width: 50%; border-radius: 0.5rem; filter: drop-shadow(0 4px);"/>
-</dp>
+</div>
 
 > [!WARNING]
 > shki is still a work in progress. PostgreSQL is the only fully implemented dialect right now.
@@ -34,34 +34,46 @@ cargo install --path .
 
 ## Quick start
 
+1) Initialize a project
+
 ```bash
-# 1) Initialize a project
-shki init db
+$ shki init db
 
-# 2) Configure DB URL (or put it in shki.toml/.env)
-export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
+Initialized shki project (Lua)
 
-# 3) Edit db/init.lua, then preview diff
-shki --config db/shki.toml diff
+  Directory: db
 
-# 4) Generate and apply migration
-shki --config db/shki.toml generate add_users
-shki --config db/shki.toml migrate
+  Created files:
+.
+├── db
+│   ├── lua/           - Supporting lua files
+│   ├── migrations/    - Migrations directory
+│   ├── .luacats/      - LuaCATS type definitions
+│   ├── .luarc.json    - Lua Language Server config
+│   ├── init.lua       - Schema definition
+│   ├── selene.toml    - Selene linter config
+│   └── shki.yml       - Selene standard library
+└── shki.toml          - project configuration
 ```
 
-`shki init db` creates:
+2) Configure DB URL (or put it in `.env`)
 
-```text
-db/
-├── migrations/
-│   └── _meta/
-├── lua/
-├── .luacats/
-├── .luarc.json
-├── selene.toml
-├── shki.yml
-├── init.lua
-└── shki.toml
+```bash
+export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
+```
+
+3) Edit `db/init.lua`, then preview diff
+
+```bash
+shki diff
+```
+
+
+4. Generate and apply migration
+
+```bash
+shki generate add_users
+shki migrate
 ```
 
 ## Commands
@@ -149,18 +161,52 @@ Available `--mode` values: `single`, `single-module`, `modules`.
 
 Set config in `shki.toml`, env vars, or CLI flags.
 
+Default Config:
+
 ```toml
-root = "."
+root = "db"
+database_url = "postgres://user:pass@localhost:5432/mydb"
 dialect = "postgres"
 schema = "init.lua"
-out = "migrations"
-database_url = "postgres://user:pass@localhost:5432/mydb"
+out = "./migrations"
 breakpoints = true
+verbose = false
+timeout_seconds = 2
 
 [migrations]
 table = "__shki_migrations"
-prefix = "timestamp" # index | timestamp | unix
+prefix = "index"
 generate_down = false
+
+[introspect]
+casing = "preserve"
+
+[codegen]
+mode = "single"
+struct_derives = [
+    "Debug",
+    "Clone",
+    "sqlx::FromRow",
+]
+struct_attributes = []
+enum_derives = [
+    "Debug",
+    "Clone",
+    "PartialEq",
+    "sqlx::Type",
+]
+enum_attributes = []
+serde = false
+sqlx = true
+include_tables = []
+exclude_tables = []
+verbose = false
+
+[codegen.struct_renames]
+
+[codegen.enum_renames]
+
+[codegen.type_overrides]
 ```
 
 Environment variables:
