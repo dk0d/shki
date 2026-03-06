@@ -23,7 +23,9 @@ pub async fn cmd_init(
         std::fs::create_dir_all(target_dir)?;
     }
 
-    let config_path = target_dir.join("shki.toml");
+    let config_path = std::env::current_dir()
+        .unwrap_or(target_dir.into())
+        .join("shki.toml");
 
     if config_path.exists() {
         println!(
@@ -35,7 +37,9 @@ pub async fn cmd_init(
     }
 
     let dialect = dialect.unwrap_or(SchemaDialect::Postgres);
+
     let config = Config {
+        root: target_dir.into(),
         dialect,
         ..Config::default()
     };
@@ -99,22 +103,25 @@ async fn init_lua_project(target_dir: &Path, config: &Config) -> Result<()> {
     println!("  {}: {}", "Directory".cyan(), target_dir.display());
     println!();
     println!("  {}", "Created files:".cyan());
+    println!(".");
     #[rustfmt::skip]
-    println!("    migrations/      - {}", "Migrations directory".dimmed());
+    println!("├── {}", target_dir.display());
     #[rustfmt::skip]
-    println!("    lua/             - {}", "Supporting lua files".dimmed());
+    println!("│   ├── lua/           - {}", "Supporting lua files".dimmed());
     #[rustfmt::skip]
-    println!("    init.lua         - {}", "Schema definition".dimmed());
+    println!("│   ├── migrations/    - {}", "Migrations directory".dimmed());
     #[rustfmt::skip]
-    println!("    .luacats         - {}", "LuaCATS type definitions".dimmed());
+    println!("│   ├── .luacats/      - {}", "LuaCATS type definitions".dimmed());
     #[rustfmt::skip]
-    println!("    .luarc.json      - {}", "Lua Language Server config".dimmed());
+    println!("│   ├── .luarc.json    - {}", "Lua Language Server config".dimmed());
     #[rustfmt::skip]
-    println!("    selene.toml      - {}", "Selene linter config".dimmed());
+    println!("│   ├── init.lua       - {}", "Schema definition".dimmed());
     #[rustfmt::skip]
-    println!("    shki.yml         - {}", "Selene standard library".dimmed());
+    println!("│   ├── selene.toml    - {}", "Selene linter config".dimmed());
     #[rustfmt::skip]
-    println!("    shki.toml        - {}", "project configuration".dimmed());
+    println!("│   └── shki.yml       - {}", "Selene standard library".dimmed());
+    #[rustfmt::skip]
+    println!("└── shki.toml          - {}", "project configuration".dimmed());
     println!();
     println!("  {}", "IDE/Linter Support:".cyan());
     println!("    - lua-language-server: autocomplete, type checking, hover docs");
@@ -124,6 +131,7 @@ async fn init_lua_project(target_dir: &Path, config: &Config) -> Result<()> {
     println!();
     println!("  {}", "Next steps:".cyan());
     println!("    1. Edit schema/init.lua to define your schema");
+
     #[rustfmt::skip]
     println!("    2. Run {} to create migrations",
              "shki generate --schema schema/init.lua".yellow()
