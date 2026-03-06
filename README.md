@@ -86,20 +86,20 @@ All commands support global options:
 - `-o, --out <PATH>`
 - `-v, --verbose`
 
-| Command | Alias | Purpose |
-| - | - | - |
-| `init [path]` | `i` | Create project files (`--simple` for config-only) |
-| `generate [name]` | `gen` | Diff schema vs DB and write migration (`--dry-run` prints SQL) |
-| `migrate` | `up` | Apply pending migrations (`--dry-run` supported) |
-| `down [count]` | - | Roll back migrations using `.down.sql` files |
-| `create <name>` | `new` | Create blank SQL migration (`--with-down`, `--sql`, `--sql-file`) |
-| `drop [migration]` | - | Delete a migration file |
-| `status` | `s` | Show applied/pending migration status |
-| `diff` | - | Show schema diff (`--sql` for SQL output) |
-| `pull` | - | Introspect DB to `sql`, `json`, or `rust` |
-| `bootstrap [name]` | `strap` | Create baseline migration from existing DB |
-| `squash` | `sq` | Collapse existing migration history into one baseline |
-| `codegen <language>` | `code` | Generate `rust`, `typescript`, or `protobuf` models |
+| Command              | Alias   | Purpose                                                           |
+| -                    | -       | -                                                                 |
+| `init [path]`        | `i`     | Create project files (`--simple` for config-only)                 |
+| `generate [name]`    | `gen`   | Diff schema vs DB and write migration (`--dry-run` prints SQL)    |
+| `migrate`            | `up`    | Apply pending migrations (`--dry-run` supported)                  |
+| `down [count]`       | -       | Roll back migrations using `.down.sql` files                      |
+| `create <name>`      | `new`   | Create blank SQL migration (`--with-down`, `--sql`, `--sql-file`) |
+| `drop [migration]`   | -       | Delete a migration file                                           |
+| `status`             | `s`     | Show applied/pending migration status                             |
+| `diff`               | -       | Show schema diff (`--sql` for SQL output)                         |
+| `pull`               | -       | Introspect DB to `sql`, `json`, or `rust`                         |
+| `bootstrap [name]`   | `strap` | Create baseline migration from existing DB                        |
+| `squash`             | `sq`    | Collapse existing migration history into one baseline             |
+| `codegen <language>` | `code`  | Generate `rust`, `typescript`, or `protobuf` models               |
 
 ## Common workflows
 
