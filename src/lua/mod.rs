@@ -83,10 +83,12 @@ fn load_schema_from_str_with_path(script: &str, name: &str, search_path: &str) -
     // Set up package.path to include the schema directory
     // This allows require() to find modules in the same directory as the schema file
     let setup_path = format!(
-        r#"package.path = "{}/?.lua;{}/?.init.lua;./lua/?.lua;" .. package.path"#,
+        r#"package.path = "{}/lua/?.lua;{}/?.lua;{}/?.init.lua;./lua/?.lua;" .. package.path"#,
+        search_path.replace('\\', "/"),
         search_path.replace('\\', "/"),
         search_path.replace('\\', "/"),
     );
+    
     lua.load(&setup_path)
         .exec()
         .map_err(|e| ShkiError::lua(format!("Failed to set package.path: {}", e)))?;
