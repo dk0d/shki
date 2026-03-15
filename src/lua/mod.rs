@@ -88,7 +88,7 @@ fn load_schema_from_str_with_path(script: &str, name: &str, search_path: &str) -
         search_path.replace('\\', "/"),
         search_path.replace('\\', "/"),
     );
-    
+
     lua.load(&setup_path)
         .exec()
         .map_err(|e| ShkiError::lua(format!("Failed to set package.path: {}", e)))?;
