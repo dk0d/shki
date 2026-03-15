@@ -233,7 +233,6 @@ impl CodeWriter for TypeScriptWriter {
         output_dir: &Path,
         config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
-        println!();
         println!("-");
         println!(
             "{}: Typescript codegen doesn't currently support {} setting",
@@ -242,7 +241,6 @@ impl CodeWriter for TypeScriptWriter {
         );
         println!("Falling back to {}", "single-module".cyan().bold());
         println!("-");
-        println!();
 
         // For TypeScript, modules mode is the same as single_module
         // (separate files with an index.ts barrel file)

@@ -55,12 +55,11 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
     }
 
     if dry_run {
-        println!("\n{}", "(dry run - no changes applied)".cyan());
+        println!("{}", "(dry run - no changes applied)".cyan());
         return Ok(());
     }
 
     // Confirm rollback
-    println!();
     let confirmed = dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Are you sure you want to rollback these migrations?")
         .default(false)
@@ -74,8 +73,6 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
     }
 
     // Perform rollback
-    println!();
-
     let mut rolled_back = Vec::new();
 
     for down_path in to_rollback {

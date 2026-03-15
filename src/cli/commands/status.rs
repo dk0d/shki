@@ -62,7 +62,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         .map(|rows| rows.iter().map(|m| (m.name.as_str(), m)).collect())
         .unwrap_or_default();
 
-    println!("\n{}\n", "Migration Status".cyan());
+    println!("{}\n", "Migration Status".cyan());
 
     let migrations = all_migrations
         .iter()
@@ -124,7 +124,6 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
 
     // TODO: use verbose flag to show these types of things
     // Show legend
-    println!();
     println!("  {} = down migration available", DOWN_SYMBOL.cyan());
     println!("  {} = down migration not available", "x".red());
 
@@ -165,7 +164,6 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
     // Validate snapshots against migration files
     if let Err(e) = migration_manager.validate_snapshots() {
-        println!();
         println!("{}", "Snapshot Validation Failed".red().bold());
         println!("{}", e);
         has_errors = true;
@@ -180,7 +178,6 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
             .await?;
 
         if let Err(e) = migration_manager.validate_checksums(&pool).await {
-            println!();
             println!("{}", "Checksum Validation Failed".red().bold());
             println!("{}", e);
             has_errors = true;
@@ -192,13 +189,11 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
             .await?;
 
         if !missing_snapshots.is_empty() {
-            println!();
             println!("------\n{}", "Found missing snapshots".bright_red().bold());
             println!("{}", "Database State".yellow());
 
             display_migration_rows(&applied);
 
-            println!();
             println!(
                 "{}: Applied migrations without snapshots",
                 "Warning".yellow().bold()
@@ -213,10 +208,8 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
                     &row.checksum.clone().unwrap_or_default()[..5].dimmed()
                 );
             }
-            println!();
 
             if !checksums_match.is_empty() {
-                println!();
                 println!(
                     "{}: There are migrations with mismatched names but matching checksums",
                     "NOTE".bright_blue().bold()
@@ -234,13 +227,11 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     }
 
     if has_errors {
-        println!();
         println!(
             "{}",
             "Validation errors found. Please resolve before running migrations.".red()
         );
     } else if has_warnings {
-        println!();
         println!("{}", "Warnings found. Review the issues above.".yellow());
     }
 

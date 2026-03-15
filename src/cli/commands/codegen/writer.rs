@@ -63,7 +63,6 @@ pub trait CodeWriter {
     ) -> Result<Vec<PathBuf>> {
         println!("Falling back to {}", "single-module".cyan().bold());
         println!("-");
-        println!();
         self.write_single_module(code, output_dir, config)
     }
 
