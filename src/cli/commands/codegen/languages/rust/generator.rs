@@ -3,6 +3,8 @@
 //! Generates Rust structs and enums from database schema snapshots,
 //! compatible with sqlx and other database libraries.
 
+use std::collections::HashSet;
+
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream};
@@ -460,8 +462,15 @@ impl RustEnum {
             return quote! {};
         }
 
-        let derives: Vec<TokenStream> = self
-            .derives
+        // if serde enabled ensure serialize and deserialize derives are present
+        let mut derives: HashSet<String> = HashSet::from_iter(self.derives.clone());
+
+        if self.serde {
+            derives.insert("serde::Serialize".to_owned());
+            derives.insert("serde::Deserialize".to_owned());
+        }
+
+        let derives: Vec<TokenStream> = derives
             .iter()
             .map(|d| {
                 let path: syn::Path = syn::parse_str(d).expect("Invalid derive path");
@@ -557,8 +566,15 @@ impl RustStruct {
             return quote! {};
         }
 
-        let derives: Vec<TokenStream> = self
-            .derives
+        // if serde enabled ensure serialize and deserialize derives are present
+        let mut derives: HashSet<String> = HashSet::from_iter(self.derives.clone());
+
+        if self.serde {
+            derives.insert("serde::Serialize".to_owned());
+            derives.insert("serde::Deserialize".to_owned());
+        }
+
+        let derives: Vec<TokenStream> = derives
             .iter()
             .map(|d| {
                 let path: syn::Path = syn::parse_str(d).expect("Invalid derive path");
