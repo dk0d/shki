@@ -272,7 +272,7 @@ fn render_lua_schema(snapshot: &Snapshot, dialect: SchemaDialect) -> String {
     }
 
     for enum_snapshot in snapshot.enums.values() {
-        out.push_str("schema:enum_type(\n");
+        out.push_str("schema:enum(\n");
         writeln!(
             &mut out,
             "    EnumBuilder.new({})",
@@ -430,7 +430,7 @@ fn lua_column_builder_expr(column: &ColumnSnapshot, snapshot: &Snapshot) -> Stri
     }
 
     if snapshot.enums.contains_key(ty) {
-        return format!("Col.enum_type({}, {})", name, lua_string(ty));
+        return format!("Col.enum({}, {})", name, lua_string(ty));
     }
 
     if let Some((len_open, len_close)) = upper
@@ -596,6 +596,6 @@ mod tests {
         assert!(lua.contains("local schema = pg.schema(\"public\")"));
         assert!(lua.contains("EnumBuilder.new(\"status\")"));
         assert!(lua.contains(":column(Col.integer(\"id\"):not_null():primary_key())"));
-        assert!(lua.contains(":column(Col.enum_type(\"state\", \"status\"))"));
+        assert!(lua.contains(":column(Col.enum(\"state\", \"status\"))"));
     }
 }

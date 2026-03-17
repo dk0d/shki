@@ -8,6 +8,21 @@ use crate::schema::types::{DataType, DefaultValue};
 use crate::schema::{Column, ColumnBuilder};
 
 use super::helpers::{parse_data_type, parse_referential_action};
+use super::LuaEnumBuilder;
+
+pub(crate) enum LuaEnumTypeInput {
+    Name(String),
+    Builder(LuaEnumBuilder),
+}
+
+impl FromLua for LuaEnumTypeInput {
+    fn from_lua(value: Value, lua: &Lua) -> LuaResult<Self> {
+        match value {
+            Value::String(s) => Ok(Self::Name(s.to_str()?.to_string())),
+            other => LuaEnumBuilder::from_lua(other, lua).map(Self::Builder),
+        }
+    }
+}
 
 /// Lua wrapper for ColumnBuilder
 #[derive(Clone)]
@@ -169,6 +184,17 @@ impl LuaColumnBuilder {
         Self {
             inner: Rc::new(RefCell::new(ColumnBuilder::enum_type(name, enum_name))),
         }
+    }
+
+    pub fn enum_type_from_builder(name: String, enum_builder: LuaEnumBuilder) -> Self {
+        let enum_type = enum_builder.enum_type();
+        Self::new(
+            name,
+            DataType::Enum {
+                name: enum_type.name,
+                schema: enum_type.schema,
+            },
+        )
     }
 
     pub fn array(name: String, element_type: String) -> Self {
@@ -455,11 +481,16 @@ pub fn column_builder_cidr(_lua: &Lua, name: String) -> LuaResult<LuaColumnBuild
     Ok(LuaColumnBuilder::cidr(name))
 }
 
-pub fn column_builder_enum_type(
+pub(crate) fn column_builder_enum_type(
     _lua: &Lua,
-    (name, enum_name): (String, String),
+    (name, enum_input): (String, LuaEnumTypeInput),
 ) -> LuaResult<LuaColumnBuilder> {
-    Ok(LuaColumnBuilder::enum_type(name, enum_name))
+    Ok(match enum_input {
+        LuaEnumTypeInput::Name(enum_name) => LuaColumnBuilder::enum_type(name, enum_name),
+        LuaEnumTypeInput::Builder(enum_builder) => {
+            LuaColumnBuilder::enum_type_from_builder(name, enum_builder)
+        }
+    })
 }
 
 pub fn column_builder_array(

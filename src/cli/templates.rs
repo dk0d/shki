@@ -33,15 +33,36 @@ local Col = ColumnBuilder
 -- )
 
 -- Example: Define an enum type (PostgreSQL only)
--- schema:enum_type(
---     EnumBuilder.new("status")
---         :description("Record status")
---         :value("active")
---         :value("inactive")
---         :value("archived")
+-- local status = require("status")
+-- schema:enum(status)
+-- schema:table(
+--     Table.new("orders")
+--         :column(Col.enum("status", status):not_null())
 -- )
+--
+-- In `lua/status.lua`:
+-- return EnumBuilder.new("status")
+--     :description("Record status")
+--     :value("active")
+--     :value("inactive")
+--     :value("archived")
 
 return schema
 "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lua_schema_template_includes_reusable_enum_example() {
+        let template = lua_schema_template(SchemaDialect::Postgres);
+
+        assert!(template.contains("local status = require(\"status\")"));
+        assert!(template.contains("schema:enum(status)"));
+        assert!(template.contains(":column(Col.enum(\"status\", status):not_null())"));
+        assert!(template.contains("return EnumBuilder.new(\"status\")"));
+    }
 }

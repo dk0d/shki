@@ -7,8 +7,8 @@ use std::rc::Rc;
 use crate::schema::Index;
 use crate::schema::IndexBuilder;
 
-use super::LuaIndexColumn;
 use super::helpers::parse_index_method;
+use super::LuaIndexColumn;
 
 /// Lua wrapper for IndexBuilder
 #[derive(Clone)]

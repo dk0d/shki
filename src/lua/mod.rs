@@ -10,26 +10,30 @@
 //!
 //! -- Define a PostgreSQL schema
 //! local schema = pg.schema("public")
+//! local post_status = require("post_status")
 //!
 //! -- Define an enum
-//! schema:enum_type(
-//!     EnumBuilder.new("post_status")
-//!         :description("Status of a blog post")
-//!         :value("draft")
-//!         :value("published")
-//!         :value("archived")
-//! )
+//! schema:enum(post_status)
 //!
 //! -- Define a table
 //! schema:table(
-//!     TableBuilder.new("users")
-//!         :description("User accounts")
+//!     TableBuilder.new("posts")
+//!         :description("Blog posts")
 //!         :column(ColumnBuilder.serial("id"):primary_key())
-//!         :column(ColumnBuilder.text("email"):not_null():unique())
-//!         :column(ColumnBuilder.timestamptz("created_at"):default_now())
+//!         :column(ColumnBuilder.text("title"):not_null())
+//!         :column(ColumnBuilder.enum("status", post_status):not_null())
 //! )
 //!
 //! return schema
+//! ```
+//!
+//! ```lua
+//! -- post_status.lua
+//! return EnumBuilder.new("post_status")
+//!     :description("Status of a blog post")
+//!     :value("draft")
+//!     :value("published")
+//!     :value("archived")
 //! ```
 
 mod column_builder;
@@ -377,7 +381,7 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
         .map_err(|e| ShkiError::lua(e.to_string()))?;
     column_builder
         .set(
-            "enum_type",
+            "enum",
             lua.create_function(column_builder_enum_type)
                 .map_err(|e| ShkiError::lua(e.to_string()))?,
         )
@@ -528,6 +532,8 @@ fn register_schema_bindings(lua: &Lua) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::types::DataType;
+    use std::fs;
 
     #[test]
     fn test_lua_create_runtime() {
@@ -590,7 +596,7 @@ mod tests {
         let script = r#"
             local schema = pg.schema("public")
             
-            schema:enum_type(
+            schema:enum(
                 EnumBuilder.new("status")
                     :description("Item status")
                     :value("active")
@@ -644,14 +650,13 @@ mod tests {
     fn test_lua_full_schema() {
         let script = r#"
             local schema = pg.schema("public")
+            local post_status = EnumBuilder.new("post_status")
+                :value("draft")
+                :value("published")
+                :value("archived")
             
             -- Add enum
-            schema:enum_type(
-                EnumBuilder.new("post_status")
-                    :value("draft")
-                    :value("published")
-                    :value("archived")
-            )
+            schema:enum(post_status)
             
             -- Users table
             schema:table(
@@ -669,7 +674,7 @@ mod tests {
                     :column(ColumnBuilder.serial("id"):primary_key())
                     :column(ColumnBuilder.integer("author_id"):not_null():references("users", "id"))
                     :column(ColumnBuilder.text("title"):not_null())
-                    :column(ColumnBuilder.enum_type("status", "post_status"):not_null())
+                    :column(ColumnBuilder.enum("status", post_status):not_null())
                     :column(ColumnBuilder.timestamptz("created_at"):default_now())
                     :index("posts_author_idx", {"author_id"})
             )
@@ -684,6 +689,113 @@ mod tests {
 
         let posts = schema.tables.get("posts").unwrap();
         assert!(posts.indexes.contains_key("posts_author_idx"));
+    }
+
+    #[test]
+    fn test_lua_column_enum_type_accepts_enum_builder() {
+        let script = r#"
+            local schema = pg.schema("public")
+            local post_status = EnumBuilder.new("post_status")
+                :value("draft")
+                :value("published")
+                :value("archived")
+
+            schema:enum(post_status)
+
+            schema:table(
+                TableBuilder.new("posts")
+                    :column(ColumnBuilder.enum("status", post_status):not_null())
+            )
+
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let posts = schema.tables.get("posts").unwrap();
+        let status = posts.columns.get("status").unwrap();
+        let post_status = schema.enums.get("post_status").unwrap();
+
+        assert!(matches!(
+            &status.data_type,
+            DataType::Enum { name, schema } if name == "post_status" && schema.is_none()
+        ));
+        assert_eq!(post_status.values, vec!["draft", "published", "archived"]);
+    }
+
+    #[test]
+    fn test_lua_column_enum_type_accepts_required_enum_builder() {
+        let dir = tempfile::tempdir().unwrap();
+        let enum_path = dir.path().join("post_status.lua");
+        let schema_path = dir.path().join("schema.lua");
+
+        fs::write(
+            &enum_path,
+            r#"
+                return EnumBuilder.new("post_status")
+                    :value("draft")
+                    :value("published")
+                    :value("archived")
+            "#,
+        )
+        .unwrap();
+
+        fs::write(
+            &schema_path,
+            r#"
+                local schema = pg.schema("public")
+                local post_status = require("post_status")
+
+                schema:enum(post_status)
+
+                schema:table(
+                    TableBuilder.new("posts")
+                        :column(ColumnBuilder.enum("status", post_status):not_null())
+                )
+
+                return schema
+            "#,
+        )
+        .unwrap();
+
+        let schema = load_schema_from_file(&schema_path).unwrap();
+        let posts = schema.tables.get("posts").unwrap();
+        let status = posts.columns.get("status").unwrap();
+        let post_status = schema.enums.get("post_status").unwrap();
+
+        assert!(matches!(
+            &status.data_type,
+            DataType::Enum { name, schema } if name == "post_status" && schema.is_none()
+        ));
+        assert_eq!(post_status.values, vec!["draft", "published", "archived"]);
+    }
+
+    #[test]
+    fn test_lua_column_enum_type_still_accepts_string_name() {
+        let script = r#"
+            local schema = pg.schema("public")
+
+            schema:enum(
+                EnumBuilder.new("post_status")
+                    :value("draft")
+                    :value("published")
+            )
+
+            schema:table(
+                TableBuilder.new("posts")
+                    :column(ColumnBuilder.enum("status", "post_status"):not_null())
+            )
+
+            return schema
+        "#;
+
+        let schema = load_schema_from_str(script, "test").unwrap();
+        let posts = schema.tables.get("posts").unwrap();
+        let status = posts.columns.get("status").unwrap();
+
+        assert!(matches!(
+            &status.data_type,
+            DataType::Enum { name, schema } if name == "post_status" && schema.is_none()
+        ));
     }
 
     #[test]
@@ -1131,16 +1243,15 @@ mod tests {
     fn test_lua_full_schema_with_all_features() {
         let script = r#"
             local schema = pg.schema("public")
+            local order_status = EnumBuilder.new("order_status")
+                :description("Status of an order")
+                :values({"pending", "processing", "shipped", "delivered"})
             
             -- Add extension
             schema:extension("uuid-ossp")
             
             -- Add enum
-            schema:enum_type(
-                EnumBuilder.new("order_status")
-                    :description("Status of an order")
-                    :values({"pending", "processing", "shipped", "delivered"})
-            )
+            schema:enum(order_status)
             
             -- Add sequence
             schema:sequence(
@@ -1155,7 +1266,7 @@ mod tests {
                     :description("Customer orders")
                     :column(ColumnBuilder.serial("id"):primary_key())
                     :column(ColumnBuilder.integer("order_number"):not_null():unique())
-                    :column(ColumnBuilder.enum_type("status", "order_status"):not_null())
+                    :column(ColumnBuilder.enum("status", order_status):not_null())
                     :column(ColumnBuilder.numeric("total", 10, 2):not_null())
                     :column(ColumnBuilder.timestamptz("created_at"):default_now())
                     :index_with(

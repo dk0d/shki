@@ -35,6 +35,10 @@ impl LuaEnumBuilder {
             .map(|cell| cell.into_inner().build())
             .unwrap_or_else(|rc| rc.borrow().clone().build())
     }
+
+    pub fn enum_type(&self) -> EnumType {
+        self.inner.borrow().clone().build()
+    }
 }
 
 impl UserData for LuaEnumBuilder {

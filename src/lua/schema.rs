@@ -49,8 +49,8 @@ impl UserData for LuaSchema {
             Ok(this.clone())
         });
 
-        // enum_type(enum_builder) -> self
-        methods.add_method("enum_type", |_, this, enum_type: LuaEnumBuilder| {
+        // enum(enum_builder) -> self
+        methods.add_method("enum", |_, this, enum_type: LuaEnumBuilder| {
             let enum_type = enum_type.build();
             this.inner.borrow_mut().enum_type(enum_type);
             Ok(this.clone())

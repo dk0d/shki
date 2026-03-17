@@ -1,7 +1,7 @@
 //! Helper functions for parsing enum values from strings
 
-use crate::schema::IndexMethod;
 use crate::schema::types::{DataType, ReferenceAction};
+use crate::schema::IndexMethod;
 
 /// Parse a string into a ReferenceAction
 pub fn parse_referential_action(s: &str) -> ReferenceAction {
