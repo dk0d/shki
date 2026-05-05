@@ -9,7 +9,6 @@ tasks:
 
   down:
     cmd: docker compose -p shki down -v 
-
       
   test:
     cmds: 
