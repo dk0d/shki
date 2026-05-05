@@ -9,6 +9,39 @@ use crate::schema::{Table, TableBuilder};
 use super::helpers::parse_referential_action;
 use super::{LuaColumnBuilder, LuaIndexBuilder};
 
+crate::lua_global_module! {
+    metadata: TABLE_BUILDER_LUA_MODULE,
+    register: register_table_builder_module,
+    name: "TableBuilder",
+    doc: "Builder for tables.",
+    functions: [
+        fn "new"(name: String => ("string", "string", "Name")) -> "TableBuilder" => table_builder_new;
+    ],
+}
+
+crate::lua_builder_def! {
+    target: LuaTableBuilder,
+    metadata: TABLE_BUILDER_LUA_TYPE,
+    register: register_lua_table_builder_methods,
+    type_name: "TableBuilder",
+    doc: "Builder for tables.",
+    fields: [],
+    methods: [
+        method "schema"(schema: String => ("string", "string", "Schema name")) -> "TableBuilder" => |this, schema| { this.transform(|builder| builder.schema(schema)); Ok(this.clone()) };
+        method "description"(desc: String => ("string", "string", "Description text")) -> "TableBuilder" => |this, desc| { this.transform(|builder| builder.description(desc)); Ok(this.clone()) };
+        method "comment"(comment: String => ("string", "string", "Comment text")) -> "TableBuilder" => |this, comment| { this.transform(|builder| builder.comment(comment)); Ok(this.clone()) };
+        method "column"(column: LuaColumnBuilder => ("ColumnBuilder", "any", "Column builder")) -> "TableBuilder" => |this, column| { let col = column.build(); this.transform(|builder| builder.column(col)); Ok(this.clone()) };
+        method "primary_key"(columns: Vec<String> => ("string[]", "table", "Column names")) -> "TableBuilder" => |this, columns| { this.transform(|builder| builder.primary_key(columns)); Ok(this.clone()) };
+        method "unique_constraint"(columns: Vec<String> => ("string[]", "table", "Column names")) -> "TableBuilder" => |this, columns| { this.transform(|builder| builder.unique_constraint(columns)); Ok(this.clone()) };
+        method "foreign_key"(columns: Vec<String> => ("string[]", "table", "Local columns"), ref_table: String => ("string", "string", "Referenced table"), ref_columns: Vec<String> => ("string[]", "table", "Referenced columns")) -> "TableBuilder" => |this, columns, ref_table, ref_columns| { this.transform(|builder| builder.foreign_key(columns, ref_table, ref_columns)); Ok(this.clone()) };
+        method "foreign_key_with_actions"(columns: Vec<String> => ("string[]", "table", "Local columns"), ref_table: String => ("string", "string", "Referenced table"), ref_columns: Vec<String> => ("string[]", "table", "Referenced columns"), on_delete: String => ("ReferenceAction|string", "string", "ON DELETE action"), on_update: String => ("ReferenceAction|string", "string", "ON UPDATE action")) -> "TableBuilder" => |this, columns, ref_table, ref_columns, on_delete, on_update| { let on_delete = parse_referential_action(&on_delete); let on_update = parse_referential_action(&on_update); this.transform(|builder| builder.foreign_key_with_actions(columns, ref_table, ref_columns, on_delete, on_update)); Ok(this.clone()) };
+        method "check"(expression: String => ("string", "string", "SQL expression")) -> "TableBuilder" => |this, expression| { this.transform(|builder| builder.check(expression)); Ok(this.clone()) };
+        method "index"(name: String => ("string", "string", "Index name"), columns: Vec<String> => ("string[]", "table", "Indexed columns")) -> "TableBuilder" => |this, name, columns| { this.transform(|builder| builder.index(name, columns)); Ok(this.clone()) };
+        method "unique_index"(name: String => ("string", "string", "Index name"), columns: Vec<String> => ("string[]", "table", "Indexed columns")) -> "TableBuilder" => |this, name, columns| { this.transform(|builder| builder.unique_index(name, columns)); Ok(this.clone()) };
+        method "index_with"(index: LuaIndexBuilder => ("IndexBuilder", "any", "Index builder")) -> "TableBuilder" => |this, index| { let idx = index.build(); this.transform(|builder| builder.index_with(idx)); Ok(this.clone()) };
+    ],
+}
+
 /// Lua wrapper for TableBuilder
 #[derive(Clone)]
 pub struct LuaTableBuilder {
@@ -42,109 +75,7 @@ impl LuaTableBuilder {
 
 impl UserData for LuaTableBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        // schema(name) -> self
-        methods.add_method("schema", |_, this, schema: String| {
-            this.transform(|builder| builder.schema(schema));
-            Ok(this.clone())
-        });
-
-        // description(desc) -> self  (alias for comment)
-        methods.add_method("description", |_, this, desc: String| {
-            this.transform(|builder| builder.description(desc));
-            Ok(this.clone())
-        });
-
-        // comment(text) -> self
-        methods.add_method("comment", |_, this, comment: String| {
-            this.transform(|builder| builder.comment(comment));
-            Ok(this.clone())
-        });
-
-        // column(column_builder) -> self
-        methods.add_method("column", |_, this, column: LuaColumnBuilder| {
-            let col = column.build();
-            this.transform(|builder| builder.column(col));
-            Ok(this.clone())
-        });
-
-        // primary_key(columns) -> self
-        methods.add_method("primary_key", |_, this, columns: Vec<String>| {
-            this.transform(|builder| builder.primary_key(columns));
-            Ok(this.clone())
-        });
-
-        // unique_constraint(columns) -> self
-        methods.add_method("unique_constraint", |_, this, columns: Vec<String>| {
-            this.transform(|builder| builder.unique_constraint(columns));
-            Ok(this.clone())
-        });
-
-        // foreign_key(columns, ref_table, ref_columns) -> self
-        methods.add_method(
-            "foreign_key",
-            |_, this, (columns, ref_table, ref_columns): (Vec<String>, String, Vec<String>)| {
-                this.transform(|builder| builder.foreign_key(columns, ref_table, ref_columns));
-                Ok(this.clone())
-            },
-        );
-
-        // foreign_key_with_actions(columns, ref_table, ref_columns, on_delete, on_update) -> self
-        methods.add_method(
-            "foreign_key_with_actions",
-            |_,
-             this,
-             (columns, ref_table, ref_columns, on_delete, on_update): (
-                Vec<String>,
-                String,
-                Vec<String>,
-                String,
-                String,
-            )| {
-                let on_delete = parse_referential_action(&on_delete);
-                let on_update = parse_referential_action(&on_update);
-                this.transform(|builder| {
-                    builder.foreign_key_with_actions(
-                        columns,
-                        ref_table,
-                        ref_columns,
-                        on_delete,
-                        on_update,
-                    )
-                });
-                Ok(this.clone())
-            },
-        );
-
-        // check(expression) -> self
-        methods.add_method("check", |_, this, expression: String| {
-            this.transform(|builder| builder.check(expression));
-            Ok(this.clone())
-        });
-
-        // index(name, columns) -> self
-        methods.add_method(
-            "index",
-            |_, this, (name, columns): (String, Vec<String>)| {
-                this.transform(|builder| builder.index(name, columns));
-                Ok(this.clone())
-            },
-        );
-
-        // unique_index(name, columns) -> self
-        methods.add_method(
-            "unique_index",
-            |_, this, (name, columns): (String, Vec<String>)| {
-                this.transform(|builder| builder.unique_index(name, columns));
-                Ok(this.clone())
-            },
-        );
-
-        // index_with(index_builder) -> self
-        methods.add_method("index_with", |_, this, index: LuaIndexBuilder| {
-            let idx = index.build();
-            this.transform(|builder| builder.index_with(idx));
-            Ok(this.clone())
-        });
+        register_lua_table_builder_methods(methods);
     }
 }
 
@@ -164,4 +95,26 @@ impl FromLua for LuaTableBuilder {
 /// TableBuilder.new(name) -> LuaTableBuilder
 pub fn table_builder_new(_: &Lua, name: String) -> LuaResult<LuaTableBuilder> {
     Ok(LuaTableBuilder::new(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macro_generated_table_builder_metadata_matches_runtime_api() {
+        assert_eq!(TABLE_BUILDER_LUA_MODULE.name, "TableBuilder");
+        assert!(TABLE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "column"));
+        assert!(TABLE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "foreign_key_with_actions"));
+        assert!(TABLE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "index_with"));
+    }
 }

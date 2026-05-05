@@ -6,6 +6,30 @@ use std::rc::Rc;
 
 use crate::schema::{EnumBuilder, EnumType};
 
+crate::lua_global_module! {
+    metadata: ENUM_BUILDER_LUA_MODULE,
+    register: register_enum_builder_module,
+    name: "EnumBuilder",
+    doc: "Builder for enum types.",
+    functions: [
+        fn "new"(name: String => ("string", "string", "Name")) -> "EnumBuilder" => enum_builder_new;
+    ],
+}
+
+crate::lua_builder_def! {
+    target: LuaEnumBuilder,
+    metadata: ENUM_BUILDER_LUA_TYPE,
+    register: register_lua_enum_builder_methods,
+    type_name: "EnumBuilder",
+    doc: "Builder for enum types.",
+    fields: [],
+    methods: [
+        method "value"(value: String => ("string", "string", "Enum value")) -> "EnumBuilder" => |this, value| { this.transform(|builder| builder.value(value)); Ok(this.clone()) };
+        method "values"(values: Vec<String> => ("string[]", "table", "Array of enum values")) -> "EnumBuilder" => |this, values| { this.transform(|builder| builder.values(values)); Ok(this.clone()) };
+        method "description"(desc: String => ("string", "string", "Description text")) -> "EnumBuilder" => |this, desc| { this.transform(|builder| builder.description(desc)); Ok(this.clone()) };
+    ],
+}
+
 /// Lua wrapper for EnumBuilder
 #[derive(Clone)]
 pub struct LuaEnumBuilder {
@@ -43,23 +67,7 @@ impl LuaEnumBuilder {
 
 impl UserData for LuaEnumBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        // value(val) -> self
-        methods.add_method("value", |_, this, value: String| {
-            this.transform(|builder| builder.value(value));
-            Ok(this.clone())
-        });
-
-        // values(vals) -> self
-        methods.add_method("values", |_, this, values: Vec<String>| {
-            this.transform(|builder| builder.values(values));
-            Ok(this.clone())
-        });
-
-        // description(desc) -> self
-        methods.add_method("description", |_, this, desc: String| {
-            this.transform(|builder| builder.description(desc));
-            Ok(this.clone())
-        });
+        register_lua_enum_builder_methods(methods);
     }
 }
 
@@ -79,4 +87,24 @@ impl FromLua for LuaEnumBuilder {
 /// EnumBuilder.new(name) -> LuaEnumBuilder
 pub fn enum_builder_new(_: &Lua, name: String) -> LuaResult<LuaEnumBuilder> {
     Ok(LuaEnumBuilder::new(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macro_generated_enum_builder_metadata_matches_runtime_api() {
+        assert_eq!(ENUM_BUILDER_LUA_MODULE.name, "EnumBuilder");
+        assert!(ENUM_BUILDER_LUA_MODULE.global);
+        assert_eq!(ENUM_BUILDER_LUA_MODULE.methods[0].name, "new");
+        assert!(ENUM_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "values"));
+        assert!(ENUM_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "description"));
+    }
 }

@@ -7,8 +7,74 @@ use std::rc::Rc;
 use crate::schema::types::{DataType, DefaultValue};
 use crate::schema::{Column, ColumnBuilder};
 
-use super::helpers::{parse_data_type, parse_referential_action};
 use super::LuaEnumBuilder;
+use super::helpers::{parse_data_type, parse_referential_action};
+
+crate::lua_global_module! {
+    metadata: COLUMN_BUILDER_LUA_MODULE,
+    register: register_column_builder_module,
+    name: "ColumnBuilder",
+    doc: "Builder for columns.",
+    functions: [
+        fn "new"(name: (String, String) => ("string", "string", "Column name"), type_name: (String, String) => ("string", "string", "SQL type name")) -> "ColumnBuilder" => column_builder_new;
+        fn "serial"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_serial;
+        fn "bigserial"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_bigserial;
+        fn "smallserial"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_smallserial;
+        fn "integer"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_integer;
+        fn "bigint"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_bigint;
+        fn "smallint"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_smallint;
+        fn "text"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_text;
+        fn "varchar"(name: (String, Option<u32>) => ("string", "string", "Column name"), length: (String, Option<u32>) => ("integer", "number", "Length", optional)) -> "ColumnBuilder" => column_builder_varchar;
+        fn "char"(name: (String, Option<u32>) => ("string", "string", "Column name"), length: (String, Option<u32>) => ("integer", "number", "Length", optional)) -> "ColumnBuilder" => column_builder_char;
+        fn "boolean"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_boolean;
+        fn "timestamp"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_timestamp;
+        fn "timestamptz"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_timestamptz;
+        fn "date"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_date;
+        fn "time"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_time;
+        fn "uuid"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_uuid;
+        fn "json"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_json;
+        fn "jsonb"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_jsonb;
+        fn "numeric"(name: (String, Option<u32>, Option<u32>) => ("string", "string", "Column name"), precision: (String, Option<u32>, Option<u32>) => ("integer", "number", "Total digits", optional), scale: (String, Option<u32>, Option<u32>) => ("integer", "number", "Decimal places", optional)) -> "ColumnBuilder" => column_builder_numeric;
+        fn "real"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_real;
+        fn "double_precision"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_double_precision;
+        fn "bytea"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_bytea;
+        fn "inet"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_inet;
+        fn "cidr"(name: String => ("string", "string", "Column name")) -> "ColumnBuilder" => column_builder_cidr;
+        fn "enum"(name: (String, LuaEnumTypeInput) => ("string", "string", "Column name"), enum_name: (String, LuaEnumTypeInput) => ("string|EnumBuilder", "any", "Enum name or builder")) -> "ColumnBuilder" => column_builder_enum_type;
+        fn "array"(name: (String, String) => ("string", "string", "Column name"), element_type: (String, String) => ("string", "string", "Element type name")) -> "ColumnBuilder" => column_builder_array;
+    ],
+}
+
+crate::lua_builder_def! {
+    target: LuaColumnBuilder,
+    metadata: COLUMN_BUILDER_LUA_TYPE,
+    register: register_lua_column_builder_methods,
+    type_name: "ColumnBuilder",
+    doc: "Builder for columns.",
+    fields: [],
+    methods: [
+        method "not_null"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.not_null()); Ok(this.clone()) };
+        method "nullable"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.nullable()); Ok(this.clone()) };
+        method "primary_key"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.primary_key()); Ok(this.clone()) };
+        method "unique"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.unique()); Ok(this.clone()) };
+        method "default_value"(value: String => ("string", "string", "Default SQL literal")) -> "ColumnBuilder" => |this, value| { this.transform(|builder| builder.default_value(value)); Ok(this.clone()) };
+        method "default_now"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default_now()); Ok(this.clone()) };
+        method "default_sql"(expr: String => ("string", "string", "SQL expression")) -> "ColumnBuilder" => |this, expr| { this.transform(|builder| builder.default(DefaultValue::Sql(expr))); Ok(this.clone()) };
+        method "default_null"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::Literal("NULL".to_string()))); Ok(this.clone()) };
+        method "default_current_timestamp"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::current_timestamp())); Ok(this.clone()) };
+        method "default_uuid_generate_v4"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::uuid_generate_v4())); Ok(this.clone()) };
+        method "default_gen_random_uuid"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::gen_random_uuid())); Ok(this.clone()) };
+        method "default_uuidv7"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::uuidv7())); Ok(this.clone()) };
+        method "default_uuidv4"() -> "ColumnBuilder" => |this| { this.transform(|builder| builder.default(DefaultValue::uuidv4())); Ok(this.clone()) };
+        method "description"(desc: String => ("string", "string", "Description text")) -> "ColumnBuilder" => |this, desc| { this.transform(|builder| builder.description(desc)); Ok(this.clone()) };
+        method "comment"(comment: String => ("string", "string", "Comment text")) -> "ColumnBuilder" => |this, comment| { this.transform(|builder| builder.comment(comment)); Ok(this.clone()) };
+        method "collate"(collation: String => ("string", "string", "Collation name")) -> "ColumnBuilder" => |this, collation| { this.transform(|builder| builder.collate(collation)); Ok(this.clone()) };
+        method "references"(table: String => ("string", "string", "Referenced table"), column: String => ("string", "string", "Referenced column")) -> "ColumnBuilder" => |this, table, column| { this.transform(|builder| builder.references(table, column)); Ok(this.clone()) };
+        method "references_on_delete"(table: String => ("string", "string", "Referenced table"), column: String => ("string", "string", "Referenced column"), action: String => ("ReferenceAction|string", "string", "ON DELETE action")) -> "ColumnBuilder" => |this, table, column, action| { let on_delete = parse_referential_action(&action); this.transform(|builder| builder.references_on_delete(table, column, on_delete)); Ok(this.clone()) };
+        method "identity"(always: bool => ("boolean", "bool", "Use ALWAYS when true")) -> "ColumnBuilder" => |this, always| { this.transform(|builder| builder.identity(always)); Ok(this.clone()) };
+        method "generated_as"(expression: String => ("string", "string", "Generated expression"), stored: bool => ("boolean", "bool", "Store generated values")) -> "ColumnBuilder" => |this, expression, stored| { this.transform(|builder| builder.generated_as(expression, stored)); Ok(this.clone()) };
+    ],
+}
 
 pub(crate) enum LuaEnumTypeInput {
     Name(String),
@@ -224,135 +290,7 @@ impl LuaColumnBuilder {
 
 impl UserData for LuaColumnBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        // not_null() -> self
-        methods.add_method("not_null", |_, this, ()| {
-            this.transform(|builder| builder.not_null());
-            Ok(this.clone())
-        });
-
-        // nullable() -> self
-        methods.add_method("nullable", |_, this, ()| {
-            this.transform(|builder| builder.nullable());
-            Ok(this.clone())
-        });
-
-        // primary_key() -> self
-        methods.add_method("primary_key", |_, this, ()| {
-            this.transform(|builder| builder.primary_key());
-            Ok(this.clone())
-        });
-
-        // unique() -> self
-        methods.add_method("unique", |_, this, ()| {
-            this.transform(|builder| builder.unique());
-            Ok(this.clone())
-        });
-
-        // default_value(value) -> self
-        methods.add_method("default_value", |_, this, value: String| {
-            this.transform(|builder| builder.default_value(value));
-            Ok(this.clone())
-        });
-
-        // default_now() -> self
-        methods.add_method("default_now", |_, this, ()| {
-            this.transform(|builder| builder.default_now());
-            Ok(this.clone())
-        });
-
-        // default_sql(expr) -> self
-        methods.add_method("default_sql", |_, this, expr: String| {
-            this.transform(|builder| builder.default(DefaultValue::Sql(expr)));
-            Ok(this.clone())
-        });
-
-        // default_null() -> self
-        methods.add_method("default_null", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::Literal("NULL".to_string())));
-            Ok(this.clone())
-        });
-
-        // default_current_timestamp() -> self
-        methods.add_method("default_current_timestamp", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::current_timestamp()));
-            Ok(this.clone())
-        });
-
-        // default_uuid_generate_v4() -> self
-        methods.add_method("default_uuid_generate_v4", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::uuid_generate_v4()));
-            Ok(this.clone())
-        });
-
-        // default_gen_random_uuid() -> self
-        methods.add_method("default_gen_random_uuid", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::gen_random_uuid()));
-            Ok(this.clone())
-        });
-
-        // default_uuidv7() -> self
-        methods.add_method("default_uuidv7", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::uuidv7()));
-            Ok(this.clone())
-        });
-
-        // default_uuidv4() -> self
-        methods.add_method("default_uuidv4", |_, this, ()| {
-            this.transform(|builder| builder.default(DefaultValue::uuidv4()));
-            Ok(this.clone())
-        });
-
-        // description(desc) -> self (alias for comment)
-        methods.add_method("description", |_, this, desc: String| {
-            this.transform(|builder| builder.description(desc));
-            Ok(this.clone())
-        });
-
-        // comment(text) -> self
-        methods.add_method("comment", |_, this, comment: String| {
-            this.transform(|builder| builder.comment(comment));
-            Ok(this.clone())
-        });
-
-        // collate(collation) -> self
-        methods.add_method("collate", |_, this, collation: String| {
-            this.transform(|builder| builder.collate(collation));
-            Ok(this.clone())
-        });
-
-        // references(table, column) -> self
-        methods.add_method(
-            "references",
-            |_, this, (table, column): (String, String)| {
-                this.transform(|builder| builder.references(table, column));
-                Ok(this.clone())
-            },
-        );
-
-        // references_on_delete(table, column, action) -> self
-        methods.add_method(
-            "references_on_delete",
-            |_, this, (table, column, action): (String, String, String)| {
-                let on_delete = parse_referential_action(&action);
-                this.transform(|builder| builder.references_on_delete(table, column, on_delete));
-                Ok(this.clone())
-            },
-        );
-
-        // identity(always) -> self
-        methods.add_method("identity", |_, this, always: bool| {
-            this.transform(|builder| builder.identity(always));
-            Ok(this.clone())
-        });
-
-        // generated_as(expression, stored) -> self
-        methods.add_method(
-            "generated_as",
-            |_, this, (expression, stored): (String, bool)| {
-                this.transform(|builder| builder.generated_as(expression, stored));
-                Ok(this.clone())
-            },
-        );
+        register_lua_column_builder_methods(methods);
     }
 }
 
@@ -498,4 +436,46 @@ pub fn column_builder_array(
     (name, element_type): (String, String),
 ) -> LuaResult<LuaColumnBuilder> {
     Ok(LuaColumnBuilder::array(name, element_type))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macro_generated_column_builder_metadata_matches_runtime_api() {
+        assert_eq!(COLUMN_BUILDER_LUA_MODULE.name, "ColumnBuilder");
+        assert!(COLUMN_BUILDER_LUA_MODULE.global);
+        assert!(
+            COLUMN_BUILDER_LUA_MODULE
+                .methods
+                .iter()
+                .any(|method| method.name == "enum")
+        );
+        assert!(
+            COLUMN_BUILDER_LUA_TYPE
+                .methods
+                .iter()
+                .any(|method| method.name == "generated_as")
+        );
+        assert!(
+            COLUMN_BUILDER_LUA_MODULE
+                .methods
+                .iter()
+                .find(|method| method.name == "varchar")
+                .unwrap()
+                .params[1]
+                .optional
+        );
+        assert!(
+            COLUMN_BUILDER_LUA_MODULE
+                .methods
+                .iter()
+                .find(|method| method.name == "enum")
+                .unwrap()
+                .params[1]
+                .luacats_type
+                .contains("EnumBuilder")
+        );
+    }
 }
