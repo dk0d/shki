@@ -69,6 +69,34 @@ export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
 shki diff
 ```
 
+Example reusable enum module:
+
+```lua
+-- db/lua/post_status.lua
+return EnumBuilder.new("post_status")
+    :description("Status of a blog post")
+    :value("draft")
+    :value("published")
+    :value("archived")
+```
+
+```lua
+-- db/init.lua
+local schema = pg.schema("public")
+local post_status = require("post_status")
+
+schema:enum(post_status)
+
+schema:table(
+    TableBuilder.new("posts")
+        :column(ColumnBuilder.serial("id"):primary_key())
+        :column(ColumnBuilder.text("title"):not_null())
+        :column(ColumnBuilder.enum("status", post_status):not_null())
+)
+
+return schema
+```
+
 
 4. Generate and apply migration
 

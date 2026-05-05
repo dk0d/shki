@@ -36,6 +36,7 @@
 //!     :value("archived")
 //! ```
 
+pub(crate) mod api;
 mod column_builder;
 mod enum_builder;
 mod helpers;
@@ -48,19 +49,56 @@ mod view_builder;
 
 // Re-export all types and functions from individual modules
 pub use column_builder::*;
+pub(crate) use column_builder::{COLUMN_BUILDER_LUA_MODULE, COLUMN_BUILDER_LUA_TYPE};
 pub use enum_builder::*;
+pub(crate) use enum_builder::{ENUM_BUILDER_LUA_MODULE, ENUM_BUILDER_LUA_TYPE};
 pub use helpers::*;
 pub use index_builder::*;
+pub(crate) use index_builder::{INDEX_BUILDER_LUA_MODULE, INDEX_BUILDER_LUA_TYPE};
 pub use index_column::*;
+pub(crate) use index_column::{INDEX_COLUMN_LUA_MODULE, INDEX_COLUMN_LUA_TYPE};
 pub use schema::*;
+pub(crate) use schema::{MYSQL_LUA_MODULE, PG_LUA_MODULE, SCHEMA_LUA_TYPE, SQLITE_LUA_MODULE};
 pub use sequence_builder::*;
+pub(crate) use sequence_builder::{SEQUENCE_BUILDER_LUA_MODULE, SEQUENCE_BUILDER_LUA_TYPE};
 pub use table_builder::*;
+pub(crate) use table_builder::{TABLE_BUILDER_LUA_MODULE, TABLE_BUILDER_LUA_TYPE};
 pub use view_builder::*;
+pub(crate) use view_builder::{VIEW_BUILDER_LUA_MODULE, VIEW_BUILDER_LUA_TYPE};
 
 use crate::schema::Schema;
 use crate::{Result, ShkiError};
 use mlua::{Lua, Result as LuaResult};
 use std::path::Path;
+
+crate::lua_value_table! {
+    metadata: REFERENCE_ACTION_LUA_TABLE,
+    register: register_reference_action_table,
+    name: "ReferenceAction",
+    doc: "Reference actions for foreign keys.",
+    values: [
+        NoAction = "no_action" => "NO ACTION";
+        Restrict = "restrict" => "RESTRICT";
+        Cascade = "cascade" => "CASCADE";
+        SetNull = "set_null" => "SET NULL";
+        SetDefault = "set_default" => "SET DEFAULT";
+    ],
+}
+
+crate::lua_value_table! {
+    metadata: INDEX_METHOD_LUA_TABLE,
+    register: register_index_method_table,
+    name: "IndexMethod",
+    doc: "Index methods for PostgreSQL indexes.",
+    values: [
+        BTree = "btree" => "btree";
+        Hash = "hash" => "hash";
+        Gist = "gist" => "gist";
+        SpGist = "spgist" => "spgist";
+        Gin = "gin" => "gin";
+        Brin = "brin" => "brin";
+    ],
+}
 
 /// Load a schema from a Lua script file
 pub fn load_schema_from_file(path: &Path) -> Result<Schema> {
@@ -116,415 +154,20 @@ pub fn create_lua_runtime() -> Result<Lua> {
 fn register_schema_bindings(lua: &Lua) -> Result<()> {
     let globals = lua.globals();
 
-    // Register pg module
-    let pg = lua
-        .create_table()
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    pg.set(
-        "schema",
-        lua.create_function(pg_schema)
-            .map_err(|e| ShkiError::lua(e.to_string()))?,
-    )
-    .map_err(|e| ShkiError::lua(e.to_string()))?;
-    globals
-        .set("pg", pg)
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    register_pg_module(lua, &globals)?;
+    register_mysql_module(lua, &globals)?;
+    register_sqlite_module(lua, &globals)?;
 
-    // Register mysql module
-    let mysql = lua
-        .create_table()
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    mysql
-        .set(
-            "schema",
-            lua.create_function(mysql_schema)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    globals
-        .set("mysql", mysql)
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    register_enum_builder_module(lua, &globals)?;
+    register_table_builder_module(lua, &globals)?;
+    register_column_builder_module(lua, &globals)?;
+    register_index_builder_module(lua, &globals)?;
+    register_sequence_builder_module(lua, &globals)?;
+    register_view_builder_module(lua, &globals)?;
+    register_index_column_module(lua, &globals)?;
 
-    // Register sqlite module
-    let sqlite = lua
-        .create_table()
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    sqlite
-        .set(
-            "schema",
-            lua.create_function(sqlite_schema)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    globals
-        .set("sqlite", sqlite)
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register EnumBuilder
-    globals
-        .set(
-            "EnumBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let enum_builder = globals
-        .get::<mlua::Table>("EnumBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    enum_builder
-        .set(
-            "new",
-            lua.create_function(enum_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register TableBuilder
-    globals
-        .set(
-            "TableBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let table_builder = globals
-        .get::<mlua::Table>("TableBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    table_builder
-        .set(
-            "new",
-            lua.create_function(table_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register ColumnBuilder
-    globals
-        .set(
-            "ColumnBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let column_builder = globals
-        .get::<mlua::Table>("ColumnBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Type constructors
-    column_builder
-        .set(
-            "new",
-            lua.create_function(column_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "serial",
-            lua.create_function(column_builder_serial)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "bigserial",
-            lua.create_function(column_builder_bigserial)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "smallserial",
-            lua.create_function(column_builder_smallserial)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "integer",
-            lua.create_function(column_builder_integer)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "bigint",
-            lua.create_function(column_builder_bigint)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "smallint",
-            lua.create_function(column_builder_smallint)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "text",
-            lua.create_function(column_builder_text)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "varchar",
-            lua.create_function(column_builder_varchar)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "char",
-            lua.create_function(column_builder_char)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "boolean",
-            lua.create_function(column_builder_boolean)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "timestamp",
-            lua.create_function(column_builder_timestamp)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "timestamptz",
-            lua.create_function(column_builder_timestamptz)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "date",
-            lua.create_function(column_builder_date)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "time",
-            lua.create_function(column_builder_time)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "uuid",
-            lua.create_function(column_builder_uuid)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "json",
-            lua.create_function(column_builder_json)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "jsonb",
-            lua.create_function(column_builder_jsonb)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "numeric",
-            lua.create_function(column_builder_numeric)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "real",
-            lua.create_function(column_builder_real)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "double_precision",
-            lua.create_function(column_builder_double_precision)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "bytea",
-            lua.create_function(column_builder_bytea)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "inet",
-            lua.create_function(column_builder_inet)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "cidr",
-            lua.create_function(column_builder_cidr)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "enum",
-            lua.create_function(column_builder_enum_type)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    column_builder
-        .set(
-            "array",
-            lua.create_function(column_builder_array)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register IndexBuilder
-    globals
-        .set(
-            "IndexBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let index_builder = globals
-        .get::<mlua::Table>("IndexBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    index_builder
-        .set(
-            "new",
-            lua.create_function(index_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register SequenceBuilder
-    globals
-        .set(
-            "SequenceBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let sequence_builder = globals
-        .get::<mlua::Table>("SequenceBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    sequence_builder
-        .set(
-            "new",
-            lua.create_function(sequence_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register ViewBuilder
-    globals
-        .set(
-            "ViewBuilder",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let view_builder = globals
-        .get::<mlua::Table>("ViewBuilder")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    view_builder
-        .set(
-            "new",
-            lua.create_function(view_builder_new)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register IndexColumn
-    globals
-        .set(
-            "IndexColumn",
-            lua.create_table()
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    let index_column = globals
-        .get::<mlua::Table>("IndexColumn")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    index_column
-        .set(
-            "column",
-            lua.create_function(index_column_column)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    index_column
-        .set(
-            "expression",
-            lua.create_function(index_column_expression)
-                .map_err(|e| ShkiError::lua(e.to_string()))?,
-        )
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register ReferenceAction enum
-    let ref_action = lua
-        .create_table()
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    ref_action
-        .set("NoAction", "no_action")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    ref_action
-        .set("Restrict", "restrict")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    ref_action
-        .set("Cascade", "cascade")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    ref_action
-        .set("SetNull", "set_null")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    ref_action
-        .set("SetDefault", "set_default")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    globals
-        .set("ReferenceAction", ref_action)
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-
-    // Register IndexMethod enum
-    let idx_method = lua
-        .create_table()
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("BTree", "btree")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("Hash", "hash")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("Gist", "gist")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("SpGist", "spgist")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("Gin", "gin")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    idx_method
-        .set("Brin", "brin")
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
-    globals
-        .set("IndexMethod", idx_method)
-        .map_err(|e| ShkiError::lua(e.to_string()))?;
+    register_reference_action_table(lua, &globals)?;
+    register_index_method_table(lua, &globals)?;
 
     Ok(())
 }
@@ -551,6 +194,20 @@ mod tests {
         assert!(globals.get::<mlua::Table>("SequenceBuilder").is_ok());
         assert!(globals.get::<mlua::Table>("ViewBuilder").is_ok());
         assert!(globals.get::<mlua::Table>("IndexColumn").is_ok());
+    }
+
+    #[test]
+    fn test_macro_generated_value_table_metadata() {
+        assert_eq!(REFERENCE_ACTION_LUA_TABLE.name, "ReferenceAction");
+        assert_eq!(INDEX_METHOD_LUA_TABLE.name, "IndexMethod");
+        assert!(REFERENCE_ACTION_LUA_TABLE
+            .fields
+            .iter()
+            .any(|field| field.name == "Cascade" && field.value == Some("cascade")));
+        assert!(INDEX_METHOD_LUA_TABLE
+            .fields
+            .iter()
+            .any(|field| field.name == "Gin" && field.value == Some("gin")));
     }
 
     #[test]

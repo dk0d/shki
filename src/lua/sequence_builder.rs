@@ -6,6 +6,35 @@ use std::rc::Rc;
 
 use crate::schema::{Sequence, SequenceBuilder};
 
+crate::lua_global_module! {
+    metadata: SEQUENCE_BUILDER_LUA_MODULE,
+    register: register_sequence_builder_module,
+    name: "SequenceBuilder",
+    doc: "Builder for sequences.",
+    functions: [
+        fn "new"(name: String => ("string", "string", "Name")) -> "SequenceBuilder" => sequence_builder_new;
+    ],
+}
+
+crate::lua_builder_def! {
+    target: LuaSequenceBuilder,
+    metadata: SEQUENCE_BUILDER_LUA_TYPE,
+    register: register_lua_sequence_builder_methods,
+    type_name: "SequenceBuilder",
+    doc: "Builder for sequences.",
+    fields: [],
+    methods: [
+        method "schema"(schema: String => ("string", "string", "Schema name")) -> "SequenceBuilder" => |this, schema| { this.transform(|builder| builder.schema(schema)); Ok(this.clone()) };
+        method "increment"(increment: i64 => ("integer", "number", "Sequence value")) -> "SequenceBuilder" => |this, increment| { this.transform(|builder| builder.increment(increment)); Ok(this.clone()) };
+        method "min_value"(min_value: i64 => ("integer", "number", "Sequence value")) -> "SequenceBuilder" => |this, min_value| { this.transform(|builder| builder.min_value(min_value)); Ok(this.clone()) };
+        method "max_value"(max_value: i64 => ("integer", "number", "Sequence value")) -> "SequenceBuilder" => |this, max_value| { this.transform(|builder| builder.max_value(max_value)); Ok(this.clone()) };
+        method "start"(start: i64 => ("integer", "number", "Sequence value")) -> "SequenceBuilder" => |this, start| { this.transform(|builder| builder.start(start)); Ok(this.clone()) };
+        method "cache"(cache: i64 => ("integer", "number", "Sequence value")) -> "SequenceBuilder" => |this, cache| { this.transform(|builder| builder.cache(cache)); Ok(this.clone()) };
+        method "cycle"() -> "SequenceBuilder" => |this| { this.transform(|builder| builder.cycle()); Ok(this.clone()) };
+        method "no_cycle"() -> "SequenceBuilder" => |this| { this.transform(|builder| builder.no_cycle()); Ok(this.clone()) };
+    ],
+}
+
 /// Lua wrapper for building Sequences
 #[derive(Clone)]
 pub struct LuaSequenceBuilder {
@@ -39,53 +68,7 @@ impl LuaSequenceBuilder {
 
 impl UserData for LuaSequenceBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        // schema(name) -> self
-        methods.add_method("schema", |_, this, schema: String| {
-            this.transform(|builder| builder.schema(schema));
-            Ok(this.clone())
-        });
-
-        // increment(value) -> self
-        methods.add_method("increment", |_, this, increment: i64| {
-            this.transform(|builder| builder.increment(increment));
-            Ok(this.clone())
-        });
-
-        // min_value(value) -> self
-        methods.add_method("min_value", |_, this, min_value: i64| {
-            this.transform(|builder| builder.min_value(min_value));
-            Ok(this.clone())
-        });
-
-        // max_value(value) -> self
-        methods.add_method("max_value", |_, this, max_value: i64| {
-            this.transform(|builder| builder.max_value(max_value));
-            Ok(this.clone())
-        });
-
-        // start(value) -> self
-        methods.add_method("start", |_, this, start: i64| {
-            this.transform(|builder| builder.start(start));
-            Ok(this.clone())
-        });
-
-        // cache(value) -> self
-        methods.add_method("cache", |_, this, cache: i64| {
-            this.transform(|builder| builder.cache(cache));
-            Ok(this.clone())
-        });
-
-        // cycle() -> self
-        methods.add_method("cycle", |_, this, ()| {
-            this.transform(|builder| builder.cycle());
-            Ok(this.clone())
-        });
-
-        // no_cycle() -> self
-        methods.add_method("no_cycle", |_, this, ()| {
-            this.transform(|builder| builder.no_cycle());
-            Ok(this.clone())
-        });
+        register_lua_sequence_builder_methods(methods);
     }
 }
 
@@ -105,4 +88,26 @@ impl FromLua for LuaSequenceBuilder {
 /// SequenceBuilder.new(name) -> LuaSequenceBuilder
 pub fn sequence_builder_new(_: &Lua, name: String) -> LuaResult<LuaSequenceBuilder> {
     Ok(LuaSequenceBuilder::new(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macro_generated_sequence_builder_metadata_matches_runtime_api() {
+        assert_eq!(SEQUENCE_BUILDER_LUA_MODULE.name, "SequenceBuilder");
+        assert!(SEQUENCE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "schema"));
+        assert!(SEQUENCE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "cycle"));
+        assert!(SEQUENCE_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "no_cycle"));
+    }
 }

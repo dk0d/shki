@@ -1,520 +1,39 @@
-/// LuaCATS type definitions for shki
-pub const LUACATS_SHKI_TYPES: &str = r#"---@meta shki
---- Shki Lua API Type Definitions
---- This file provides type information for the Lua Language Server.
---- It should NOT be executed - it's only for IDE support.
+use crate::lua::api::{
+    LuaMethodDoc as LuaMethod, LuaParamDoc as LuaParam, LuaTypeDoc as LuaTypeDef,
+};
+use crate::lua::{
+    COLUMN_BUILDER_LUA_MODULE, COLUMN_BUILDER_LUA_TYPE, ENUM_BUILDER_LUA_MODULE,
+    ENUM_BUILDER_LUA_TYPE, INDEX_BUILDER_LUA_MODULE, INDEX_BUILDER_LUA_TYPE,
+    INDEX_COLUMN_LUA_MODULE, INDEX_COLUMN_LUA_TYPE, INDEX_METHOD_LUA_TABLE, MYSQL_LUA_MODULE,
+    PG_LUA_MODULE, REFERENCE_ACTION_LUA_TABLE, SCHEMA_LUA_TYPE, SEQUENCE_BUILDER_LUA_MODULE,
+    SEQUENCE_BUILDER_LUA_TYPE, SQLITE_LUA_MODULE, TABLE_BUILDER_LUA_MODULE, TABLE_BUILDER_LUA_TYPE,
+    VIEW_BUILDER_LUA_MODULE, VIEW_BUILDER_LUA_TYPE,
+};
+use std::fmt::Write;
+
+const LUA_TYPES: &[LuaTypeDef] = &[
+    SCHEMA_LUA_TYPE,
+    PG_LUA_MODULE,
+    MYSQL_LUA_MODULE,
+    SQLITE_LUA_MODULE,
+    ENUM_BUILDER_LUA_MODULE,
+    ENUM_BUILDER_LUA_TYPE,
+    TABLE_BUILDER_LUA_MODULE,
+    TABLE_BUILDER_LUA_TYPE,
+    COLUMN_BUILDER_LUA_MODULE,
+    COLUMN_BUILDER_LUA_TYPE,
+    INDEX_BUILDER_LUA_MODULE,
+    INDEX_BUILDER_LUA_TYPE,
+    SEQUENCE_BUILDER_LUA_MODULE,
+    SEQUENCE_BUILDER_LUA_TYPE,
+    VIEW_BUILDER_LUA_MODULE,
+    VIEW_BUILDER_LUA_TYPE,
+    INDEX_COLUMN_LUA_MODULE,
+    INDEX_COLUMN_LUA_TYPE,
+    REFERENCE_ACTION_LUA_TABLE,
+    INDEX_METHOD_LUA_TABLE,
+];
 
---------------------------------------------------------------------------------
--- Enums / Constants
---------------------------------------------------------------------------------
-
----@class ReferenceAction
----@field NoAction string
----@field Restrict string
----@field Cascade string
----@field SetNull string
----@field SetDefault string
-ReferenceAction = {
-    NoAction = "no_action",
-    Restrict = "restrict",
-    Cascade = "cascade",
-    SetNull = "set_null",
-    SetDefault = "set_default",
-}
-
----@class IndexMethod
----@field BTree string
----@field Hash string
----@field Gist string
----@field SpGist string
----@field Gin string
----@field Brin string
-IndexMethod = {
-    BTree = "btree",
-    Hash = "hash",
-    Gist = "gist",
-    SpGist = "spgist",
-    Gin = "gin",
-    Brin = "brin",
-}
-
---------------------------------------------------------------------------------
--- Schema
---------------------------------------------------------------------------------
-
----@class Schema
----@field name string The schema name (e.g., "public")
----@field dialect string The database dialect ("Postgres", "Mysql", "Sqlite")
-local Schema = {}
-
---- Add a table to the schema
----@param table TableBuilder The table builder
----@return Schema self
-function Schema:table(table) end
-
---- Add an enum type to the schema
----@param enum EnumBuilder The enum builder
----@return Schema self
-function Schema:enum_type(enum) end
-
---- Add a PostgreSQL extension
----@param name string Extension name (e.g., "uuid-ossp")
----@return Schema self
-function Schema:extension(name) end
-
---------------------------------------------------------------------------------
--- Dialect Modules
---------------------------------------------------------------------------------
-
----@class pg
-pg = {}
-
---- Create a new PostgreSQL schema
----@param name string Schema name (e.g., "public")
----@return Schema
-function pg.schema(name) end
-
----@class mysql
-mysql = {}
-
---- Create a new MySQL schema/database
----@param name string Database name
----@return Schema
-function mysql.schema(name) end
-
----@class sqlite
-sqlite = {}
-
---- Create a new SQLite schema
----@return Schema
-function sqlite.schema() end
-
---------------------------------------------------------------------------------
--- EnumBuilder
---------------------------------------------------------------------------------
-
----@class EnumBuilder
-EnumBuilder = {}
-
---- Create a new enum builder
----@param name string The enum type name
----@return EnumBuilder
-function EnumBuilder.new(name) end
-
---- Add a single value to the enum
----@param value string The enum value
----@return EnumBuilder self
-function EnumBuilder:value(value) end
-
---- Add multiple values to the enum
----@param values string[] Array of enum values
----@return EnumBuilder self
-function EnumBuilder:values(values) end
-
---- Set the description/comment for the enum
----@param desc string Description text (supports markdown)
----@return EnumBuilder self
-function EnumBuilder:description(desc) end
-
---------------------------------------------------------------------------------
--- TableBuilder
---------------------------------------------------------------------------------
-
----@class TableBuilder
-TableBuilder = {}
-
---- Create a new table builder
----@param name string The table name
----@return TableBuilder
-function TableBuilder.new(name) end
-
---- Set the schema name for the table
----@param name string Schema name
----@return TableBuilder self
-function TableBuilder:schema(name) end
-
---- Set the description/comment for the table
----@param desc string Description text (supports markdown)
----@return TableBuilder self
-function TableBuilder:description(desc) end
-
---- Set a comment for the table (alias for description)
----@param text string Comment text
----@return TableBuilder self
-function TableBuilder:comment(text) end
-
---- Add a column to the table
----@param column ColumnBuilder The column builder
----@return TableBuilder self
-function TableBuilder:column(column) end
-
---- Add a composite primary key constraint
----@param columns string[] Column names
----@return TableBuilder self
-function TableBuilder:primary_key(columns) end
-
---- Add a unique constraint on columns
----@param columns string[] Column names
----@return TableBuilder self
-function TableBuilder:unique_constraint(columns) end
-
---- Add a foreign key constraint
----@param columns string[] Local column names
----@param ref_table string Referenced table name
----@param ref_columns string[] Referenced column names
----@return TableBuilder self
-function TableBuilder:foreign_key(columns, ref_table, ref_columns) end
-
---- Add a foreign key constraint with referential actions
----@param columns string[] Local column names
----@param ref_table string Referenced table name
----@param ref_columns string[] Referenced column names
----@param on_delete string ON DELETE action (use ReferenceAction.*)
----@param on_update string ON UPDATE action (use ReferenceAction.*)
----@return TableBuilder self
-function TableBuilder:foreign_key_with_actions(columns, ref_table, ref_columns, on_delete, on_update) end
-
---- Add a check constraint
----@param expression string SQL check expression
----@return TableBuilder self
-function TableBuilder:check(expression) end
-
---- Add an index on columns
----@param name string Index name
----@param columns string[] Column names
----@return TableBuilder self
-function TableBuilder:index(name, columns) end
-
---- Add a unique index on columns
----@param name string Index name
----@param columns string[] Column names
----@return TableBuilder self
-function TableBuilder:unique_index(name, columns) end
-
---- Add an index using IndexBuilder
----@param index IndexBuilder The index builder
----@return TableBuilder self
-function TableBuilder:index_with(index) end
-
---------------------------------------------------------------------------------
--- ColumnBuilder
---------------------------------------------------------------------------------
-
----@class ColumnBuilder
-ColumnBuilder = {}
-
---- Create a column with a custom type
----@param name string Column name
----@param type_name string SQL type name
----@return ColumnBuilder
-function ColumnBuilder.new(name, type_name) end
-
---- Create a SERIAL column (auto-incrementing integer)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.serial(name) end
-
---- Create a BIGSERIAL column (auto-incrementing bigint)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.bigserial(name) end
-
---- Create a SMALLSERIAL column (auto-incrementing smallint)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.smallserial(name) end
-
---- Create an INTEGER column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.integer(name) end
-
---- Create a BIGINT column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.bigint(name) end
-
---- Create a SMALLINT column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.smallint(name) end
-
---- Create a TEXT column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.text(name) end
-
---- Create a VARCHAR column
----@param name string Column name
----@param length? integer Optional max length
----@return ColumnBuilder
-function ColumnBuilder.varchar(name, length) end
-
---- Create a CHAR column
----@param name string Column name
----@param length? integer Optional fixed length
----@return ColumnBuilder
-function ColumnBuilder.char(name, length) end
-
---- Create a BOOLEAN column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.boolean(name) end
-
---- Create a TIMESTAMP column (without timezone)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.timestamp(name) end
-
---- Create a TIMESTAMP WITH TIME ZONE column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.timestamptz(name) end
-
---- Create a DATE column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.date(name) end
-
---- Create a TIME column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.time(name) end
-
---- Create a UUID column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.uuid(name) end
-
---- Create a JSON column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.json(name) end
-
---- Create a JSONB column (PostgreSQL binary JSON)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.jsonb(name) end
-
---- Create a NUMERIC/DECIMAL column
----@param name string Column name
----@param precision? integer Total number of digits
----@param scale? integer Number of decimal places
----@return ColumnBuilder
-function ColumnBuilder.numeric(name, precision, scale) end
-
---- Create a REAL column (single precision float)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.real(name) end
-
---- Create a DOUBLE PRECISION column
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.double_precision(name) end
-
---- Create a BYTEA column (binary data)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.bytea(name) end
-
---- Create an INET column (IP address)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.inet(name) end
-
---- Create a CIDR column (network address)
----@param name string Column name
----@return ColumnBuilder
-function ColumnBuilder.cidr(name) end
-
---- Create a column with an enum type
----@param name string Column name
----@param enum_name string Name of the enum type
----@return ColumnBuilder
-function ColumnBuilder.enum_type(name, enum_name) end
-
---- Create an array column
----@param name string Column name
----@param element_type string Element type name
----@return ColumnBuilder
-function ColumnBuilder.array(name, element_type) end
-
--- Column modifiers
-
---- Mark the column as NOT NULL
----@return ColumnBuilder self
-function ColumnBuilder:not_null() end
-
---- Mark the column as nullable (default)
----@return ColumnBuilder self
-function ColumnBuilder:nullable() end
-
---- Mark the column as a primary key
----@return ColumnBuilder self
-function ColumnBuilder:primary_key() end
-
---- Add a UNIQUE constraint to the column
----@return ColumnBuilder self
-function ColumnBuilder:unique() end
-
---- Set a default value (literal)
----@param value string Default value as SQL literal
----@return ColumnBuilder self
-function ColumnBuilder:default_value(value) end
-
---- Set default to CURRENT_TIMESTAMP/now()
----@return ColumnBuilder self
-function ColumnBuilder:default_now() end
-
---- Set a default expression
----@param expr string SQL expression for default
----@return ColumnBuilder self
-function ColumnBuilder:default_sql(expr) end
-
---- Set default to NULL
----@return ColumnBuilder self
-function ColumnBuilder:default_null() end
-
---- Set default to CURRENT_TIMESTAMP
----@return ColumnBuilder self
-function ColumnBuilder:default_current_timestamp() end
-
---- Set default to uuid_generate_v4() (requires uuid-ossp extension)
----@return ColumnBuilder self
-function ColumnBuilder:default_uuid_generate_v4() end
-
---- Set default to gen_random_uuid() (PostgreSQL 13+)
----@return ColumnBuilder self
-function ColumnBuilder:default_gen_random_uuid() end
-
---- Set default to uuidv7() (PostgreSQL 18+)
----@return ColumnBuilder self
-function ColumnBuilder:default_uuidv7() end
-
---- Set default to uuidv4() (PostgreSQL 18+)
----@return ColumnBuilder self
-function ColumnBuilder:default_uuidv4() end
-
---- Set the description/comment for the column
----@param desc string Description text (supports markdown)
----@return ColumnBuilder self
-function ColumnBuilder:description(desc) end
-
---- Set a comment for the column (alias for description)
----@param text string Comment text
----@return ColumnBuilder self
-function ColumnBuilder:comment(text) end
-
---- Set the collation for a text column
----@param collation string Collation name
----@return ColumnBuilder self
-function ColumnBuilder:collate(collation) end
-
---- Add a foreign key reference to another table
----@param table string Referenced table name
----@param column string Referenced column name
----@return ColumnBuilder self
-function ColumnBuilder:references(table, column) end
-
---- Add a foreign key reference with ON DELETE action
----@param table string Referenced table name
----@param column string Referenced column name
----@param action string ON DELETE action (use ReferenceAction.*)
----@return ColumnBuilder self
-function ColumnBuilder:references_on_delete(table, column, action) end
-
---- Make this an identity column
----@param always boolean If true, ALWAYS; if false, BY DEFAULT
----@return ColumnBuilder self
-function ColumnBuilder:identity(always) end
-
---- Make this a generated/computed column
----@param expression string SQL expression to compute value
----@param stored boolean If true, value is stored; if false, virtual
----@return ColumnBuilder self
-function ColumnBuilder:generated_as(expression, stored) end
-
---------------------------------------------------------------------------------
--- IndexBuilder
---------------------------------------------------------------------------------
-
----@class IndexBuilder
-IndexBuilder = {}
-
---- Create a new index builder
----@param name string Index name
----@return IndexBuilder
-function IndexBuilder.new(name) end
-
---- Add a column to the index
----@param name string Column name
----@return IndexBuilder self
-function IndexBuilder:column(name) end
-
---- Add multiple columns to the index
----@param names string[] Column names
----@return IndexBuilder self
-function IndexBuilder:columns(names) end
-
---- Add an expression to the index
----@param expr string SQL expression
----@return IndexBuilder self
-function IndexBuilder:expression(expr) end
-
---- Make this a unique index
----@return IndexBuilder self
-function IndexBuilder:unique() end
-
---- Set the index method (btree, hash, gist, etc.)
----@param method string Index method (use IndexMethod.*)
----@return IndexBuilder self
-function IndexBuilder:using(method) end
-
---- Add a WHERE clause for a partial index
----@param clause string SQL WHERE clause (without WHERE keyword)
----@return IndexBuilder self
-function IndexBuilder:where_clause(clause) end
-
---- Add INCLUDE columns (PostgreSQL covering index)
----@param columns string[] Column names to include
----@return IndexBuilder self
-function IndexBuilder:include(columns) end
-
---- Create the index concurrently (non-blocking)
----@return IndexBuilder self
-function IndexBuilder:concurrently() end
-"#;
-
-/// Lua Language Server configuration
-pub const LUARC_CONFIG: &str = r#"{
-  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
-  "runtime": {
-    "version": "Lua 5.4"
-  },
-  "workspace": {
-    "library": [
-      ".luacats"
-    ],
-    "checkThirdParty": false
-  },
-  "diagnostics": {
-    "globals": [
-      "pg",
-      "mysql",
-      "sqlite",
-      "EnumBuilder",
-      "TableBuilder",
-      "ColumnBuilder",
-      "IndexBuilder",
-      "ReferenceAction",
-      "IndexMethod"
-    ]
-  }
-}
-"#;
-
-/// Selene linter configuration
 pub const SELENE_CONFIG: &str = r#"# Selene linter configuration for shki
 # https://kampfkarren.github.io/selene/
 
@@ -526,209 +45,253 @@ std = "shki"
 # unused_variable = "warn"
 "#;
 
-pub const SELENE_SHKI_STD: &str = r#"---
-# Shki standard library definition for Selene
-# This file defines the globals injected by the shki Lua runtime
+fn lua_global_names() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for ty in LUA_TYPES.iter().filter(|ty| ty.global) {
+        if !names.contains(&ty.name) {
+            names.push(ty.name);
+        }
+    }
+    names
+}
 
-base: lua54
+fn unique_type_names() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for ty in LUA_TYPES {
+        if !names.contains(&ty.name) {
+            names.push(ty.name);
+        }
+    }
+    names
+}
 
-globals:
-  # Dialect modules
-  pg:
-    property: read-only
-    struct:
-      schema:
-        args:
-          - type: string
-        method: false
+fn render_luacats_method(out: &mut String, type_name: &str, method: &LuaMethod) {
+    writeln!(out, "--- {}", method.doc).unwrap();
+    for param in method.params {
+        let optional = if param.optional { "?" } else { "" };
+        writeln!(
+            out,
+            "---@param {}{} {} {}",
+            param.name, optional, param.luacats_type, param.doc
+        )
+        .unwrap();
+    }
+    if method.is_static {
+        writeln!(out, "---@return {}", method.returns).unwrap();
+    } else {
+        writeln!(out, "---@return {} self", method.returns).unwrap();
+    }
+    let joined = method
+        .params
+        .iter()
+        .map(|param| param.name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if method.is_static {
+        writeln!(
+            out,
+            "function {}.{}({}) end",
+            type_name, method.name, joined
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "function {}:{}({}) end",
+            type_name, method.name, joined
+        )
+        .unwrap();
+    }
+    out.push('\n');
+}
 
-  mysql:
-    property: read-only
-    struct:
-      schema:
-        args:
-          - type: string
-        method: false
+fn render_luacats_type(out: &mut String, name: &'static str) {
+    let variants = LUA_TYPES
+        .iter()
+        .filter(|ty| ty.name == name)
+        .collect::<Vec<_>>();
+    let ty = variants[0];
+    writeln!(
+        out,
+        "--------------------------------------------------------------------------------"
+    )
+    .unwrap();
+    writeln!(out, "-- {}", ty.name).unwrap();
+    writeln!(
+        out,
+        "--------------------------------------------------------------------------------\n"
+    )
+    .unwrap();
+    writeln!(out, "--- {}", ty.doc).unwrap();
+    writeln!(out, "---@class {}", ty.name).unwrap();
+    let mut seen_fields = Vec::new();
+    for field in variants.iter().flat_map(|ty| ty.fields.iter()) {
+        if seen_fields.contains(&field.name) {
+            continue;
+        }
+        seen_fields.push(field.name);
+        writeln!(
+            out,
+            "---@field {} {} {}",
+            field.name, field.luacats_type, field.doc
+        )
+        .unwrap();
+    }
+    let is_global = variants.iter().any(|ty| ty.global);
+    let value_only = variants.iter().all(|ty| ty.methods.is_empty())
+        && variants
+            .iter()
+            .flat_map(|ty| ty.fields.iter())
+            .any(|field| field.value.is_some());
+    if is_global {
+        if value_only {
+            writeln!(out, "{} = {{", ty.name).unwrap();
+            for field in variants.iter().flat_map(|ty| ty.fields.iter()) {
+                if let Some(value) = field.value {
+                    writeln!(out, "    {} = \"{}\",", field.name, value).unwrap();
+                }
+            }
+            writeln!(out, "}}\n").unwrap();
+        } else {
+            writeln!(out, "{} = {{}}\n", ty.name).unwrap();
+        }
+    } else {
+        writeln!(out, "local {} = {{}}\n", ty.name).unwrap();
+    }
+    let mut seen_methods = Vec::new();
+    for method in variants.iter().flat_map(|ty| ty.methods.iter()) {
+        if seen_methods.contains(&method.name) {
+            continue;
+        }
+        seen_methods.push(method.name);
+        render_luacats_method(out, ty.name, method);
+    }
+}
 
-  sqlite:
-    property: read-only
-    struct:
-      schema:
-        args: []
-        method: false
+pub fn luacats_shki_types() -> String {
+    let mut out = String::from(
+        "---@meta shki\n--- Shki Lua API Type Definitions\n--- Generated from the Rust binding metadata.\n--- This file provides type information for the Lua Language Server.\n--- It should NOT be executed - it is only for IDE support.\n\n",
+    );
 
-  # Builder classes
-  EnumBuilder:
-    property: read-only
-    struct:
-      new:
-        args:
-          - type: string
-        method: false
+    for name in unique_type_names() {
+        render_luacats_type(&mut out, name);
+    }
 
-  TableBuilder:
-    property: read-only
-    struct:
-      new:
-        args:
-          - type: string
-        method: false
+    out
+}
 
-  ColumnBuilder:
-    property: read-only
-    struct:
-      new:
-        args:
-          - type: string
-          - type: string
-        method: false
-      serial:
-        args:
-          - type: string
-        method: false
-      bigserial:
-        args:
-          - type: string
-        method: false
-      smallserial:
-        args:
-          - type: string
-        method: false
-      integer:
-        args:
-          - type: string
-        method: false
-      bigint:
-        args:
-          - type: string
-        method: false
-      smallint:
-        args:
-          - type: string
-        method: false
-      text:
-        args:
-          - type: string
-        method: false
-      varchar:
-        args:
-          - type: string
-          - type: number
-            required: false
-        method: false
-      char:
-        args:
-          - type: string
-          - type: number
-            required: false
-        method: false
-      boolean:
-        args:
-          - type: string
-        method: false
-      timestamp:
-        args:
-          - type: string
-        method: false
-      timestamptz:
-        args:
-          - type: string
-        method: false
-      date:
-        args:
-          - type: string
-        method: false
-      time:
-        args:
-          - type: string
-        method: false
-      uuid:
-        args:
-          - type: string
-        method: false
-      json:
-        args:
-          - type: string
-        method: false
-      jsonb:
-        args:
-          - type: string
-        method: false
-      numeric:
-        args:
-          - type: string
-          - type: number
-            required: false
-          - type: number
-            required: false
-        method: false
-      real:
-        args:
-          - type: string
-        method: false
-      double_precision:
-        args:
-          - type: string
-        method: false
-      bytea:
-        args:
-          - type: string
-        method: false
-      inet:
-        args:
-          - type: string
-        method: false
-      cidr:
-        args:
-          - type: string
-        method: false
-      enum_type:
-        args:
-          - type: string
-          - type: string
-        method: false
-      array:
-        args:
-          - type: string
-          - type: string
-        method: false
+pub fn luarc_config() -> String {
+    let globals = lua_global_names()
+        .into_iter()
+        .map(|name| format!("      \"{}\"", name))
+        .collect::<Vec<_>>()
+        .join(",\n");
 
-  IndexBuilder:
-    property: read-only
-    struct:
-      new:
-        args:
-          - type: string
-        method: false
+    format!(
+        "{{\n  \"$schema\": \"https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json\",\n  \"runtime\": {{\n    \"version\": \"Lua 5.4\"\n  }},\n  \"workspace\": {{\n    \"library\": [\n      \".luacats\"\n    ],\n    \"checkThirdParty\": false\n  }},\n  \"diagnostics\": {{\n    \"globals\": [\n{}\n    ]\n  }}\n}}\n",
+        globals
+    )
+}
 
-  # Enum constants
-  ReferenceAction:
-    property: read-only
-    struct:
-      NoAction:
-        property: read-only
-      Restrict:
-        property: read-only
-      Cascade:
-        property: read-only
-      SetNull:
-        property: read-only
-      SetDefault:
-        property: read-only
+fn render_selene_args(out: &mut String, params: &[LuaParam]) {
+    if params.is_empty() {
+        out.push_str("        args: []\n");
+        return;
+    }
 
-  IndexMethod:
-    property: read-only
-    struct:
-      BTree:
-        property: read-only
-      Hash:
-        property: read-only
-      Gist:
-        property: read-only
-      SpGist:
-        property: read-only
-      Gin:
-        property: read-only
-      Brin:
-        property: read-only
-"#;
+    out.push_str("        args:\n");
+    for param in params {
+        writeln!(out, "          - type: {}", param.selene_type).unwrap();
+        if param.optional {
+            out.push_str("            required: false\n");
+        }
+    }
+}
+
+pub fn selene_shki_std() -> String {
+    let mut out = String::from(
+        "---\n# Shki standard library definition for Selene\n# Generated from the Rust binding metadata.\n\nbase: lua54\n\nglobals:\n",
+    );
+
+    for ty in LUA_TYPES.iter().filter(|ty| ty.global) {
+        writeln!(out, "  {}:", ty.name).unwrap();
+        out.push_str("    property: read-only\n");
+        out.push_str("    struct:\n");
+
+        if ty.fields.iter().any(|field| field.value.is_some()) && ty.methods.is_empty() {
+            for field in ty.fields {
+                writeln!(out, "      {}:", field.name).unwrap();
+                out.push_str("        property: read-only\n");
+            }
+            continue;
+        }
+
+        for method in ty.methods.iter().filter(|method| method.is_static) {
+            writeln!(out, "      {}:", method.name).unwrap();
+            render_selene_args(&mut out, method.params);
+            out.push_str("        method: false\n");
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_luacats_includes_all_lua_globals_and_interfaces() {
+        let luacats = luacats_shki_types();
+
+        for global in lua_global_names() {
+            assert!(
+                luacats.contains(global),
+                "missing {global} in LuaCATS output"
+            );
+        }
+
+        assert!(luacats.contains("function Schema:enum(enum_type) end"));
+        assert!(luacats.contains("function Schema:sequence(sequence) end"));
+        assert!(luacats.contains("function Schema:view(view) end"));
+        assert!(luacats.contains("function ColumnBuilder.enum(name, enum_name) end"));
+        assert!(luacats.contains("function IndexBuilder:index_column(col) end"));
+        assert!(luacats.contains("function SequenceBuilder:cycle() end"));
+        assert!(luacats.contains("function ViewBuilder:materialized() end"));
+        assert!(luacats.contains("function IndexColumn.expression(expr) end"));
+    }
+
+    #[test]
+    fn generated_luarc_includes_registered_globals() {
+        let luarc = luarc_config();
+
+        for global in [
+            "SequenceBuilder",
+            "ViewBuilder",
+            "IndexColumn",
+            "ReferenceAction",
+            "IndexMethod",
+        ] {
+            assert!(luarc.contains(&format!("\"{}\"", global)));
+        }
+    }
+
+    #[test]
+    fn generated_selene_std_includes_runtime_globals() {
+        let selene = selene_shki_std();
+
+        for global in [
+            "EnumBuilder:",
+            "ColumnBuilder:",
+            "SequenceBuilder:",
+            "ViewBuilder:",
+            "IndexColumn:",
+        ] {
+            assert!(selene.contains(global));
+        }
+
+        assert!(selene.contains("      enum:"));
+        assert!(selene.contains("      new:"));
+        assert!(selene.contains("      schema:"));
+    }
+}

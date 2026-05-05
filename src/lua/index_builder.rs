@@ -10,6 +10,38 @@ use crate::schema::IndexBuilder;
 use super::helpers::parse_index_method;
 use super::LuaIndexColumn;
 
+crate::lua_global_module! {
+    metadata: INDEX_BUILDER_LUA_MODULE,
+    register: register_index_builder_module,
+    name: "IndexBuilder",
+    doc: "Builder for indexes.",
+    functions: [
+        fn "new"(name: String => ("string", "string", "Name")) -> "IndexBuilder" => index_builder_new;
+    ],
+}
+
+crate::lua_builder_def! {
+    target: LuaIndexBuilder,
+    metadata: INDEX_BUILDER_LUA_TYPE,
+    register: register_lua_index_builder_methods,
+    type_name: "IndexBuilder",
+    doc: "Builder for indexes.",
+    fields: [],
+    methods: [
+        method "column"(name: String => ("string", "string", "Column name")) -> "IndexBuilder" => |this, name| { this.transform(|builder| builder.column(name)); Ok(this.clone()) };
+        method "columns"(names: Vec<String> => ("string[]", "table", "Column names")) -> "IndexBuilder" => |this, names| { this.transform(|builder| builder.columns(names)); Ok(this.clone()) };
+        method "expression"(expr: String => ("string", "string", "SQL expression")) -> "IndexBuilder" => |this, expr| { this.transform(|builder| builder.expression(expr)); Ok(this.clone()) };
+        method "index_column"(col: LuaIndexColumn => ("IndexColumn", "any", "Index column descriptor")) -> "IndexBuilder" => |this, col| { this.transform(|builder| builder.index_column(col.into_inner())); Ok(this.clone()) };
+        method "unique"() -> "IndexBuilder" => |this| { this.transform(|builder| builder.unique()); Ok(this.clone()) };
+        method "using"(method: String => ("IndexMethod|string", "string", "Index method")) -> "IndexBuilder" => |this, method| { this.transform(|builder| builder.using(parse_index_method(&method))); Ok(this.clone()) };
+        method "where_clause"(clause: String => ("string", "string", "WHERE clause without WHERE")) -> "IndexBuilder" => |this, clause| { this.transform(|builder| builder.where_clause(clause)); Ok(this.clone()) };
+        method "include"(columns: Vec<String> => ("string[]", "table", "Column names")) -> "IndexBuilder" => |this, columns| { this.transform(|builder| builder.include(columns)); Ok(this.clone()) };
+        method "concurrently"() -> "IndexBuilder" => |this| { this.transform(|builder| builder.concurrently()); Ok(this.clone()) };
+        method "tablespace"(tablespace: String => ("string", "string", "Tablespace name")) -> "IndexBuilder" => |this, tablespace| { this.transform(|builder| builder.tablespace(tablespace)); Ok(this.clone()) };
+        method "option"(key: String => ("string", "string", "Option key"), value: String => ("string", "string", "Option value")) -> "IndexBuilder" => |this, key, value| { this.transform(|builder| builder.option(key, value)); Ok(this.clone()) };
+    ],
+}
+
 /// Lua wrapper for IndexBuilder
 #[derive(Clone)]
 pub struct LuaIndexBuilder {
@@ -43,71 +75,7 @@ impl LuaIndexBuilder {
 
 impl UserData for LuaIndexBuilder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        // column(name) -> self
-        methods.add_method("column", |_, this, name: String| {
-            this.transform(|builder| builder.column(name));
-            Ok(this.clone())
-        });
-
-        // columns(names) -> self
-        methods.add_method("columns", |_, this, names: Vec<String>| {
-            this.transform(|builder| builder.columns(names));
-            Ok(this.clone())
-        });
-
-        // expression(expr) -> self
-        methods.add_method("expression", |_, this, expr: String| {
-            this.transform(|builder| builder.expression(expr));
-            Ok(this.clone())
-        });
-
-        // index_column(lua_index_column) -> self
-        methods.add_method("index_column", |_, this, col: LuaIndexColumn| {
-            this.transform(|builder| builder.index_column(col.into_inner()));
-            Ok(this.clone())
-        });
-
-        // unique() -> self
-        methods.add_method("unique", |_, this, ()| {
-            this.transform(|builder| builder.unique());
-            Ok(this.clone())
-        });
-
-        // using(method) -> self
-        methods.add_method("using", |_, this, method: String| {
-            this.transform(|builder| builder.using(parse_index_method(&method)));
-            Ok(this.clone())
-        });
-
-        // where_clause(clause) -> self
-        methods.add_method("where_clause", |_, this, clause: String| {
-            this.transform(|builder| builder.where_clause(clause));
-            Ok(this.clone())
-        });
-
-        // include(columns) -> self
-        methods.add_method("include", |_, this, columns: Vec<String>| {
-            this.transform(|builder| builder.include(columns));
-            Ok(this.clone())
-        });
-
-        // concurrently() -> self
-        methods.add_method("concurrently", |_, this, ()| {
-            this.transform(|builder| builder.concurrently());
-            Ok(this.clone())
-        });
-
-        // tablespace(name) -> self
-        methods.add_method("tablespace", |_, this, tablespace: String| {
-            this.transform(|builder| builder.tablespace(tablespace));
-            Ok(this.clone())
-        });
-
-        // option(key, value) -> self
-        methods.add_method("option", |_, this, (key, value): (String, String)| {
-            this.transform(|builder| builder.option(key, value));
-            Ok(this.clone())
-        });
+        register_lua_index_builder_methods(methods);
     }
 }
 
@@ -127,4 +95,26 @@ impl FromLua for LuaIndexBuilder {
 /// IndexBuilder.new(name) -> LuaIndexBuilder
 pub fn index_builder_new(_: &Lua, name: String) -> LuaResult<LuaIndexBuilder> {
     Ok(LuaIndexBuilder::new(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macro_generated_index_builder_metadata_matches_runtime_api() {
+        assert_eq!(INDEX_BUILDER_LUA_MODULE.name, "IndexBuilder");
+        assert!(INDEX_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "index_column"));
+        assert!(INDEX_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "using"));
+        assert!(INDEX_BUILDER_LUA_TYPE
+            .methods
+            .iter()
+            .any(|m| m.name == "concurrently"));
+    }
 }

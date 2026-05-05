@@ -5,11 +5,11 @@ use std::path::Path;
 use crate::Result;
 use crate::cli::templates::lua_schema_template;
 use crate::config::Config;
-use crate::constants::{LUARC_CONFIG, SELENE_CONFIG, SELENE_SHKI_STD};
+use crate::constants::{SELENE_CONFIG, luarc_config, selene_shki_std};
 use crate::schema::SchemaDialect;
 
 use super::SchemaLanguage;
-use crate::cli::constants::LUACATS_SHKI_TYPES;
+use crate::cli::constants::luacats_shki_types;
 
 /// Initialize a new shki project
 pub async fn cmd_init(
@@ -84,11 +84,11 @@ async fn init_lua_project(target_dir: &Path, config: &Config) -> Result<()> {
 
     // Create LuaCATS type definitions (for lua-language-server)
     let shki_types_path = types_dir.join("shki.lua");
-    std::fs::write(&shki_types_path, LUACATS_SHKI_TYPES)?;
+    std::fs::write(&shki_types_path, luacats_shki_types())?;
 
     // Create .luarc.json for Lua Language Server
     let luarc_path = target_dir.join(".luarc.json");
-    std::fs::write(&luarc_path, LUARC_CONFIG)?;
+    std::fs::write(&luarc_path, luarc_config())?;
 
     // Create Selene linter configuration
     let selene_toml_path = target_dir.join("selene.toml");
@@ -96,7 +96,7 @@ async fn init_lua_project(target_dir: &Path, config: &Config) -> Result<()> {
 
     // Create Selene standard library definition for shki
     let selene_std_path = target_dir.join("shki.yml");
-    std::fs::write(&selene_std_path, SELENE_SHKI_STD)?;
+    std::fs::write(&selene_std_path, selene_shki_std())?;
 
     println!("{}", "Initialized shki project (Lua)".green());
     println!();
