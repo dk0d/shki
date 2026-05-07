@@ -1,0 +1,4 @@
+publish = false                                     # prevent publish to crates.io
+pre-release-commit-message = "release: {{version}}"
+shared-version = true
+tag-name = "v{{version}}"
