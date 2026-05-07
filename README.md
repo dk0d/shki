@@ -3,14 +3,19 @@
 </div>
 
 > [!WARNING]
-> `shki` is still a work in progress. PostgreSQL is the only supported dialect.
-> Planned features may not be fully finished or entirely missing.
+> `shki` is still a work in progress. Planned features may not be fully finished or entirely missing.
 
 # shki
 
 Database migrations with a smaller, rebuilt core.
 
 `shki` is currently focused on the basics: initializing a project, creating SQL migration files, applying them, checking status, and rolling them back when down migrations exist.
+
+Dialects Supported:
+
+- [x] PostgreSQL
+- [x] SQLite
+- [ ] MySQL
 
 ## Back to basics
 
