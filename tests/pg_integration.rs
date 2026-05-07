@@ -88,7 +88,8 @@ fn schema_suffix(schema_name: &str) -> &str {
 }
 
 fn migration_names(paths: Vec<PathBuf>) -> Vec<String> {
-    paths.into_iter()
+    paths
+        .into_iter()
         .map(|path| {
             path.file_stem()
                 .and_then(|stem| stem.to_str())
@@ -248,7 +249,10 @@ mod migrations {
             .expect("failed to apply migration");
 
         assert!(ctx.table_exists(&table_name).await);
-        assert_eq!(ctx.applied_names(&manager).await, vec!["0001_create_test_table"]);
+        assert_eq!(
+            ctx.applied_names(&manager).await,
+            vec!["0001_create_test_table"]
+        );
 
         ctx.cleanup().await;
     }
@@ -286,7 +290,10 @@ mod migrations {
             ),
         ]);
 
-        let applied = manager.apply_all(&ctx.pool).await.expect("failed to apply all");
+        let applied = manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply all");
 
         assert_eq!(
             applied,
@@ -386,7 +393,10 @@ mod migrations {
             ),
         ]);
 
-        manager.apply_all(&ctx.pool).await.expect("failed to apply all");
+        manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply all");
         assert!(ctx.table_exists(&users_table).await);
         assert!(ctx.table_exists(&posts_table).await);
 
@@ -432,7 +442,10 @@ mod migrations {
             );
         }
 
-        manager.apply_all(&ctx.pool).await.expect("failed to apply all");
+        manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply all");
 
         let rolled_back = manager
             .rollback_count(&ctx.pool, 2)
@@ -441,7 +454,10 @@ mod migrations {
 
         assert_eq!(
             rolled_back,
-            vec!["0003_create_tbl3".to_string(), "0002_create_tbl2".to_string()]
+            vec![
+                "0003_create_tbl3".to_string(),
+                "0002_create_tbl2".to_string()
+            ]
         );
         assert!(ctx.table_exists(&format!("tbl1_{suffix}")).await);
         assert!(!ctx.table_exists(&format!("tbl2_{suffix}")).await);
@@ -500,7 +516,10 @@ mod migrations {
             ]
         );
 
-        manager.apply_all(&ctx.pool).await.expect("failed to apply remaining");
+        manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply remaining");
 
         assert!(
             manager
@@ -593,7 +612,10 @@ mod migrations {
             ),
         ]);
 
-        manager.apply_all(&ctx.pool).await.expect("failed to apply all");
+        manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply all");
 
         assert!(ctx.column_exists(&table_name, "email").await);
         assert!(
@@ -661,7 +683,10 @@ mod migrations {
             ),
         ]);
 
-        manager.apply_all(&ctx.pool).await.expect("failed to apply enum migration");
+        manager
+            .apply_all(&ctx.pool)
+            .await
+            .expect("failed to apply enum migration");
 
         assert!(ctx.enum_exists(&enum_name).await);
         assert!(ctx.table_exists(&table_name).await);
