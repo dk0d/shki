@@ -47,11 +47,11 @@ pub async fn cmd_init(
 
     match mode.unwrap_or_default() {
         SchemaMode::Lua => {
-            init_lua_project(target_dir, &config).await;
+            init_lua_project(target_dir, &config).await?;
         }
         SchemaMode::Sql => {
             // only init the default config and exit
-            init_sql_project(target_dir, &config).await;
+            init_sql_project(target_dir, &config).await?;
         }
     }
 
