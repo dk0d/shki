@@ -62,3 +62,27 @@ impl SqlGenerator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_identifiers_per_dialect() {
+        let table = TableId::new("odd\"name", Some("app\"schema".to_string()));
+
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&table),
+            "\"app\"\"schema\".\"odd\"\"name\""
+        );
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Sqlite).qualified_name("users", &None),
+            "\"users\""
+        );
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Mysql)
+                .qualified_name("odd`name", &Some("app`schema".to_string())),
+            "`app``schema`.`odd``name`"
+        );
+    }
+}

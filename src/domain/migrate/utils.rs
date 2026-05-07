@@ -61,3 +61,29 @@ pub fn generate_blank_migration_template(
 
     content
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_sql_normalizes_whitespace_before_truncating() {
+        assert_eq!(truncate_sql("SELECT\n  *\tFROM users", 64), "SELECT * FROM users");
+        assert_eq!(truncate_sql("SELECT    *    FROM users", 10), "SELECT * F...");
+    }
+
+    #[test]
+    fn sanitize_migration_name_collapses_non_alphanumeric_runs() {
+        assert_eq!(sanitize_migration_name(" Add  users! table "), "add-users-table");
+        assert_eq!(sanitize_migration_name("___"), "");
+    }
+
+    #[test]
+    fn blank_template_contains_basic_header() {
+        let template =
+            generate_blank_migration_template("0001_create_users", SqlDialect::Sqlite, true);
+
+        assert!(template.starts_with("-- Migration: 0001_create_users (down)\n"));
+        assert!(template.contains("-- Created at: "));
+    }
+}

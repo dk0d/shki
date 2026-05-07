@@ -96,3 +96,37 @@ pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table() -> TableId {
+        TableId::new("__shki_migrations", Some("meta".to_string()))
+    }
+
+    #[test]
+    fn uses_expected_placeholders_per_dialect() {
+        let table = table();
+
+        assert!(delete_table(&SqlDialect::Postgres, &table).contains("WHERE name = $1"));
+        assert!(insert_migration(&SqlDialect::Postgres, &table).contains("VALUES ($1, $2)"));
+
+        assert!(delete_table(&SqlDialect::Sqlite, &table).contains("WHERE name = $1"));
+        assert!(insert_migration(&SqlDialect::Sqlite, &table).contains("VALUES (?, ?)"));
+
+        assert!(delete_table(&SqlDialect::Mysql, &table).contains("WHERE name = ?"));
+        assert!(insert_migration(&SqlDialect::Mysql, &table).contains("VALUES (?, ?)"));
+    }
+
+    #[test]
+    fn ensure_migrations_uses_dialect_specific_identifiers() {
+        let postgres = ensure_migrations(&SqlDialect::Postgres, &table());
+        let mysql = ensure_migrations(&SqlDialect::Mysql, &table());
+
+        assert!(postgres.contains("\"meta\".\"__shki_migrations\""));
+        assert!(postgres.contains("id SERIAL PRIMARY KEY"));
+        assert!(mysql.contains("`meta`.`__shki_migrations`"));
+        assert!(mysql.contains("id INT AUTO_INCREMENT PRIMARY KEY"));
+    }
+}

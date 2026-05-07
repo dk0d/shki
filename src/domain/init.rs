@@ -22,9 +22,7 @@ pub async fn cmd_init(
         std::fs::create_dir_all(target_dir)?;
     }
 
-    let config_path = std::env::current_dir()
-        .unwrap_or(target_dir.into())
-        .join("shki.toml");
+    let config_path = target_dir.join("shki.toml");
 
     if config_path.exists() {
         println!(
@@ -155,4 +153,23 @@ async fn init_lua_project(target_dir: &Path, _config: &Config) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn init_writes_config_into_target_directory() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let target_dir = temp_dir.path().join("project");
+
+        cmd_init(&target_dir, Some(SqlDialect::Sqlite), Some(SchemaMode::Sql))
+            .await
+            .expect("init should succeed");
+
+        assert!(target_dir.join("shki.toml").exists());
+        assert!(!temp_dir.path().join("shki.toml").exists());
+    }
 }

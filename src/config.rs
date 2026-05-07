@@ -64,7 +64,7 @@ pub struct Config {
     pub verbose: bool,
 
     /// Migration settings
-    #[serde(default, flatten)]
+    #[serde(default)]
     pub migrations: MigrationConfig,
 
     // Introspection settings
@@ -193,7 +193,7 @@ impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
-        let config: Config = Figment::new()
+        let mut config: Config = Figment::new()
             .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
             .merge(Env::raw())
@@ -201,6 +201,32 @@ impl Config {
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
+
+        if let Some(dialect) = args.dialect {
+            config.dialect = dialect;
+        }
+        if let Some(database_url) = args.database_url.clone() {
+            config.database_url = Some(database_url);
+        }
+        if let Some(out) = args.out.clone() {
+            config.out = out;
+        }
+        if args.verbose {
+            config.verbose = true;
+        }
+        if let Some(table) = args.table.clone() {
+            config.migrations.table = table;
+        }
+        if let Some(schema) = args.schema.clone() {
+            config.migrations.schema = Some(schema);
+        }
+        if let Some(prefix) = args.prefix {
+            config.migrations.prefix = prefix;
+        }
+        if args.generate_down {
+            config.migrations.generate_down = true;
+        }
+
         Ok(config)
     }
 
@@ -239,4 +265,89 @@ impl Config {
     // pub fn codegen_out_dir(&self) -> Option<PathBuf> {
     //     self.codegen.output.as_ref().map(|p| self.resolve_path(p))
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn resolve_path_uses_root_for_relative_paths_only() {
+        let config = Config {
+            root: PathBuf::from("/tmp/shki-root"),
+            out: PathBuf::from("migrations"),
+            schema: "schema/init.lua".to_string(),
+            ..Config::default()
+        };
+
+        assert_eq!(config.out_dir(), PathBuf::from("/tmp/shki-root/migrations"));
+        assert_eq!(
+            config.schema_path(),
+            PathBuf::from("/tmp/shki-root/schema/init.lua")
+        );
+        assert_eq!(
+            config.resolve_path("/var/tmp/already-absolute.sql"),
+            PathBuf::from("/var/tmp/already-absolute.sql")
+        );
+    }
+
+    #[test]
+    fn load_applies_file_env_and_cli_precedence() {
+        let _guard = env_lock().lock().expect("failed to lock env");
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("shki.toml");
+
+        std::fs::write(
+            &config_path,
+            r#"
+root = "db"
+dialect = "sqlite"
+database_url = "sqlite://from-file.db"
+
+[migrations]
+table = "file_migrations"
+prefix = "index"
+generate_down = false
+"#,
+        )
+        .expect("failed to write config");
+
+        unsafe {
+            std::env::set_var("DATABASE_URL", "sqlite://from-raw-env.db");
+            std::env::set_var("SHKI_DATABASE_URL", "sqlite://from-shki-env.db");
+            std::env::set_var("SHKI_MIGRATIONS__TABLE", "env_migrations");
+        }
+
+        let args = CommonArgs {
+            dialect: Some(SqlDialect::Postgres),
+            database_url: Some("postgres://from-cli".to_string()),
+            out: Some(PathBuf::from("cli-migrations")),
+            prefix: Some(MigrationPrefix::Timestamp),
+            generate_down: true,
+            ..CommonArgs::default()
+        };
+
+        let config = Config::load(&config_path, &args).expect("config should load");
+
+        assert_eq!(config.root, PathBuf::from("db"));
+        assert_eq!(config.dialect, SqlDialect::Postgres);
+        assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
+        assert_eq!(config.out, PathBuf::from("cli-migrations"));
+        assert_eq!(config.migrations.table, "env_migrations");
+        assert_eq!(config.migrations.prefix, MigrationPrefix::Timestamp);
+        assert!(config.migrations.generate_down);
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("SHKI_DATABASE_URL");
+            std::env::remove_var("SHKI_MIGRATIONS__TABLE");
+        }
+    }
 }
