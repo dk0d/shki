@@ -1,10 +1,11 @@
 [package]
 name = "shki"
-version = "0.1.2"
+version = "0.2.1"
 edition = "2024"
 description = "Declarative database schema management and migration tool in Rust"
 license = "MIT"
 repository = "https://github.com/dk0d/shki"
+homepage = "https://shki.sh"
 keywords = ["database", "schema", "migration", "postgresql", "mysql", "sqlite"]
 categories = ["database", "command-line-utilities"]
 
@@ -65,6 +66,12 @@ syn = "2.0.114"
 dialoguer = { version = "0.12.0", features = ["fuzzy-matcher", "fuzzy-select"] }
 dotenvy = { version = "0.15.7", features = ["clap", "cli"] }
 sha2 = "0.10"
+serde_yaml = "0.9.34"
 
 [dev-dependencies]
 tempfile = "3.24.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

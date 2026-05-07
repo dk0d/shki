@@ -4,12 +4,34 @@
 
 use figment::{
     Figment,
-    providers::{Env, Format, Toml},
+    providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{ShkiError, commands::codegen::CodegenConfig, schema::SchemaDialect};
+use crate::{CommonArgs, ShkiError, schema::SqlDialect};
+use clap::ValueEnum;
+
+/// Schema definition language
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaMode {
+    /// Just write SQL migration files without any schema definition or diffing
+    #[default]
+    Sql,
+
+    /// Define schemas using Lua scripts
+    Lua,
+}
+
+impl std::fmt::Display for SchemaMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchemaMode::Sql => write!(f, "sql"),
+            SchemaMode::Lua => write!(f, "lua"),
+        }
+    }
+}
 
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +40,7 @@ pub struct Config {
     pub root: PathBuf,
 
     /// Database dialect
-    pub dialect: SchemaDialect,
+    pub dialect: SqlDialect,
 
     /// Path to schema files (glob pattern)
     #[serde(default)]
@@ -30,6 +52,7 @@ pub struct Config {
 
     /// Database connection URL
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // TODO: derive the dialect from the URL if not explicitly set
     pub database_url: Option<String>,
 
     /// Whether to add breakpoints between SQL statements
@@ -41,19 +64,21 @@ pub struct Config {
     pub verbose: bool,
 
     /// Migration settings
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub migrations: MigrationConfig,
 
-    /// Introspection settings
-    #[serde(default)]
-    pub introspect: IntrospectConfig,
+    // Introspection settings
+    // #[serde(default)]
+    // pub introspect: IntrospectConfig,
 
-    #[serde(default)]
-    pub codegen: CodegenConfig,
-
+    // #[serde(default)]
+    // pub codegen: CodegenConfig,
     /// Database connection timeout in seconds
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
+
+    #[serde(default)]
+    pub mode: SchemaMode,
 }
 
 fn default_timeout() -> u64 {
@@ -108,14 +133,14 @@ impl Default for MigrationConfig {
 }
 
 /// Migration file name prefix style
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum MigrationPrefix {
     /// Sequential index (0000, 0001, 0002, ...)
+    #[default]
     Index,
 
     /// Timestamp (20240101120000)
-    #[default]
     Timestamp,
 
     /// Unix timestamp
@@ -149,15 +174,16 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             root: default_root(),
-            dialect: SchemaDialect::Postgres,
+            dialect: SqlDialect::default(),
+            mode: SchemaMode::default(),
             schema: "init.lua".to_string(),
             out: default_out(),
             database_url: None,
             breakpoints: true,
             verbose: false,
-            codegen: CodegenConfig::default(),
+            // codegen: CodegenConfig::default(),
             migrations: MigrationConfig::default(),
-            introspect: IntrospectConfig::default(),
+            // introspect: IntrospectConfig::default(),
             timeout_seconds: default_timeout(),
         }
     }
@@ -165,26 +191,17 @@ impl Default for Config {
 
 impl Config {
     /// Load configuration from a file
-    pub fn load(path: &std::path::Path) -> crate::Result<Self> {
-        let _ = dotenvy::dotenv();
-        // let content = std::fs::read_to_string(path)?;
+    pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
+        dotenvy::dotenv().ok();
         let config: Config = Figment::new()
+            .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
             .merge(Env::raw())
             .merge(Env::prefixed("SHKI_").split("__"))
+            .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         Ok(config)
-    }
-
-    /// Load configuration from the default location (shki.toml)
-    pub fn load_default() -> crate::Result<Self> {
-        let path = PathBuf::from("shki.toml");
-        if path.exists() {
-            Self::load(&path)
-        } else {
-            Ok(Self::default())
-        }
     }
 
     /// Save configuration to a file
@@ -218,8 +235,8 @@ impl Config {
         self.resolve_path(&self.schema)
     }
 
-    /// Get the resolved codegen output directory (if configured)
-    pub fn codegen_out_dir(&self) -> Option<PathBuf> {
-        self.codegen.output.as_ref().map(|p| self.resolve_path(p))
-    }
+    // Get the resolved codegen output directory (if configured)
+    // pub fn codegen_out_dir(&self) -> Option<PathBuf> {
+    //     self.codegen.output.as_ref().map(|p| self.resolve_path(p))
+    // }
 }

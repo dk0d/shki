@@ -8,16 +8,47 @@
 
 # shki
 
-Declarative database schema management and migrations with Lua + Rust.
+Database migrations with a smaller, rebuilt core.
 
-Define your target schema in Lua, diff against the live database, and let shki generate migration SQL.
+`shki` is currently focused on the basics: initializing a project, creating SQL migration files, applying them, checking status, and rolling them back when down migrations exist.
 
-## Current status
+## Back to basics
 
-- PostgreSQL: supported for schema diffing, migration generation, migrate/down, introspection, bootstrap, squash, and codegen.
-- MySQL and SQLite: CLI flags and structure exist, but core introspection/diff flow is not complete yet.
-- Schema language: Lua.
-- Code generation: Rust, TypeScript, and Protobuf outputs.
+This rebuild intentionally steps back from the older, broader feature set for now.
+
+The goal is to get the migration runner, configuration model, and command surface back into a clean and dependable state before re-introducing schema diffing, introspection, code generation, and the rest of the original vision.
+
+That means the current README reflects what is available today, and the missing pieces are called out explicitly below instead of being implied.
+
+## Current feature set
+
+- Manual SQL migration workflow.
+- Project initialization with `sql` mode and an early `lua` mode scaffold.
+- Create migration files with optional inline SQL, SQL loaded from a file, and optional `.down.sql` companions.
+- Apply pending migrations in order.
+- Track applied migrations in a dedicated migrations table.
+- Validate stored checksums against applied migration files.
+- Show migration status.
+- Roll back applied migrations with `down` files.
+- Configure behavior through `shki.toml`, environment variables, and CLI flags.
+- PostgreSQL is the primary supported backend in the current rebuild.
+
+## Not back yet
+
+These features existed previously or are still present as partial code paths, but they are not part of the current supported surface area:
+
+- [ ] Schema diffing against a live database
+- [ ] Generated migrations from Lua schema changes
+- [ ] Full Lua schema authoring workflow and starter files
+- [ ] Database introspection / `pull`
+- [ ] Bootstrap / adopt-existing-database flow
+- [ ] Squash existing migration history
+- [ ] Code generation for Rust, TypeScript, or Protobuf
+- [ ] Drop/delete migration helper commands
+- [ ] MySQL support beyond basic dialect plumbing
+- [ ] SQLite support beyond basic dialect plumbing
+- [ ] Rust-native schema definitions
+- [ ] Schema linting and validation passes
 
 ## Installation
 
@@ -35,46 +66,39 @@ cargo install --path .
 
 ## Quick start
 
-1) Initialize a project
+1. Initialize a project.
 
 ```bash
-$ shki init db
-
-Initialized shki project (Lua)
-
-  Directory: db
-
-  Created files:
-.
-├── db
-│   ├── lua/           - Supporting lua files
-│   ├── migrations/    - Migrations directory
-│   ├── .luacats/      - LuaCATS type definitions
-│   ├── .luarc.json    - Lua Language Server config
-│   ├── init.lua       - Schema definition
-│   ├── selene.toml    - Selene linter config
-│   └── shki.yml       - Selene standard library
-└── shki.toml          - project configuration
+shki init db
 ```
 
-2) Configure DB URL (or put it in `.env`)
+By default this initializes the current SQL-first workflow. The generated `shki.toml` lives in the current directory and points `root` at `db`.
+
+2. Configure your database URL in the shell, `.env`, or `shki.toml`.
 
 ```bash
 export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
 ```
 
-3) Edit `db/init.lua`, then preview diff
+3. Create a migration.
 
 ```bash
-shki diff
+shki create add_users_table --with-down
 ```
 
+4. Edit the generated SQL files in `db/migrations/`.
 
-4. Generate and apply migration
+5. Apply pending migrations.
 
 ```bash
-shki generate add_users
 shki migrate
+```
+
+6. Check status or preview a rollback.
+
+```bash
+shki status
+shki down --dry-run
 ```
 
 ## Commands
@@ -82,87 +106,60 @@ shki migrate
 All commands support global options:
 
 - `-c, --config <PATH>` (default `shki.toml`)
-- `-l, --dialect <pg|postgres|postgresql|mysql|sqlite>`
+- `-l, --dialect <postgres|mysql|sqlite>`
 - `-u, --database-url <URL>` (env fallback: `DATABASE_URL`)
 - `-o, --out <PATH>`
 - `-v, --verbose`
+- `--table <NAME>`
+- `--schema <SCHEMA>`
+- `--prefix <index|timestamp|unix>`
+- `--generate-down`
 
-| Command              | Alias   | Purpose                                                           |
-| -                    | -       | -                                                                 |
-| `init [path]`        | `i`     | Create project files (`--simple` for config-only)                 |
-| `generate [name]`    | `gen`   | Diff schema vs DB and write migration (`--dry-run` prints SQL)    |
-| `migrate`            | `up`    | Apply pending migrations (`--dry-run` supported)                  |
-| `down [count]`       | -       | Roll back migrations using `.down.sql` files                      |
-| `create <name>`      | `new`   | Create blank SQL migration (`--with-down`, `--sql`, `--sql-file`) |
-| `drop [migration]`   | -       | Delete a migration file                                           |
-| `status`             | `s`     | Show applied/pending migration status                             |
-| `diff`               | -       | Show schema diff (`--sql` for SQL output)                         |
-| `pull`               | -       | Introspect DB to `sql`, `json`, or `rust`                         |
-| `bootstrap [name]`   | `strap` | Create baseline migration from existing DB                        |
-| `squash`             | `sq`    | Collapse existing migration history into one baseline             |
-| `codegen <language>` | `code`  | Generate `rust`, `typescript`, or `protobuf` models               |
+| Command         | Alias  | Purpose                                                      |
+| --------------- | ------ | ------------------------------------------------------------ |
+| `config`        | `conf` | Print the effective configuration                            |
+| `init [path]`   | `i`    | Initialize a project directory                               |
+| `migrate`       | `up`   | Apply pending migrations                                     |
+| `create <name>` | `new`  | Create a blank migration for manual SQL editing              |
+| `status`        | `s`    | Show migration status and checksum issues                    |
+| `down [count]`  | -      | Roll back applied migrations with matching `.down.sql` files |
 
 ## Common workflows
-
-### Schema-first (recommended)
-
-```bash
-shki diff
-shki generate add_posts
-shki migrate
-```
 
 ### SQL-first migration runner
 
 ```bash
-shki init --simple
-shki create add_users_table --with-down
+shki init db
+shki create add_posts_table --with-down
 shki migrate
 ```
 
-### Adopt an existing database (Experimental)
+### Seed a migration with SQL immediately
 
 ```bash
-# baseline migration from current DB state
-shki bootstrap initial_baseline
-
-# optional: also write Lua schema from introspection
-shki bootstrap initial_baseline --write-lua
+shki create add_users_index \
+  --sql 'CREATE INDEX idx_users_email ON users(email);'
 ```
 
-### Squash migration history (Experimental)
- 
-```bash
-shki squash --name baseline_after_v1
-```
-
-### Introspect schema
+### Seed a migration from a file
 
 ```bash
-shki pull --format sql
-shki pull --format json --output schema.json
+shki create add_audit_table --sql-file ./sql/add_audit_table.sql
 ```
 
-## Code generation
+### Roll back one or more applied migrations
 
 ```bash
-# Rust
-shki codegen --out src/models.rs --mode single rust
-
-# TypeScript (flavor: type | interface)
-shki codegen --out src/models.ts --mode single typescript interface
-
-# Protobuf
-shki codegen --out proto --mode modules protobuf
+shki down --dry-run
+shki down 1
+shki down 3
 ```
-
-Available `--mode` values: `single`, `single-module`, `modules`.
 
 ## Configuration
 
 Set config in `shki.toml`, env vars, or CLI flags.
 
-Default Config:
+Default config:
 
 ```toml
 root = "db"
@@ -173,41 +170,12 @@ out = "./migrations"
 breakpoints = true
 verbose = false
 timeout_seconds = 2
+mode = "sql"
 
 [migrations]
 table = "__shki_migrations"
 prefix = "index"
 generate_down = false
-
-[introspect]
-casing = "preserve"
-
-[codegen]
-mode = "single"
-struct_derives = [
-    "Debug",
-    "Clone",
-    "sqlx::FromRow",
-]
-struct_attributes = []
-enum_derives = [
-    "Debug",
-    "Clone",
-    "PartialEq",
-    "sqlx::Type",
-]
-enum_attributes = []
-serde = false
-sqlx = true
-include_tables = []
-exclude_tables = []
-verbose = false
-
-[codegen.struct_renames]
-
-[codegen.enum_renames]
-
-[codegen.type_overrides]
 ```
 
 Environment variables:
@@ -224,23 +192,19 @@ SHKI_MIGRATIONS__GENERATE_DOWN=true
 
 shki also reads `.env` from the current working directory.
 
-## Note on down migrations
+## Notes
 
-Auto-generated down migrations are best for local iteration. For production, prefer forward-only migration strategy.
+### Down migrations
 
-Known hard cases that may need manual down SQL:
+Down migrations are optional. `shki down` only considers applied migrations that have a matching `.down.sql` file.
 
-- enum value additions
-- sequence alterations
-- complex column alterations
+### Checksum validation
 
-## Roadmap
+When `status` or `migrate` can connect to the database, `shki` validates stored checksums for applied migrations and reports if a migration file has changed since it was applied.
 
-- [ ] Complete MySQL support
-- [ ] Complete SQLite support
-- [ ] Rust-native schema definitions
-- [ ] Extended codegen customization (ecosystem-specific derives)
-- [ ] Schema linting/validation
+### Lua mode
+
+`init --mode lua` still exists, but the full schema-first Lua workflow is being brought back later as part of the broader rebuild.
 
 ## Contributing
 
