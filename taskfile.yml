@@ -28,3 +28,77 @@ tasks:
     internal: true
     cmd: until pg_isready --host=localhost --port=5432 --username=postgres --dbname=shki; do echo "Waiting for postgresql to start"; sleep 1; done
       
+  tools:install:
+    desc: Install dev tooling
+    cmds:
+      - cargo install cargo-binstall
+      - cargo binstall cargo-nextest -y
+      - cargo binstall bacon -y
+      - cargo binstall cargo-dist -y
+      - cargo binstall cargo-release -y 
+      - cargo binstall cargo-update -y
+      - cargo binstall cargo-llvm-cov -y
+
+  test:
+    desc: Run unit tests
+    cmd: cargo nextest run
+
+  # https://nexte.st/docs/integrations/test-coverage/
+  test:cov:
+    desc: Run test coverage
+    cmd: cargo llvm-cov nextest
+    
+  # https://nexte.st/docs/integrations/test-coverage/
+  test:cov:html:
+    desc: Run test coverage
+    cmds: 
+      - cargo llvm-cov nextest --open
+
+  # From: https://axodotdev.github.io/cargo-dist/book/workspaces/cargo-release-guide.html#using-cargo-release-with-pull-requests
+  # 
+  # This will:
+  #  * tag the commit
+  #  * push the tag
+  #  * trigger dist when it sees the tag (if applicable)
+  #  
+  # THIS WON'T CREATE NEW COMMITS
+  #
+  # running "dist plan" is totally optional, but this is is the best time to check
+  # that your dist release CI will produce the desired result when you push the tag
+  tag:release:
+    desc: Final release step to tag main with version
+    cmds:
+      - git checkout main
+      - git pull 
+      - dist plan
+      - cargo release --execute
+  
+  cargo-release:
+    internal: true
+    desc: Prepare a cargo-release commit on the current branch
+    cmds:
+      - branch="$(git branch --show-current)" && cargo release {{.BUMP}} --workspace --no-publish --no-tag --allow-branch "$branch" --execute
+    requires:
+      vars:
+        - BUMP
+
+  major:
+    desc: Prepare the next major cargo-release commit on the current branch
+    cmds:
+      - task: cargo-release
+        vars:
+          BUMP: major
+
+  minor:
+    desc: Prepare the next minor cargo-release commit on the current branch
+    cmds:
+      - task: cargo-release
+        vars:
+          BUMP: minor
+
+  patch:
+    desc: Prepare the next patch cargo-release commit on the current branch
+    cmds:
+      - task: cargo-release
+        vars:
+          BUMP: patch
