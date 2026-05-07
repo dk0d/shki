@@ -1,6 +1,5 @@
 use chrono::Utc;
 
-use crate::MIGRATION_SPLIT_MARKER;
 use crate::schema::SqlDialect;
 use std::fmt::Write as _;
 
