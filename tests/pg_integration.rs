@@ -1,11 +1,6 @@
 //! PostgreSQL integration tests
 //!
-//! These tests require a running PostgreSQL instance.
-//! Use `docker compose up -d postgres` to start the test database.
-//!
-//! Connection URL: postgresql://postgres:postgres@localhost:5432/shki_test
-//!
-//! Run these tests with: `cargo test --test pg_integration -- --ignored`
+//! These tests start PostgreSQL automatically with Docker via `testcontainers`.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -16,12 +11,11 @@ use shki::schema::SqlDialect;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AnyPool, Executor, Pool, Postgres};
 use tempfile::TempDir;
+use testcontainers::ContainerAsync;
+use testcontainers::ImageExt;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::postgres::Postgres as PostgresContainer;
 use uuid::Uuid;
-
-fn get_database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/shki".into())
-}
 
 async fn connect_with_retries<T, F, Fut>(label: &str, mut connect: F) -> T
 where
@@ -43,7 +37,7 @@ where
             }
             Err(error) => {
                 panic!(
-                    "Failed to connect to PostgreSQL ({}) after {} attempts. Is the database running? Use `docker compose up -d postgres`. Error: {}",
+                    "Failed to connect to PostgreSQL ({}) after {} attempts. Error: {}",
                     label, max_retries, error
                 );
             }
@@ -53,8 +47,8 @@ where
     unreachable!()
 }
 
-async fn create_pool() -> Pool<Postgres> {
-    let url = get_database_url();
+async fn create_pool(url: &str) -> Pool<Postgres> {
+    let url = url.to_string();
 
     connect_with_retries("Postgres", || {
         PgPoolOptions::new()
@@ -65,8 +59,8 @@ async fn create_pool() -> Pool<Postgres> {
     .await
 }
 
-async fn create_any_pool() -> AnyPool {
-    let url = get_database_url();
+async fn create_any_pool(url: &str) -> AnyPool {
+    let url = url.to_string();
     sqlx::any::install_default_drivers();
 
     connect_with_retries("AnyPool", || {
@@ -76,6 +70,38 @@ async fn create_any_pool() -> AnyPool {
             .connect(&url)
     })
     .await
+}
+
+struct TestDatabase {
+    _container: ContainerAsync<PostgresContainer>,
+    database_url: String,
+}
+
+impl TestDatabase {
+    async fn start() -> Self {
+        let container = PostgresContainer::default()
+            .with_db_name("postgres")
+            .with_user("postgres")
+            .with_password("postgres")
+            .with_tag("16-alpine")
+            .start()
+            .await
+            .expect("failed to start postgres test container");
+
+        let host = container
+            .get_host()
+            .await
+            .expect("failed to get postgres test container host");
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("failed to get postgres test container port");
+
+        Self {
+            database_url: format!("postgresql://postgres:postgres@{host}:{port}/postgres"),
+            _container: container,
+        }
+    }
 }
 
 fn unique_schema_name(prefix: &str) -> String {
@@ -115,6 +141,7 @@ async fn cleanup_test_schema(pool: &Pool<Postgres>, schema_name: &str) {
 }
 
 struct PgTestContext {
+    _database: TestDatabase,
     pool: AnyPool,
     pg_pool: Pool<Postgres>,
     schema_name: String,
@@ -123,13 +150,15 @@ struct PgTestContext {
 
 impl PgTestContext {
     async fn new(prefix: &str) -> Self {
-        let pg_pool = create_pool().await;
-        let pool = create_any_pool().await;
+        let database = TestDatabase::start().await;
+        let pg_pool = create_pool(&database.database_url).await;
+        let pool = create_any_pool(&database.database_url).await;
         let schema_name = unique_schema_name(prefix);
 
         setup_test_schema(&pg_pool, &schema_name).await;
 
         Self {
+            _database: database,
             pool,
             pg_pool,
             schema_name,
@@ -224,7 +253,6 @@ mod migrations {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_apply_simple() {
         let ctx = PgTestContext::new("migrate_simple").await;
         let manager = ctx.manager();
@@ -258,7 +286,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_apply_all_pending() {
         let ctx = PgTestContext::new("migrate_all").await;
         let manager = ctx.manager();
@@ -310,7 +337,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_single() {
         let ctx = PgTestContext::new("rollback_single").await;
         let manager = ctx.manager();
@@ -350,7 +376,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_all() {
         let ctx = PgTestContext::new("rollback_all").await;
         let manager = ctx.manager();
@@ -419,7 +444,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_rollback_count() {
         let ctx = PgTestContext::new("rollback_count").await;
         let manager = ctx.manager();
@@ -468,7 +492,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_pending_detection() {
         let ctx = PgTestContext::new("pending").await;
         let manager = ctx.manager();
@@ -533,7 +556,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_transaction_rollback_on_error() {
         let ctx = PgTestContext::new("tx_rollback").await;
         let manager = ctx.manager();
@@ -560,7 +582,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_alter_table() {
         let ctx = PgTestContext::new("alter").await;
         let manager = ctx.manager();
@@ -645,7 +666,6 @@ mod migrations {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running PostgreSQL
     async fn test_migration_with_enum_type() {
         let ctx = PgTestContext::new("enum_migration").await;
         let manager = ctx.manager();
