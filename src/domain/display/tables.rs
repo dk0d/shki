@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::{MigrationManager, MigrationRow};
-use crate::pool::create_any_pool_opts;
 use colored::Colorize;
 use tabled::Tabled;
 use tabled::settings::Alignment;
@@ -40,13 +38,8 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
     // }
 
     // Try to get applied migrations if database URL is available
-    let applied = if let Some(db_url) = config.database_url.as_ref() {
-        let pool = create_any_pool_opts()
-            .max_connections(2)
-            .acquire_timeout(Duration::from_secs(config.timeout_seconds))
-            .connect(db_url)
-            .await?;
-        let migrations = manager.get_applied_migrations(&pool).await?;
+    let applied = if config.database_url.is_some() {
+        let migrations = manager.get_applied_migrations().await?;
         Some(migrations)
     } else {
         None

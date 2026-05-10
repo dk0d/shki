@@ -5,21 +5,16 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use super::checksum::sql_checksum;
+use super::utils::{generate_blank_migration_template, sanitize_migration_name};
+use crate::config::MigrationPrefix;
+use crate::engines::{Engine, EngineDriver};
+use crate::models::table_id::TableId;
+use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
 use chrono::{DateTime, Utc};
 use petname::Generator;
 use serde::{Deserialize, Serialize};
-use sqlx::AnyPool;
 use sqlx::prelude::FromRow;
-
-use super::checksum::sql_checksum;
-use super::queries;
-use super::utils::{generate_blank_migration_template, sanitize_migration_name, truncate_sql};
-use crate::config::MigrationPrefix;
-use crate::models::table_id::TableId;
-use crate::schema::SqlDialect;
-// use crate::error::{MismatchDetail, SnapshotValidationSummary};
-// use crate::snapshot::Snapshot;
-use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum MigrationDirection {
@@ -88,57 +83,38 @@ pub struct MigrationManager {
     /// Output directory
     pub out_dir: PathBuf,
 
-    /// Migration table name
-    pub table_name: String,
-
-    /// Migration table schema (PostgreSQL)
-    pub table_schema: Option<String>,
+    /// Migration table
+    pub table: TableId,
 
     /// Migration prefix style
     pub prefix: MigrationPrefix,
 
     /// Database dialect
-    pub dialect: SqlDialect,
-}
-
-impl Default for MigrationManager {
-    fn default() -> Self {
-        Self {
-            out_dir: "migrations".into(),
-            table_name: "__shki_migrations".to_string(),
-            table_schema: None,
-            prefix: MigrationPrefix::Index,
-            dialect: SqlDialect::Postgres,
-        }
-    }
+    pub engine: Engine,
 }
 
 impl MigrationManager {
-    pub fn from_config(config: &crate::config::Config) -> Self {
-        Self {
+    pub async fn from_config(config: &crate::config::Config) -> Result<Self> {
+        let table: TableId = (
+            config.migrations.table.clone(),
+            config.migrations.schema.clone(),
+        )
+            .into();
+        Ok(Self {
             out_dir: config.out_dir(),
-            table_name: config.migrations.table.clone(),
-            table_schema: config.migrations.schema.clone(),
+            table: table.clone(),
             prefix: config.migrations.prefix,
-            dialect: config.dialect,
-        }
+            engine: Engine::from_config(config).await?,
+        })
     }
 
-    /// Create a new migration manager
-    pub fn new(out_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(out_dir: impl Into<PathBuf>, engine: Engine) -> Self {
         Self {
             out_dir: out_dir.into(),
-            ..Default::default()
+            table: engine.table().clone(),
+            prefix: MigrationPrefix::Index,
+            engine,
         }
-    }
-
-    pub fn with_config(mut self, config: &crate::config::Config) -> Self {
-        self.out_dir = config.out_dir();
-        self.table_name = config.migrations.table.clone();
-        self.table_schema = config.migrations.schema.clone();
-        self.prefix = config.migrations.prefix;
-        self.dialect = config.dialect;
-        self
     }
 
     pub fn with_out_dir(mut self, out_dir: impl Into<PathBuf>) -> Self {
@@ -146,20 +122,17 @@ impl MigrationManager {
         self
     }
 
-    pub fn with_dialect(mut self, dialect: SqlDialect) -> Self {
-        self.dialect = dialect;
-        self
-    }
-
     /// Set the migration table name
     pub fn with_table_name(mut self, name: impl Into<String>) -> Self {
-        self.table_name = name.into();
+        self.table = (name.into(), self.table.schema.clone()).into();
+        self.engine = self.engine.with_table(self.table.clone());
         self
     }
 
     /// Set the migration table schema
     pub fn with_table_schema(mut self, schema: impl Into<String>) -> Self {
-        self.table_schema = Some(schema.into());
+        self.table = (self.table.name.clone(), Some(schema.into())).into();
+        self.engine = self.engine.with_table(self.table.clone());
         self
     }
 
@@ -212,11 +185,6 @@ impl MigrationManager {
                 Ok(format!("{}_{}", ts, suffix))
             }
         }
-    }
-
-    /// Get a TableId for the migrations table, including schema if specified (PostgreSQL)
-    pub fn migration_table(&self) -> TableId {
-        (self.table_name.clone(), self.table_schema.clone()).into()
     }
 
     /// List all up migrations in the directory
@@ -275,31 +243,32 @@ impl MigrationManager {
     }
 
     /// Create the migrations table if it doesn't exist
-    pub async fn ensure_migrations_table(&self, pool: &AnyPool) -> Result<()> {
-        let query = queries::ensure_migrations(&self.dialect, &self.migration_table());
-        sqlx::query(&query).execute(pool).await.map_err(|e| {
+    pub async fn ensure_migrations_table(&self) -> Result<()> {
+        self.engine.ensure_migrations().await.map_err(|e| {
             ShkiError::migration(format!(
                 "Failed to create migrations table '{}': {}",
-                self.table_name, e
+                self.table.name, e
             ))
         })?;
         Ok(())
     }
 
     /// Get list of applied migrations from the database
-    pub async fn get_applied_migrations(&self, pool: &AnyPool) -> Result<Vec<MigrationRow>> {
-        self.ensure_migrations_table(pool).await?;
-        let query = queries::select_migrations(&self.dialect, &self.migration_table());
-        let rows = sqlx::query_as::<_, MigrationRow>(&query)
-            .fetch_all(pool)
-            .await?;
+    pub async fn get_applied_migrations(&self) -> Result<Vec<MigrationRow>> {
+        self.ensure_migrations_table().await?;
+        let rows = self.engine.select_migrations().await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to query applied migrations from table '{}': {}",
+                self.table.name, e
+            ))
+        })?;
         Ok(rows)
     }
 
     /// Get pending migrations
-    pub async fn get_pending_migrations(&self, pool: &AnyPool) -> Result<Vec<PathBuf>> {
+    pub async fn get_pending_migrations(&self) -> Result<Vec<PathBuf>> {
         let all_migrations = self.list_up_migrations()?;
-        let applied = self.get_applied_migrations(pool).await?;
+        let applied = self.get_applied_migrations().await?;
 
         let applied_set: std::collections::HashSet<String> =
             applied.into_iter().map(|m| m.name).collect();
@@ -323,8 +292,8 @@ impl MigrationManager {
     ///
     /// Migrations that were applied before checksum tracking (with null checksums)
     /// are skipped.
-    pub async fn validate_checksums(&self, pool: &AnyPool) -> Result<()> {
-        let applied = self.get_applied_migrations(pool).await?;
+    pub async fn validate_checksums(&self) -> Result<()> {
+        let applied = self.get_applied_migrations().await?;
 
         for migration in applied {
             // Skip migrations without checksums (applied before checksum tracking)
@@ -364,80 +333,18 @@ impl MigrationManager {
     ///
     /// Note: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
     /// run inside a transaction. For such cases, use separate migration files.
-    pub async fn apply_migration(&self, pool: &AnyPool, migration_path: &Path) -> Result<String> {
-        self.ensure_migrations_table(pool).await?;
-
-        let sql = std::fs::read_to_string(migration_path)?;
-        let name = migration_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-
-        // Calculate checksum of the SQL content
-        let checksum = sql_checksum(&sql);
-
-        // Execute all statements within a transaction
-        let mut tx = pool.begin().await?;
-
-        sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        // Build the SQL for recording the migration
-        let query = queries::insert_migration(&self.dialect, &self.migration_table());
-
-        // Record the migration with checksum within the same transaction
-        sqlx::query(&query)
-            .bind(name)
-            .bind(&checksum)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
-            })?;
-
-        // Commit the transaction
-        tx.commit().await.map_err(|e| {
-            ShkiError::migration(format!("Failed to commit migration '{}': {}", name, e))
-        })?;
-
-        Ok(checksum)
+    pub async fn apply_migration(&self, migration_path: &Path) -> Result<MigrationRow> {
+        self.ensure_migrations_table().await?;
+        self.engine.apply_migration(migration_path).await
     }
 
     /// Record an existing migration file as applied without executing its SQL.
     ///
     /// This is useful for bootstrap/adoption workflows where the database already
     /// matches the migration state and only tracking metadata should be inserted.
-    pub async fn mark_migration_applied(
-        &self,
-        pool: &AnyPool,
-        migration_path: &Path,
-    ) -> Result<()> {
-        self.ensure_migrations_table(pool).await?;
-
-        let sql = std::fs::read_to_string(migration_path)?;
-        let name = migration_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-
-        let checksum = sql_checksum(&sql);
-        let query = queries::insert_migration(&self.dialect, &self.migration_table());
-
-        sqlx::query(&query)
-            .bind(name)
-            .bind(&checksum)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
-            })?;
-
+    pub async fn mark_migration_applied(&self, migration_path: &Path) -> Result<()> {
+        self.ensure_migrations_table().await?;
+        self.engine.mark_applied(migration_path).await?;
         Ok(())
     }
 
@@ -446,14 +353,14 @@ impl MigrationManager {
     /// Validates both snapshots and applied migration checksums before applying
     /// new ones. If any checksum mismatch is detected, the operation fails before
     /// any new migrations are applied.
-    pub async fn apply_all(&self, pool: &AnyPool) -> Result<Vec<String>> {
+    pub async fn apply_all(&self) -> Result<Vec<String>> {
         // Validate snapshots against migration files first
         // self.validate_snapshots()?;
 
         // Validate checksums of already-applied migrations
-        self.validate_checksums(pool).await?;
+        self.validate_checksums().await?;
 
-        let pending = self.get_pending_migrations(pool).await?;
+        let pending = self.get_pending_migrations().await?;
         let mut applied = Vec::new();
 
         for migration_path in pending {
@@ -463,10 +370,9 @@ impl MigrationManager {
                 .unwrap_or("unknown")
                 .to_string();
 
-            self.apply_migration(pool, &migration_path).await?;
+            self.apply_migration(&migration_path).await?;
             applied.push(name);
         }
-
         Ok(applied)
     }
 
@@ -475,8 +381,8 @@ impl MigrationManager {
     /// Returns migrations in reverse order (most recent first) that:
     /// 1. Have been applied to the database
     /// 2. Have a corresponding .down.sql file
-    pub async fn get_rollback_migrations(&self, pool: &AnyPool) -> Result<Vec<PathBuf>> {
-        let applied = self.get_applied_migrations(pool).await?;
+    pub async fn get_rollback_migrations(&self) -> Result<Vec<PathBuf>> {
+        let applied = self.get_applied_migrations().await?;
 
         // Get down migrations that exist and match applied migrations
         // Return in reverse order (most recent first)
@@ -501,59 +407,8 @@ impl MigrationManager {
     ///
     /// Executes the down migration within a transaction and removes
     /// the migration record from the migrations table.
-    pub async fn rollback_migration(
-        &self,
-        pool: &AnyPool,
-        down_migration_path: &Path,
-    ) -> Result<()> {
-        let sql = std::fs::read_to_string(down_migration_path)?;
-
-        // Extract the migration name from the down file (remove .down.sql)
-        let filename = down_migration_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid down migration filename"))?;
-
-        let name = filename
-            .strip_suffix(".down.sql")
-            .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
-
-        // Build the SQL for removing the migration record
-        let delete_sql = queries::delete_table(&self.dialect, &self.migration_table());
-
-        // Execute all statements within a transaction
-        let mut tx = pool.begin().await?;
-
-        sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in down migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        // Remove the migration record within the same transaction
-        sqlx::query(&delete_sql)
-            .bind(name)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to remove migration record '{}': {}",
-                    name, e
-                ))
-            })?;
-
-        // Commit the transaction
-        tx.commit().await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to commit rollback of migration '{}': {}",
-                name, e
-            ))
-        })?;
-
-        Ok(())
+    pub async fn rollback_migration(&self, down_migration_path: &Path) -> Result<()> {
+        self.engine.rollback_migration(down_migration_path).await
     }
 
     /// Rollback migrations until there are no more down migrations available
@@ -563,8 +418,8 @@ impl MigrationManager {
     /// - An error occurs
     ///
     /// Returns the names of migrations that were rolled back.
-    pub async fn rollback_all(&self, pool: &AnyPool) -> Result<Vec<String>> {
-        let rollback_migrations = self.get_rollback_migrations(pool).await?;
+    pub async fn rollback_all(&self) -> Result<Vec<String>> {
+        let rollback_migrations = self.get_rollback_migrations().await?;
         let mut rolled_back = Vec::new();
 
         for down_path in rollback_migrations {
@@ -575,7 +430,7 @@ impl MigrationManager {
                 .unwrap_or("unknown")
                 .to_string();
 
-            self.rollback_migration(pool, &down_path).await?;
+            self.rollback_migration(&down_path).await?;
             rolled_back.push(name);
         }
 
@@ -586,8 +441,8 @@ impl MigrationManager {
     ///
     /// Rolls back up to `count` migrations in reverse order.
     /// Only migrations with down files can be rolled back.
-    pub async fn rollback_count(&self, pool: &AnyPool, count: usize) -> Result<Vec<String>> {
-        let rollback_migrations = self.get_rollback_migrations(pool).await?;
+    pub async fn rollback_count(&self, count: usize) -> Result<Vec<String>> {
+        let rollback_migrations = self.get_rollback_migrations().await?;
         let mut rolled_back = Vec::new();
 
         for down_path in rollback_migrations.into_iter().take(count) {
@@ -598,7 +453,7 @@ impl MigrationManager {
                 .unwrap_or("unknown")
                 .to_string();
 
-            self.rollback_migration(pool, &down_path).await?;
+            self.rollback_migration(&down_path).await?;
             rolled_back.push(name);
         }
 
@@ -643,14 +498,13 @@ impl MigrationManager {
         let up_path = self.out_dir.join(format!("{}.sql", migration_name));
 
         // Create up migration template content
-        let up_content = generate_blank_migration_template(&migration_name, self.dialect, false);
+        let up_content = generate_blank_migration_template(&migration_name, false);
         std::fs::write(&up_path, up_content)?;
 
         // Create down migration if requested
         let down_path = if with_down {
             let path = self.out_dir.join(format!("{}.down.sql", migration_name));
-            let down_content =
-                generate_blank_migration_template(&migration_name, self.dialect, true);
+            let down_content = generate_blank_migration_template(&migration_name, true);
             std::fs::write(&path, down_content)?;
             Some(path)
         } else {
@@ -763,21 +617,34 @@ impl MigrationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::SqlDialect;
     use tempfile::TempDir;
 
     fn temp_manager() -> (TempDir, MigrationManager) {
         let temp_dir = TempDir::new().expect("failed to create temp dir");
-        let manager = MigrationManager::new(temp_dir.path()).with_dialect(SqlDialect::Sqlite);
+        let manager = MigrationManager::new(
+            temp_dir.path(),
+            Engine::detached(SqlDialect::Sqlite, TableId::new("__shki_migrations", None)),
+        );
         (temp_dir, manager)
     }
 
-    async fn sqlite_pool() -> AnyPool {
-        sqlx::any::install_default_drivers();
-        sqlx::any::AnyPoolOptions::new()
+    fn sqlite_manager() -> (TempDir, MigrationManager) {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        std::fs::File::create(&db_path).expect("failed to create sqlite db file");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("failed to create sqlite pool")
+            .connect_lazy(&format!("sqlite://{}", db_path.display()))
+            .expect("failed to create sqlite pool");
+        let manager = MigrationManager::new(
+            temp_dir.path(),
+            Engine::Sqlite(crate::engines::sqlite::Sqlite::new(
+                pool,
+                TableId::new("__shki_migrations", None),
+            )),
+        );
+        (temp_dir, manager)
     }
 
     #[test]
@@ -854,8 +721,7 @@ mod tests {
 
     #[tokio::test]
     async fn validate_checksums_skips_missing_files_and_detects_mismatches() {
-        let (_temp_dir, manager) = temp_manager();
-        let pool = sqlite_pool().await;
+        let (_temp_dir, manager) = sqlite_manager();
 
         let missing_path = manager.out_dir.join("0000_missing.sql");
         std::fs::write(
@@ -864,7 +730,7 @@ mod tests {
         )
         .expect("failed to write migration");
         manager
-            .mark_migration_applied(&pool, &missing_path)
+            .mark_migration_applied(&missing_path)
             .await
             .expect("failed to mark migration applied");
         std::fs::remove_file(&missing_path).expect("failed to remove migration file");
@@ -876,7 +742,7 @@ mod tests {
         )
         .expect("failed to write migration");
         manager
-            .apply_migration(&pool, &mismatch_path)
+            .apply_migration(&mismatch_path)
             .await
             .expect("failed to apply migration");
         std::fs::write(
@@ -886,7 +752,7 @@ mod tests {
         .expect("failed to rewrite migration");
 
         let error = manager
-            .validate_checksums(&pool)
+            .validate_checksums()
             .await
             .expect_err("checksum validation should fail");
 
@@ -897,8 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn rollback_candidates_follow_applied_order_and_require_down_files() {
-        let (_temp_dir, manager) = temp_manager();
-        let pool = sqlite_pool().await;
+        let (_temp_dir, manager) = sqlite_manager();
 
         for name in ["0000_first", "0001_second", "0002_third"] {
             let path = manager.out_dir.join(format!("{name}.sql"));
@@ -908,7 +773,7 @@ mod tests {
             )
             .expect("failed to write migration");
             manager
-                .mark_migration_applied(&pool, &path)
+                .mark_migration_applied(&path)
                 .await
                 .expect("failed to mark migration applied");
         }
@@ -925,7 +790,7 @@ mod tests {
         .expect("failed to write down migration");
 
         let rollback = manager
-            .get_rollback_migrations(&pool)
+            .get_rollback_migrations()
             .await
             .expect("failed to get rollback migrations");
 

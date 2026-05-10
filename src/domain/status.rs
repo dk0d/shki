@@ -1,12 +1,9 @@
-use std::time::Duration;
-
 use crate::Result;
 use crate::config::Config;
 use colored::Colorize;
 
 use super::display::tables::display_migrations;
 use super::migrate::manager::MigrationManager;
-use super::pool::create_any_pool_opts;
 
 /// Show migration status
 pub async fn cmd_status(config: &Config) -> Result<()> {
@@ -15,7 +12,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     } else {
         println!("{}", "No database url found".bright_yellow());
     }
-    let migration_manager = MigrationManager::from_config(config);
+    let migration_manager = MigrationManager::from_config(config).await?;
 
     display_migrations(&migration_manager, config).await?;
 
@@ -31,14 +28,8 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
     // }
 
     // Validate applied migration checksums if database is available
-    if let Some(db_url) = config.database_url.as_ref() {
-        let pool = create_any_pool_opts()
-            .max_connections(2)
-            .acquire_timeout(Duration::from_secs(config.timeout_seconds))
-            .connect(db_url)
-            .await?;
-
-        if let Err(e) = migration_manager.validate_checksums(&pool).await {
+    if config.database_url.is_some() {
+        if let Err(e) = migration_manager.validate_checksums().await {
             println!("{}", "Checksum Validation Failed".red().bold());
             println!("{}", e);
             has_errors = true;

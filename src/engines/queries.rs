@@ -26,7 +26,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
         SqlDialect::Postgres => format!(
             r#"
                 CREATE TABLE IF NOT EXISTS {} (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -125,7 +125,7 @@ mod tests {
         let mysql = ensure_migrations(&SqlDialect::Mysql, &table());
 
         assert!(postgres.contains("\"meta\".\"__shki_migrations\""));
-        assert!(postgres.contains("id SERIAL PRIMARY KEY"));
+        assert!(postgres.contains("id BIGSERIAL PRIMARY KEY"));
         assert!(mysql.contains("`meta`.`__shki_migrations`"));
         assert!(mysql.contains("id INT AUTO_INCREMENT PRIMARY KEY"));
     }

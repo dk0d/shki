@@ -2,20 +2,18 @@ use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 
 use crate::migrate::manager::MigrationManager;
-use crate::pool::create_any_pool;
 use crate::{Config, Result, ShkiError};
 
 // Rollback migrations using down migration files
 pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> Result<()> {
-    let db_url = config
+    config
         .database_url
         .as_ref()
         .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))?;
 
-    let pool = create_any_pool(db_url).await;
-    let migration_manager = MigrationManager::from_config(config);
+    let migration_manager = MigrationManager::from_config(config).await?;
     // Get migrations that can be rolled back
-    let rollback_migrations = migration_manager.get_rollback_migrations(&pool).await?;
+    let rollback_migrations = migration_manager.get_rollback_migrations().await?;
 
     if rollback_migrations.is_empty() {
         println!(
@@ -80,7 +78,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
         }
 
         migration_manager
-            .rollback_migration(&pool, &down_path)
+            .rollback_migration(&down_path)
             .await?;
         rolled_back.push(name);
     }

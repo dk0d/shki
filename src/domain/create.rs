@@ -13,11 +13,7 @@ pub async fn cmd_create(
     with_down: bool,
     open_editor: bool,
 ) -> Result<()> {
-    let migration_manager = MigrationManager::default()
-        .with_out_dir(config.out_dir())
-        .with_dialect(config.dialect)
-        .with_table_name(&config.migrations.table)
-        .with_prefix(config.migrations.prefix);
+    let migration_manager = MigrationManager::from_config(config).await?;
 
     // Use config setting for down migrations, but CLI flag can override
     let create_down = with_down || config.migrations.generate_down;

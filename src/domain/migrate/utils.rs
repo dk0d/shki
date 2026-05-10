@@ -1,6 +1,5 @@
 use chrono::Utc;
 
-use crate::schema::SqlDialect;
 use std::fmt::Write as _;
 
 /// Truncate a SQL statement for display in error messages
@@ -42,11 +41,7 @@ pub fn sanitize_migration_name(name: &str) -> String {
 /// * `migration_name` - The name of the migration
 /// * `dialect` - The database dialect
 /// * `is_down` - Whether this is a down migration template
-pub fn generate_blank_migration_template(
-    migration_name: &str,
-    _dialect: SqlDialect,
-    is_down: bool,
-) -> String {
+pub fn generate_blank_migration_template(migration_name: &str, is_down: bool) -> String {
     let mut content = String::new();
 
     let direction = if is_down { "down" } else { "up" };
@@ -68,20 +63,28 @@ mod tests {
 
     #[test]
     fn truncate_sql_normalizes_whitespace_before_truncating() {
-        assert_eq!(truncate_sql("SELECT\n  *\tFROM users", 64), "SELECT * FROM users");
-        assert_eq!(truncate_sql("SELECT    *    FROM users", 10), "SELECT * F...");
+        assert_eq!(
+            truncate_sql("SELECT\n  *\tFROM users", 64),
+            "SELECT * FROM users"
+        );
+        assert_eq!(
+            truncate_sql("SELECT    *    FROM users", 10),
+            "SELECT * F..."
+        );
     }
 
     #[test]
     fn sanitize_migration_name_collapses_non_alphanumeric_runs() {
-        assert_eq!(sanitize_migration_name(" Add  users! table "), "add-users-table");
+        assert_eq!(
+            sanitize_migration_name(" Add  users! table "),
+            "add-users-table"
+        );
         assert_eq!(sanitize_migration_name("___"), "");
     }
 
     #[test]
     fn blank_template_contains_basic_header() {
-        let template =
-            generate_blank_migration_template("0001_create_users", SqlDialect::Sqlite, true);
+        let template = generate_blank_migration_template("0001_create_users", true);
 
         assert!(template.starts_with("-- Migration: 0001_create_users (down)\n"));
         assert!(template.contains("-- Created at: "));
