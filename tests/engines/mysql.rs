@@ -1,14 +1,17 @@
-use sqlx::mysql::MySqlPoolOptions;
 use sqlx::Pool;
+use sqlx::mysql::MySqlPoolOptions;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
-use testcontainers::ReuseDirective;
 use testcontainers::ImageExt;
+use testcontainers::ReuseDirective;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mysql::Mysql as MysqlContainer;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
+use tokio::time::sleep;
 
 use super::TestBackend;
 use shki::engines::Engine;
@@ -25,6 +28,7 @@ struct SharedMysqlServer {
 }
 
 static MYSQL_SERVER: OnceCell<SharedMysqlServer> = OnceCell::const_new();
+static MYSQL_TEST_LIMIT: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(1)));
 
 async fn shared_mysql_server() -> &'static SharedMysqlServer {
     MYSQL_SERVER
@@ -42,10 +46,26 @@ async fn shared_mysql_server() -> &'static SharedMysqlServer {
                 .get_host()
                 .await
                 .expect("failed to get mysql test container host");
-            let port = container
-                .get_host_port_ipv4(3306)
-                .await
-                .expect("failed to get mysql test container port");
+            let mut last_error = None;
+            let mut port = None;
+            for _ in 0..40 {
+                match container.get_host_port_ipv4(3306).await {
+                    Ok(bound_port) => {
+                        port = Some(bound_port);
+                        break;
+                    }
+                    Err(error) => {
+                        last_error = Some(error);
+                        sleep(Duration::from_millis(250)).await;
+                    }
+                }
+            }
+            let port = port.unwrap_or_else(|| {
+                panic!(
+                    "failed to get mysql test container port after waiting: {:?}",
+                    last_error
+                )
+            });
 
             SharedMysqlServer {
                 admin_url: format!("mysql://root@{host}:{port}/mysql"),
@@ -62,10 +82,16 @@ pub struct MysqlTestContext {
     pub temp_dir: TempDir,
     pub migrations_dir: PathBuf,
     pub suffix: String,
+    _permit: OwnedSemaphorePermit,
 }
 
 impl MysqlTestContext {
     pub async fn new(name: &str) -> Self {
+        let permit = MYSQL_TEST_LIMIT
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("failed to acquire mysql test permit");
         let server = shared_mysql_server().await;
         let database_name = format!("shki_{}_{}", name, unique_suffix());
 
@@ -87,7 +113,7 @@ impl MysqlTestContext {
             .replace("/mysql", &format!("/{database_name}"));
         let mysql_pool = connect_with_retries("MySQL", || {
             MySqlPoolOptions::new()
-                .max_connections(5)
+                .max_connections(2)
                 .acquire_timeout(Duration::from_secs(10))
                 .connect(&database_url)
         })
@@ -104,6 +130,7 @@ impl MysqlTestContext {
             temp_dir,
             migrations_dir,
             suffix: unique_suffix(),
+            _permit: permit,
         }
     }
 }
@@ -170,6 +197,7 @@ impl TestBackend for MysqlTestContext {
     }
 
     async fn cleanup(self) {
+        self.mysql_pool.close().await;
         let server = shared_mysql_server().await;
         let admin_pool = connect_with_retries("MySQL admin", || {
             MySqlPoolOptions::new()
