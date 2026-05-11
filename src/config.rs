@@ -12,6 +12,15 @@ use std::path::PathBuf;
 use crate::{CommonArgs, ShkiError, schema::SqlDialect};
 use clap::ValueEnum;
 
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ExplicitConfigProbe {
+    dialect: Option<SqlDialect>,
+}
+
 /// Schema definition language
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,7 +61,6 @@ pub struct Config {
 
     /// Database connection URL
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    // TODO: derive the dialect from the URL if not explicitly set
     pub database_url: Option<String>,
 
     /// Whether to add breakpoints between SQL statements
@@ -190,10 +198,20 @@ impl Default for Config {
 }
 
 impl Config {
+    fn infer_dialect_from_url(url: &str) -> Option<SqlDialect> {
+        let scheme = url.split(':').next()?.to_ascii_lowercase();
+        match scheme.as_str() {
+            "postgres" | "postgresql" => Some(SqlDialect::Postgres),
+            "mysql" => Some(SqlDialect::Mysql),
+            "sqlite" => Some(SqlDialect::Sqlite),
+            _ => None,
+        }
+    }
+
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
-        let mut config: Config = Figment::new()
+        let config: Config = Figment::new()
             .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
             .merge(Env::raw())
@@ -201,33 +219,23 @@ impl Config {
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
-
-        if let Some(dialect) = args.dialect {
-            config.dialect = dialect;
-        }
-        if let Some(database_url) = args.database_url.clone() {
-            config.database_url = Some(database_url);
-        }
-        if let Some(out) = args.out.clone() {
-            config.out = out;
-        }
-        if args.verbose {
-            config.verbose = true;
-        }
-        if let Some(table) = args.table.clone() {
-            config.migrations.table = table;
-        }
-        if let Some(schema) = args.schema.clone() {
-            config.migrations.schema = Some(schema);
-        }
-        if let Some(prefix) = args.prefix {
-            config.migrations.prefix = prefix;
-        }
-        if args.generate_down {
-            config.migrations.generate_down = true;
-        }
-
+        let config = config.infer_dialect();
         Ok(config)
+    }
+
+    pub fn with_dialect(mut self, dialect: SqlDialect) -> Self {
+        self.dialect = dialect;
+        self
+    }
+
+    /// if dialect is not already set, try to infer it from the database URL
+    pub fn infer_dialect(mut self) -> Self {
+        if let Some(database_url) = self.database_url.as_deref()
+            && let Some(dialect) = Self::infer_dialect_from_url(database_url)
+        {
+            self.dialect = dialect;
+        }
+        self
     }
 
     /// Save configuration to a file
@@ -329,8 +337,11 @@ generate_down = false
             dialect: Some(SqlDialect::Postgres),
             database_url: Some("postgres://from-cli".to_string()),
             out: Some(PathBuf::from("cli-migrations")),
-            prefix: Some(MigrationPrefix::Timestamp),
-            generate_down: true,
+            migrations: crate::cli::args::MigrationArgs {
+                prefix: Some(MigrationPrefix::Timestamp),
+                generate_down: true,
+                ..Default::default()
+            },
             ..CommonArgs::default()
         };
 
