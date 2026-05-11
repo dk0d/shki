@@ -26,7 +26,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
         SqlDialect::Postgres => format!(
             r#"
                 CREATE TABLE IF NOT EXISTS {} (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -40,7 +40,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 "#,
             table_name
@@ -67,7 +67,7 @@ pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
             table_name
         ),
         SqlDialect::Mysql => format!(
-            "SELECT id, name, checksum, applied_at from {} ORDER BY id",
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
             table_name
         ),
 
@@ -94,5 +94,39 @@ pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
         SqlDialect::Sqlite => {
             format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table() -> TableId {
+        TableId::new("__shki_migrations", Some("meta".to_string()))
+    }
+
+    #[test]
+    fn uses_expected_placeholders_per_dialect() {
+        let table = table();
+
+        assert!(delete_table(&SqlDialect::Postgres, &table).contains("WHERE name = $1"));
+        assert!(insert_migration(&SqlDialect::Postgres, &table).contains("VALUES ($1, $2)"));
+
+        assert!(delete_table(&SqlDialect::Sqlite, &table).contains("WHERE name = $1"));
+        assert!(insert_migration(&SqlDialect::Sqlite, &table).contains("VALUES (?, ?)"));
+
+        assert!(delete_table(&SqlDialect::Mysql, &table).contains("WHERE name = ?"));
+        assert!(insert_migration(&SqlDialect::Mysql, &table).contains("VALUES (?, ?)"));
+    }
+
+    #[test]
+    fn ensure_migrations_uses_dialect_specific_identifiers() {
+        let postgres = ensure_migrations(&SqlDialect::Postgres, &table());
+        let mysql = ensure_migrations(&SqlDialect::Mysql, &table());
+
+        assert!(postgres.contains("\"meta\".\"__shki_migrations\""));
+        assert!(postgres.contains("id BIGSERIAL PRIMARY KEY"));
+        assert!(mysql.contains("`meta`.`__shki_migrations`"));
+        assert!(mysql.contains("id INT AUTO_INCREMENT PRIMARY KEY"));
     }
 }

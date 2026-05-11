@@ -2,12 +2,8 @@
 //!
 //! This module converts diff statements into executable SQL.
 
-use crate::Result;
 use crate::models::table_id::TableId;
 use crate::schema::SqlDialect;
-use std::collections::HashSet;
-use std::fmt::Write as _;
-use std::ops::Deref;
 
 /// SQL generator for a specific dialect
 pub struct SqlGenerator {
@@ -19,7 +15,7 @@ impl SqlGenerator {
     /// Create a new SQL generator
     pub fn new(dialect: &SqlDialect) -> Self {
         Self {
-            dialect: dialect.clone(),
+            dialect: dialect.to_owned(),
             breakpoints: true,
         }
     }
@@ -64,5 +60,29 @@ impl SqlGenerator {
             ),
             None => self.quote_identifier(name),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_identifiers_per_dialect() {
+        let table = TableId::new("odd\"name", Some("app\"schema".to_string()));
+
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&table),
+            "\"app\"\"schema\".\"odd\"\"name\""
+        );
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Sqlite).qualified_name("users", &None),
+            "\"users\""
+        );
+        assert_eq!(
+            SqlGenerator::new(&SqlDialect::Mysql)
+                .qualified_name("odd`name", &Some("app`schema".to_string())),
+            "`app``schema`.`odd``name`"
+        );
     }
 }

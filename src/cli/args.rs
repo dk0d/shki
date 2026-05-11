@@ -8,7 +8,7 @@ use clap::builder::styling::{AnsiColor, Color, Style};
 // pub mod constants;
 // pub mod templates;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -71,7 +71,16 @@ pub struct CommonArgs {
 
     /// Verbose output
     #[arg(short, long, global = true)]
+    #[serde(skip_serializing_if = "crate::config::is_false")]
     pub verbose: bool,
+
+    #[command(flatten)]
+    #[serde(default, skip_serializing_if = "MigrationArgs::is_empty")]
+    pub migrations: MigrationArgs,
+}
+
+#[derive(Debug, Serialize, Args, Default)]
+pub struct MigrationArgs {
 
     /// Name of the migrations table
     #[arg(long,  default_value = None)]
@@ -94,7 +103,17 @@ pub struct CommonArgs {
 
     /// Whether to generate down migrations alongside up migrations
     #[arg(long, default_value_t = false)]
+    #[serde(skip_serializing_if = "crate::config::is_false")]
     pub generate_down: bool,
+}
+
+impl MigrationArgs {
+    pub fn is_empty(&self) -> bool {
+        self.table.is_none()
+            && self.schema.is_none()
+            && self.prefix.is_none()
+            && !self.generate_down
+    }
 }
 
 /// Shki - Declarative database schema management

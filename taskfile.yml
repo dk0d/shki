@@ -14,20 +14,6 @@ tasks:
     cmds: 
       - cargo nextest run {{ .CLI_ARGS }}
       
-  test:pg:
-    desc: Run postgres integration tests
-    cmds: 
-      - docker compose -p shki down -v 
-      - docker compose -p shki up -d 
-      - task: wait-for-postgres
-      # - cargo nextest run --run-ignored ignored-only
-      - cargo test --test pg_integration -- --ignored
-      - docker compose -p shki down
-      
-  wait-for-postgres:
-    internal: true
-    cmd: until pg_isready --host=localhost --port=5432 --username=postgres --dbname=shki; do echo "Waiting for postgresql to start"; sleep 1; done
-      
   tools:install:
     desc: Install dev tooling
     cmds:
