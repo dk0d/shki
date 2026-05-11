@@ -15,7 +15,7 @@ Dialects Supported:
 
 - [x] PostgreSQL
 - [x] SQLite
-- [ ] MySQL
+- [x] MySQL
 
 ## Back to basics
 
@@ -36,7 +36,7 @@ That means the current README reflects what is available today, and the missing 
 - Show migration status.
 - Roll back applied migrations with `down` files.
 - Configure behavior through `shki.toml`, environment variables, and CLI flags.
-- PostgreSQL is the primary supported backend in the current rebuild.
+- PostgreSQL, MySQL, and SQLite are supported for the core migration workflow.
 
 ## Not back yet
 
@@ -50,8 +50,6 @@ These features existed previously or are still present as partial code paths, bu
 - [ ] Squash existing migration history
 - [ ] Code generation for Rust, TypeScript, or Protobuf
 - [ ] Drop/delete migration helper commands
-- [ ] MySQL support beyond basic dialect plumbing
-- [ ] SQLite support beyond basic dialect plumbing
 - [ ] Rust-native schema definitions
 - [ ] Schema linting and validation passes
 
@@ -83,7 +81,13 @@ By default this initializes the current SQL-first workflow. The generated `shki.
 
 ```bash
 export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
+# or
+export DATABASE_URL='mysql://user:pass@localhost:3306/mydb'
+# or
+export DATABASE_URL='sqlite://db/app.db'
 ```
+
+`shki` derives the dialect from `database_url` automatically for `postgres`, `mysql`, and `sqlite` URLs. Use `--dialect` or set `dialect` in `shki.toml` only when you want to override that.
 
 3. Create a migration.
 
@@ -169,7 +173,6 @@ Default config:
 ```toml
 root = "db"
 database_url = "postgres://user:pass@localhost:5432/mydb"
-dialect = "postgres"
 schema = "init.lua"
 out = "./migrations"
 breakpoints = true
@@ -181,6 +184,16 @@ mode = "sql"
 table = "__shki_migrations"
 prefix = "index"
 generate_down = false
+```
+
+Examples for other backends:
+
+```toml
+# MySQL
+database_url = "mysql://user:pass@localhost:3306/mydb"
+
+# SQLite
+database_url = "sqlite://db/app.db"
 ```
 
 Environment variables:
