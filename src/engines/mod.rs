@@ -40,6 +40,11 @@ impl Engine {
         )
             .into();
 
+        if config.database_url.is_none() {
+            // If no database URL is provided, use the detached engine which doesn't require a connection
+            return Ok(Engine::Detached(Detached::new(config.dialect, table)));
+        }
+
         match config.dialect {
             SqlDialect::Postgres => {
                 let pool = sqlx::postgres::PgPoolOptions::new()

@@ -32,11 +32,6 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         return Ok(());
     }
 
-    // let snapshots = Snapshot::load_all(&config.out_dir())?;
-    // if snapshots.is_empty() {
-    //     println!("{}", "No snapshots found".red());
-    // }
-
     // Try to get applied migrations if database URL is available
     let applied = if config.database_url.is_some() {
         let migrations = manager.get_applied_migrations().await?;

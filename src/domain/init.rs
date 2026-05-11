@@ -32,9 +32,7 @@ pub async fn cmd_init(
         );
         return Ok(());
     }
-
     let dialect = dialect.unwrap_or(SqlDialect::Postgres);
-
     let config = Config {
         root: target_dir.into(),
         dialect,
