@@ -34,7 +34,7 @@ async fn shared_mysql_server() -> &'static SharedMysqlServer {
     MYSQL_SERVER
         .get_or_init(|| async {
             let container = MysqlContainer::default()
-                .with_name("shki-shared-mysql-tests")
+                .with_name("mysql")
                 .with_reuse(ReuseDirective::Always)
                 .with_tag("8.0.34")
                 .with_startup_timeout(Duration::from_secs(120))
