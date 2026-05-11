@@ -1,6 +1,5 @@
 pub mod checksum;
 pub mod manager;
-pub mod queries;
 pub mod utils;
 
 use crate::config::Config;

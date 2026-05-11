@@ -1,0 +1,6 @@
+[[profile.default.overrides]]
+filter = 'package(shki) & binary(integration)'
+test-group = 'integration-serial'
+
+[test-groups]
+integration-serial = { max-threads = 1 }

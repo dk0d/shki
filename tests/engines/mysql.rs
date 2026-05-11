@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
+use testcontainers::ReuseDirective;
 use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mysql::Mysql as MysqlContainer;
@@ -29,7 +30,10 @@ async fn shared_mysql_server() -> &'static SharedMysqlServer {
     MYSQL_SERVER
         .get_or_init(|| async {
             let container = MysqlContainer::default()
+                .with_name("shki-shared-mysql-tests")
+                .with_reuse(ReuseDirective::Always)
                 .with_tag("8.0.34")
+                .with_startup_timeout(Duration::from_secs(120))
                 .start()
                 .await
                 .expect("failed to start shared mysql test container");

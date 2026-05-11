@@ -72,7 +72,7 @@ async-trait = "0.1.89"
 
 [dev-dependencies]
 tempfile = "3.24.0"
-testcontainers = "0.27.3"
+testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
 testcontainers-modules = { version = "0.15.0", features = ["mysql", "postgres"] }
 
 # The profile that 'dist' will build with
