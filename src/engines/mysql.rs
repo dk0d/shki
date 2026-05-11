@@ -41,7 +41,7 @@ impl Mysql {
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 "#,
             table_name
@@ -74,7 +74,7 @@ impl Mysql {
             })?;
 
         let select = format!(
-            "SELECT id, name, checksum, applied_at FROM {} WHERE name = ?",
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
             table_name
         );
         sqlx::query_as::<_, MigrationRow>(&select)
@@ -105,7 +105,7 @@ impl Mysql {
     {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let select = format!(
-            "SELECT id, name, checksum, applied_at FROM {} WHERE name = ?",
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
             table_name
         );
         let row = sqlx::query_as::<_, MigrationRow>(&select)
@@ -191,7 +191,7 @@ impl EngineDriver for Mysql {
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!(
-            "SELECT id, name, checksum, applied_at from {} ORDER BY id",
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
             table_name
         );
         let rows = sqlx::query_as::<_, MigrationRow>(&query)

@@ -40,7 +40,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
-                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 "#,
             table_name
@@ -67,7 +67,7 @@ pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
             table_name
         ),
         SqlDialect::Mysql => format!(
-            "SELECT id, name, checksum, applied_at from {} ORDER BY id",
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
             table_name
         ),
 

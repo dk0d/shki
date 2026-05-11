@@ -2,12 +2,11 @@ mod engines;
 use engines::*;
 mod common;
 
-use shki::migrate::manager::MigrationManager;
 use shki::run;
 
 use self::common::*;
 
-async fn scenario_apply_simple(ctx: BackendContext) {
+async fn scenario_apply_simple<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let table_name = ctx.unique_name("users");
     let migration_path = ctx.write_migration(
@@ -16,7 +15,7 @@ async fn scenario_apply_simple(ctx: BackendContext) {
     );
 
     manager
-        .apply_migration(&ctx.pool().await, &migration_path)
+        .apply_migration(&migration_path)
         .await
         .expect("failed to apply migration");
 
@@ -26,7 +25,7 @@ async fn scenario_apply_simple(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
+async fn scenario_apply_all_and_pending_detection<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let users = ctx.unique_name("users");
     let posts = ctx.unique_name("posts");
@@ -50,7 +49,7 @@ async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
     assert_eq!(
         migration_names(
             manager
-                .get_pending_migrations(&ctx.pool().await)
+                .get_pending_migrations()
                 .await
                 .expect("failed to load pending migrations")
         ),
@@ -62,17 +61,14 @@ async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
     );
 
     manager
-        .apply_migration(
-            &ctx.pool().await,
-            &ctx.migrations_dir().join("0001_create_users.sql"),
-        )
+        .apply_migration(&ctx.migrations_dir().join("0001_create_users.sql"))
         .await
         .expect("failed to apply first migration");
 
     assert_eq!(
         migration_names(
             manager
-                .get_pending_migrations(&ctx.pool().await)
+                .get_pending_migrations()
                 .await
                 .expect("failed to reload pending migrations")
         ),
@@ -83,7 +79,7 @@ async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
     );
 
     let applied = manager
-        .apply_all(&ctx.pool().await)
+        .apply_all()
         .await
         .expect("failed to apply all pending migrations");
 
@@ -93,7 +89,7 @@ async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
     assert!(ctx.table_exists(&logs).await);
     assert!(
         manager
-            .get_pending_migrations(&ctx.pool().await)
+            .get_pending_migrations()
             .await
             .expect("failed to read final pending migrations")
             .is_empty()
@@ -102,7 +98,7 @@ async fn scenario_apply_all_and_pending_detection(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_rollback_single(ctx: BackendContext) {
+async fn scenario_rollback_single<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let table_name = ctx.unique_name("widgets");
     let up_path = ctx.write_migration(
@@ -115,11 +111,11 @@ async fn scenario_rollback_single(ctx: BackendContext) {
     );
 
     manager
-        .apply_migration(&ctx.pool().await, &up_path)
+        .apply_migration(&up_path)
         .await
         .expect("failed to apply migration");
     manager
-        .rollback_migration(&ctx.pool().await, &down_path)
+        .rollback_migration(&down_path)
         .await
         .expect("failed to rollback migration");
 
@@ -129,7 +125,7 @@ async fn scenario_rollback_single(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_rollback_all(ctx: BackendContext) {
+async fn scenario_rollback_all<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let users = ctx.unique_name("users");
     let posts = ctx.unique_name("posts");
@@ -148,12 +144,12 @@ async fn scenario_rollback_all(ctx: BackendContext) {
     ]);
 
     manager
-        .apply_all(&ctx.pool().await)
+        .apply_all()
         .await
         .expect("failed to apply all migrations");
 
     let rolled_back = manager
-        .rollback_all(&ctx.pool().await)
+        .rollback_all()
         .await
         .expect("failed to rollback all migrations");
 
@@ -164,7 +160,7 @@ async fn scenario_rollback_all(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_rollback_count(ctx: BackendContext) {
+async fn scenario_rollback_count<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
 
     for i in 1..=3 {
@@ -180,12 +176,12 @@ async fn scenario_rollback_count(ctx: BackendContext) {
     }
 
     manager
-        .apply_all(&ctx.pool().await)
+        .apply_all()
         .await
         .expect("failed to apply all migrations");
 
     let rolled_back = manager
-        .rollback_count(&ctx.pool().await, 2)
+        .rollback_count(2)
         .await
         .expect("failed to rollback migrations");
 
@@ -195,7 +191,7 @@ async fn scenario_rollback_count(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_transaction_rollback_on_error(ctx: BackendContext) {
+async fn scenario_transaction_rollback_on_error<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let table_name = ctx.unique_name("broken");
     let migration_path = ctx.write_migration(
@@ -207,18 +203,23 @@ async fn scenario_transaction_rollback_on_error(ctx: BackendContext) {
         ),
     );
 
-    let result = manager
-        .apply_migration(&ctx.pool().await, &migration_path)
-        .await;
+    let result = manager.apply_migration(&migration_path).await;
 
     assert!(result.is_err());
-    assert!(!ctx.table_exists(&table_name).await);
+
+    if ctx.dialect() == shki::schema::SqlDialect::Mysql {
+        // MySQL autocommits DDL, so the failed second statement still leaves the first table behind.
+        assert!(ctx.table_exists(&table_name).await);
+    } else {
+        assert!(!ctx.table_exists(&table_name).await);
+    }
+
     assert!(ctx.applied_names(&manager).await.is_empty());
 
     ctx.cleanup().await;
 }
 
-async fn scenario_checksum_validation_blocks_new_migrations(ctx: BackendContext) {
+async fn scenario_checksum_validation_blocks_new_migrations<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let first_table = ctx.unique_name("users");
     let second_table = ctx.unique_name("posts");
@@ -232,7 +233,7 @@ async fn scenario_checksum_validation_blocks_new_migrations(ctx: BackendContext)
     );
 
     manager
-        .apply_migration(&ctx.pool().await, &first)
+        .apply_migration(&first)
         .await
         .expect("failed to apply initial migration");
 
@@ -266,19 +267,11 @@ async fn scenario_checksum_validation_blocks_new_migrations(ctx: BackendContext)
     ctx.cleanup().await;
 }
 
-async fn scenario_custom_migration_table(ctx: BackendContext) {
-    let manager = match ctx.migration_schema() {
-        Some(schema) => MigrationManager::new(ctx.migrations_dir())
-            .with_dialect(ctx.dialect())
-            .with_table_schema(schema)
-            .with_table_name("custom_migrations"),
-        None => MigrationManager::new(ctx.migrations_dir())
-            .with_dialect(ctx.dialect())
-            .with_table_name("custom_migrations"),
-    };
+async fn scenario_custom_migration_table<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager_with_table("custom_migrations");
 
     manager
-        .ensure_migrations_table(&ctx.pool().await)
+        .ensure_migrations_table()
         .await
         .expect("failed to ensure custom migrations table");
 
@@ -287,7 +280,7 @@ async fn scenario_custom_migration_table(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_cli_migrate_applies_pending(ctx: BackendContext) {
+async fn scenario_cli_migrate_applies_pending<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let table_name = ctx.unique_name("posts");
     ctx.write_migration(
@@ -308,7 +301,7 @@ async fn scenario_cli_migrate_applies_pending(ctx: BackendContext) {
     ctx.cleanup().await;
 }
 
-async fn scenario_cli_down_dry_run_does_not_modify_database(ctx: BackendContext) {
+async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();
     let table_name = ctx.unique_name("logs");
@@ -322,7 +315,7 @@ async fn scenario_cli_down_dry_run_does_not_modify_database(ctx: BackendContext)
     );
 
     manager
-        .apply_migration(&ctx.pool().await, &up_path)
+        .apply_migration(&up_path)
         .await
         .expect("failed to apply migration");
 
@@ -337,62 +330,63 @@ async fn scenario_cli_down_dry_run_does_not_modify_database(ctx: BackendContext)
 }
 
 macro_rules! backend_suite {
-    ($module:ident, $setup:expr) => {
+    ($module:ident, $backend:ty) => {
         mod $module {
             use super::*;
 
             #[tokio::test]
             async fn apply_simple() {
-                scenario_apply_simple($setup("apply_simple").await).await;
+                scenario_apply_simple(<$backend as TestBackend>::setup("apply_simple").await).await;
             }
 
             #[tokio::test]
             async fn apply_all_and_pending_detection() {
-                scenario_apply_all_and_pending_detection($setup("apply_all").await).await;
+                scenario_apply_all_and_pending_detection(<$backend as TestBackend>::setup("apply_all").await).await;
             }
 
             #[tokio::test]
             async fn rollback_single() {
-                scenario_rollback_single($setup("rollback_single").await).await;
+                scenario_rollback_single(<$backend as TestBackend>::setup("rollback_single").await).await;
             }
 
             #[tokio::test]
             async fn rollback_all() {
-                scenario_rollback_all($setup("rollback_all").await).await;
+                scenario_rollback_all(<$backend as TestBackend>::setup("rollback_all").await).await;
             }
 
             #[tokio::test]
             async fn rollback_count() {
-                scenario_rollback_count($setup("rollback_count").await).await;
+                scenario_rollback_count(<$backend as TestBackend>::setup("rollback_count").await).await;
             }
 
             #[tokio::test]
             async fn transaction_rollback_on_error() {
-                scenario_transaction_rollback_on_error($setup("tx_rollback").await).await;
+                scenario_transaction_rollback_on_error(<$backend as TestBackend>::setup("tx_rollback").await).await;
             }
 
             #[tokio::test]
             async fn checksum_validation_blocks_new_migrations() {
-                scenario_checksum_validation_blocks_new_migrations($setup("checksum").await).await;
+                scenario_checksum_validation_blocks_new_migrations(<$backend as TestBackend>::setup("checksum").await).await;
             }
 
             #[tokio::test]
             async fn custom_migration_table() {
-                scenario_custom_migration_table($setup("migration_table").await).await;
+                scenario_custom_migration_table(<$backend as TestBackend>::setup("migration_table").await).await;
             }
 
             #[tokio::test]
             async fn cli_migrate_applies_pending() {
-                scenario_cli_migrate_applies_pending($setup("cli_migrate").await).await;
+                scenario_cli_migrate_applies_pending(<$backend as TestBackend>::setup("cli_migrate").await).await;
             }
 
             #[tokio::test]
             async fn cli_down_dry_run_does_not_modify_database() {
-                scenario_cli_down_dry_run_does_not_modify_database($setup("cli_down").await).await;
+                scenario_cli_down_dry_run_does_not_modify_database(<$backend as TestBackend>::setup("cli_down").await).await;
             }
         }
     };
 }
 
-backend_suite!(sqlite, BackendContext::sqlite);
-backend_suite!(postgres, BackendContext::postgres);
+backend_suite!(sqlite, SqliteTestContext);
+backend_suite!(postgres, PgTestContext);
+backend_suite!(mysql, MysqlTestContext);
