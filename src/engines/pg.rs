@@ -121,7 +121,7 @@ impl Postgres {
         let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.table);
         let query = format!("DELETE FROM {} WHERE name = $1 returning *", table_name);
         let row = sqlx::query_as::<_, MigrationRow>(&query)
-            .bind(&name)
+            .bind(name)
             .fetch_one(exec)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
