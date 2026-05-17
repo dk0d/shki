@@ -1,9 +1,10 @@
 use crate::models::table_id::TableId;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
+use crate::sql::utils::qualified_table_name;
 
 pub fn delete_table(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
+    let table_name = qualified_table_name(dialect, table);
 
     match dialect {
         SqlDialect::Postgres | SqlDialect::Sqlite => {
@@ -60,7 +61,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
 }
 
 pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
+    let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
@@ -79,8 +80,7 @@ pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
 }
 
 pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
-
+    let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => {
             format!(

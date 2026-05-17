@@ -25,7 +25,7 @@ impl Detached {
         &self.table
     }
 
-    fn unavailable(&self) -> ShkiError {
+    pub(crate) fn unavailable(&self) -> ShkiError {
         ShkiError::config(format!(
             "Database URL is required for {} operations",
             self.dialect
@@ -57,6 +57,4 @@ impl EngineDriver for Detached {
     async fn delete_table(&self) -> Result<()> {
         Err(self.unavailable())
     }
-    //     Err(self.unavailable())
-    // }
 }

@@ -5,6 +5,8 @@ pub mod queries;
 pub mod sqlite;
 pub mod utils;
 
+use indexmap::IndexMap;
+
 use self::detached::Detached;
 use self::mysql::Mysql;
 use self::pg::Postgres;
@@ -16,7 +18,8 @@ use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::MigrationRow;
 use crate::models::table_id::TableId;
-use crate::schema::SqlDialect;
+use crate::schema::*;
+use crate::snapshots::{Introspectable, Snapshot, SnapshotProvider};
 
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -34,11 +37,7 @@ impl Engine {
     }
 
     pub async fn from_config(config: &Config) -> Result<Self> {
-        let table: TableId = (
-            config.migrations.table.clone(),
-            config.migrations.schema.clone(),
-        )
-            .into();
+        let table: TableId = config.migrations.table.clone().into();
 
         if config.database_url.is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
@@ -123,4 +122,44 @@ pub(crate) trait EngineDriver {
 
     // /// Delete a single migration
     // async fn delete_migration(&self, name: &str) -> Result<MigrationRow>;
+}
+
+#[async_trait::async_trait]
+impl<E> Introspectable for E
+where
+    E: EngineDriver + SnapshotProvider + Send + Sync,
+{
+    async fn introspect(&self, config: &Config) -> Result<Snapshot> {
+        let mut snapshot = Snapshot::new(config.dialect);
+
+        snapshot.enums = self.get_enums(&config.migrations.table.schema).await?;
+        snapshot.views = self.get_views(&config.migrations.table.schema).await?;
+        snapshot.sequences = self.get_sequences(&config.migrations.table.schema).await?;
+        snapshot.extensions = self.get_extensions(&config.migrations.table.schema).await?;
+
+        let mut tables = self.get_tables(&config.migrations.table.schema).await?;
+        let constraints = self
+            .get_constraints(&config.migrations.table.schema)
+            .await?;
+
+        dbg!("Got tables: {:#?}", &tables.iter().len());
+
+        let columns = self.get_columns(&config.migrations.table.schema).await?;
+
+        columns.into_iter().for_each(|(table_id, cols)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.columns = cols;
+            }
+        });
+
+        constraints.into_iter().for_each(|(table_id, cons)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.constraints = cons;
+            }
+        });
+
+        snapshot.tables = tables;
+
+        Ok(snapshot)
+    }
 }

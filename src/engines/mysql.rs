@@ -246,8 +246,7 @@ mod tests {
         let pool = sqlx::mysql::MySqlPoolOptions::new()
             .connect_lazy("mysql://root:password@localhost/shki")
             .expect("failed to create lazy mysql pool");
-        let engine = Mysql::new(pool, TableId::new("old_table", None))
-            .with_table(table());
+        let engine = Mysql::new(pool, TableId::new("old_table", None)).with_table(table());
 
         assert_eq!(engine.table(), &table());
     }
@@ -256,12 +255,12 @@ mod tests {
     fn mysql_queries_use_mysql_placeholders_and_identifiers() {
         let table = table();
 
-        assert!(queries::ensure_migrations(&SqlDialect::Mysql, &table)
-            .contains("CREATE TABLE IF NOT EXISTS `meta`.`__shki_migrations`"));
-        assert!(queries::insert_migration(&SqlDialect::Mysql, &table)
-            .contains("VALUES (?, ?)"));
-        assert!(queries::select_migrations(&SqlDialect::Mysql, &table)
-            .contains("ORDER BY id"));
+        assert!(
+            queries::ensure_migrations(&SqlDialect::Mysql, &table)
+                .contains("CREATE TABLE IF NOT EXISTS `meta`.`__shki_migrations`")
+        );
+        assert!(queries::insert_migration(&SqlDialect::Mysql, &table).contains("VALUES (?, ?)"));
+        assert!(queries::select_migrations(&SqlDialect::Mysql, &table).contains("ORDER BY id"));
     }
 
     #[test]
