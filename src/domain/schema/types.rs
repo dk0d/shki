@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::generator::{SqlStmt, ToSql};
+
 use super::SqlDialect;
 
 /// Enum type definition (PostgreSQL)
@@ -180,6 +182,12 @@ pub enum DataType {
     SqliteReal,
     SqliteText,
     SqliteBlob,
+}
+
+impl ToSql for DataType {
+    fn to_sql(&self, dialect: &SqlDialect) -> crate::Result<SqlStmt> {
+        Ok(self.to_string(dialect).into())
+    }
 }
 
 impl DataType {
@@ -1080,6 +1088,66 @@ mod tests {
         assert_eq!(
             DataType::from((SqlDialect::Sqlite, "BLOB".to_string())),
             DataType::SqliteBlob
+        );
+    }
+
+    #[test]
+    fn parses_types_from_dialect_and_str_tuple() {
+        assert_eq!(
+            DataType::from((SqlDialect::Postgres, "INTEGER[][]")),
+            DataType::Array {
+                element_type: Box::new(DataType::Array {
+                    element_type: Box::new(DataType::Integer),
+                }),
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "SET('draft', 'published')")),
+            DataType::Set {
+                values: vec!["draft".to_string(), "published".to_string()],
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "jsonb")),
+            DataType::JsonB
+        );
+    }
+
+    #[test]
+    fn parses_types_from_borrowed_dialect_and_str_tuple() {
+        let postgres = SqlDialect::Postgres;
+        let mysql = SqlDialect::Mysql;
+        let sqlite = SqlDialect::Sqlite;
+
+        assert_eq!(
+            DataType::from((&postgres, "TIME(6) WITH TIME ZONE")),
+            DataType::Time {
+                precision: Some(6),
+                with_timezone: true,
+            }
+        );
+        assert_eq!(
+            DataType::from((&mysql, "DECIMAL(8, 3)")),
+            DataType::Decimal {
+                precision: Some(8),
+                scale: Some(3),
+            }
+        );
+        assert_eq!(
+            DataType::from((&sqlite, "double precision")),
+            DataType::Real
+        );
+    }
+
+    #[test]
+    fn displays_default_identity_values() {
+        assert_eq!(
+            DefaultValue::Identity { always: true }.to_string(),
+            "ALWAYS"
+        );
+        assert_eq!(
+            DefaultValue::Identity { always: false }.to_string(),
+            "BY DEFAULT"
         );
     }
 }
