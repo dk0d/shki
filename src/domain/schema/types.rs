@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::SqlDialect;
+
 /// Enum type definition (PostgreSQL)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbEnum {
@@ -409,6 +411,432 @@ impl DataType {
     }
 }
 
+impl DataType {
+    pub fn parse(value: impl Into<String>, dialect: &SqlDialect) -> Self {
+        (dialect, value.into().as_str()).into()
+    }
+}
+
+impl From<(SqlDialect, String)> for DataType {
+    fn from((dialect, value): (SqlDialect, String)) -> Self {
+        Self::from((dialect, value.as_str()))
+    }
+}
+
+impl From<(SqlDialect, &str)> for DataType {
+    fn from((dialect, value): (SqlDialect, &str)) -> Self {
+        match dialect {
+            SqlDialect::Postgres => parse_postgres_type(value),
+            SqlDialect::Mysql => parse_mysql_type(value),
+            SqlDialect::Sqlite => parse_sqlite_type(value),
+        }
+    }
+}
+
+impl From<(&SqlDialect, &str)> for DataType {
+    fn from((dialect, value): (&SqlDialect, &str)) -> Self {
+        match dialect {
+            SqlDialect::Postgres => parse_postgres_type(value),
+            SqlDialect::Mysql => parse_mysql_type(value),
+            SqlDialect::Sqlite => parse_sqlite_type(value),
+        }
+    }
+}
+
+fn parse_postgres_type(value: &str) -> DataType {
+    let ty = value.trim();
+    let normalized = normalize_type_name(ty);
+
+    if let Some(element_type) = normalized.strip_suffix("[]") {
+        return DataType::Array {
+            element_type: Box::new(parse_postgres_type(element_type.trim())),
+        };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["CHARACTER VARYING", "VARCHAR"]) {
+        return DataType::VarChar { length };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["CHARACTER", "CHAR"]) {
+        return DataType::Char { length };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "NUMERIC") {
+        return DataType::Numeric { precision, scale };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "DECIMAL") {
+        return DataType::Decimal { precision, scale };
+    }
+
+    if let Some(parsed) = parse_postgres_time_type(ty) {
+        return parsed;
+    }
+
+    if let Some((name, schema)) = parse_qualified_identifier(ty) {
+        return DataType::Custom { name, schema };
+    }
+
+    match normalized.as_str() {
+        "SMALLINT" | "INT2" => DataType::SmallInt,
+        "INTEGER" | "INT" | "INT4" => DataType::Integer,
+        "BIGINT" | "INT8" => DataType::BigInt,
+        "SERIAL" | "SERIAL4" => DataType::Serial,
+        "BIGSERIAL" | "SERIAL8" => DataType::BigSerial,
+        "SMALLSERIAL" | "SERIAL2" => DataType::SmallSerial,
+        "REAL" | "FLOAT4" => DataType::Real,
+        "DOUBLE PRECISION" | "FLOAT8" => DataType::DoublePrecision,
+        "MONEY" => DataType::Money,
+        "TEXT" => DataType::Text,
+        "CITEXT" => DataType::Citext,
+        "BYTEA" => DataType::ByteA,
+        "BOOLEAN" | "BOOL" => DataType::Boolean,
+        "DATE" => DataType::Date,
+        "INTERVAL" => DataType::Interval,
+        "UUID" => DataType::Uuid,
+        "JSON" => DataType::Json,
+        "JSONB" => DataType::JsonB,
+        "INET" => DataType::Inet,
+        "CIDR" => DataType::Cidr,
+        "MACADDR" => DataType::MacAddr,
+        "MACADDR8" => DataType::MacAddr8,
+        "POINT" => DataType::Point,
+        "LINE" => DataType::Line,
+        "LSEG" => DataType::LSeg,
+        "BOX" => DataType::Box,
+        "PATH" => DataType::Path,
+        "POLYGON" => DataType::Polygon,
+        "CIRCLE" => DataType::Circle,
+        "INT4RANGE" => DataType::Int4Range,
+        "INT8RANGE" => DataType::Int8Range,
+        "NUMRANGE" => DataType::NumRange,
+        "TSRANGE" => DataType::TsRange,
+        "TSTZRANGE" => DataType::TsTzRange,
+        "DATERANGE" => DataType::DateRange,
+        _ => DataType::Custom {
+            name: ty.to_string(),
+            schema: None,
+        },
+    }
+}
+
+fn parse_mysql_type(value: &str) -> DataType {
+    let ty = value.trim();
+    let normalized = normalize_type_name(ty);
+
+    if let Some(values) = parse_mysql_value_list(ty, "ENUM") {
+        return DataType::Enum_ { values };
+    }
+
+    if let Some(values) = parse_mysql_value_list(ty, "SET") {
+        return DataType::Set { values };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["VARCHAR"]) {
+        return DataType::VarChar { length };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["CHAR"]) {
+        return DataType::Char { length };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["BINARY"]) {
+        return DataType::Binary { length };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["VARBINARY"]) {
+        return DataType::VarBinary { length };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "NUMERIC") {
+        return DataType::Numeric { precision, scale };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "DECIMAL") {
+        return DataType::Decimal { precision, scale };
+    }
+
+    if let Some(parsed) = parse_mysql_time_type(ty) {
+        return parsed;
+    }
+
+    if normalized == "INT AUTO_INCREMENT" || normalized == "INTEGER AUTO_INCREMENT" {
+        return DataType::Serial;
+    }
+
+    if normalized == "BIGINT AUTO_INCREMENT" {
+        return DataType::BigSerial;
+    }
+
+    if normalized == "BOOLEAN" || normalized == "BOOL" {
+        return DataType::Boolean;
+    }
+
+    if normalized.starts_with("TINYINT") {
+        if parse_type_length(ty, &["TINYINT"]) == Some(Some(1)) && !normalized.contains("UNSIGNED")
+        {
+            return DataType::Boolean;
+        }
+
+        return DataType::TinyInt {
+            unsigned: normalized.contains("UNSIGNED"),
+        };
+    }
+
+    if normalized.starts_with("MEDIUMINT") {
+        return DataType::MediumInt {
+            unsigned: normalized.contains("UNSIGNED"),
+        };
+    }
+
+    match normalized.as_str() {
+        "SMALLINT" => DataType::SmallInt,
+        "INT" | "INTEGER" => DataType::Integer,
+        "BIGINT" => DataType::BigInt,
+        "FLOAT" => DataType::Real,
+        "DOUBLE" | "DOUBLE PRECISION" => DataType::DoublePrecision,
+        "TEXT" => DataType::Text,
+        "TINYTEXT" => DataType::TinyText,
+        "MEDIUMTEXT" => DataType::MediumText,
+        "LONGTEXT" => DataType::LongText,
+        "BLOB" => DataType::Blob,
+        "TINYBLOB" => DataType::TinyBlob,
+        "MEDIUMBLOB" => DataType::MediumBlob,
+        "LONGBLOB" => DataType::LongBlob,
+        "DATE" => DataType::Date,
+        "YEAR" => DataType::Year,
+        "JSON" => DataType::Json,
+        _ => DataType::Custom {
+            name: ty.to_string(),
+            schema: None,
+        },
+    }
+}
+
+fn parse_sqlite_type(value: &str) -> DataType {
+    let ty = value.trim();
+    let normalized = normalize_type_name(ty);
+
+    if let Some(length) = parse_type_length(ty, &["VARCHAR"]) {
+        return DataType::VarChar { length };
+    }
+
+    if let Some(length) = parse_type_length(ty, &["CHAR"]) {
+        return DataType::Char { length };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "NUMERIC") {
+        return DataType::Numeric { precision, scale };
+    }
+
+    if let Some((precision, scale)) = parse_precision_and_scale(ty, "DECIMAL") {
+        return DataType::Decimal { precision, scale };
+    }
+
+    if let Some(parsed) = parse_mysql_time_type(ty) {
+        return parsed;
+    }
+
+    match normalized.as_str() {
+        "INTEGER" => DataType::SqliteInteger,
+        "REAL" => DataType::SqliteReal,
+        "TEXT" => DataType::SqliteText,
+        "BLOB" => DataType::SqliteBlob,
+        "BOOLEAN" => DataType::Boolean,
+        "DATE" => DataType::Date,
+        "JSON" => DataType::Json,
+        "JSONB" => DataType::JsonB,
+        _ if normalized.contains("INT") => DataType::Integer,
+        _ if normalized.contains("CHAR")
+            || normalized.contains("CLOB")
+            || normalized.contains("TEXT") =>
+        {
+            DataType::Text
+        }
+        _ if normalized.contains("BLOB") => DataType::Blob,
+        _ if normalized.contains("REAL")
+            || normalized.contains("FLOA")
+            || normalized.contains("DOUB") =>
+        {
+            DataType::Real
+        }
+        _ => DataType::Custom {
+            name: ty.to_string(),
+            schema: None,
+        },
+    }
+}
+
+fn parse_postgres_time_type(ty: &str) -> Option<DataType> {
+    let normalized = normalize_type_name(ty);
+
+    if normalized == "TIMESTAMPTZ" {
+        return Some(DataType::Timestamp {
+            precision: None,
+            with_timezone: true,
+        });
+    }
+
+    if normalized == "TIMETZ" {
+        return Some(DataType::Time {
+            precision: None,
+            with_timezone: true,
+        });
+    }
+
+    if normalized.starts_with("TIMESTAMP") {
+        return Some(DataType::Timestamp {
+            precision: parse_type_length(ty, &["TIMESTAMP"]).flatten(),
+            with_timezone: normalized.contains("WITH TIME ZONE"),
+        });
+    }
+
+    if normalized.starts_with("TIME") {
+        return Some(DataType::Time {
+            precision: parse_type_length(ty, &["TIME"]).flatten(),
+            with_timezone: normalized.contains("WITH TIME ZONE"),
+        });
+    }
+
+    None
+}
+
+fn parse_mysql_time_type(ty: &str) -> Option<DataType> {
+    let normalized = normalize_type_name(ty);
+
+    if normalized.starts_with("TIMESTAMP") {
+        return Some(DataType::Timestamp {
+            precision: parse_type_length(ty, &["TIMESTAMP"]).flatten(),
+            with_timezone: false,
+        });
+    }
+
+    if normalized.starts_with("TIME") {
+        return Some(DataType::Time {
+            precision: parse_type_length(ty, &["TIME"]).flatten(),
+            with_timezone: false,
+        });
+    }
+
+    None
+}
+
+fn parse_type_length(ty: &str, names: &[&str]) -> Option<Option<u32>> {
+    let normalized = normalize_type_name(ty);
+
+    for name in names {
+        if normalized == *name {
+            return Some(None);
+        }
+
+        let prefix = format!("{}(", name);
+        if normalized.starts_with(&prefix) && normalized.ends_with(')') {
+            let inner = &normalized[prefix.len()..normalized.len() - 1];
+            return Some(inner.trim().parse().ok());
+        }
+    }
+
+    None
+}
+
+fn parse_precision_and_scale(ty: &str, name: &str) -> Option<(Option<u32>, Option<u32>)> {
+    let normalized = normalize_type_name(ty);
+
+    if normalized == name {
+        return Some((None, None));
+    }
+
+    let prefix = format!("{}(", name);
+    if !normalized.starts_with(&prefix) || !normalized.ends_with(')') {
+        return None;
+    }
+
+    let inner = &normalized[prefix.len()..normalized.len() - 1];
+    let mut parts = inner.split(',').map(str::trim);
+    let precision = parts.next().and_then(|part| part.parse().ok());
+    let scale = parts.next().and_then(|part| part.parse().ok());
+    Some((precision, scale))
+}
+
+fn parse_mysql_value_list(ty: &str, name: &str) -> Option<Vec<String>> {
+    let normalized = normalize_type_name(ty);
+    let prefix = format!("{}(", name);
+    if !normalized.starts_with(&prefix) || !normalized.ends_with(')') {
+        return None;
+    }
+
+    let start = ty.find('(')? + 1;
+    let end = ty.rfind(')')?;
+    let inner = &ty[start..end];
+    parse_sql_string_list(inner)
+}
+
+fn parse_sql_string_list(values: &str) -> Option<Vec<String>> {
+    let mut chars = values.chars().peekable();
+    let mut parsed = Vec::new();
+
+    loop {
+        while matches!(chars.peek(), Some(c) if c.is_ascii_whitespace() || *c == ',') {
+            chars.next();
+        }
+
+        if chars.peek().is_none() {
+            break;
+        }
+
+        if chars.next()? != '\'' {
+            return None;
+        }
+
+        let mut value = String::new();
+        loop {
+            match chars.next()? {
+                '\'' => {
+                    if matches!(chars.peek(), Some('\'')) {
+                        chars.next();
+                        value.push('\'');
+                    } else {
+                        break;
+                    }
+                }
+                ch => value.push(ch),
+            }
+        }
+
+        parsed.push(value);
+    }
+
+    Some(parsed)
+}
+
+fn parse_qualified_identifier(ty: &str) -> Option<(String, Option<String>)> {
+    if ty.contains('(') || ty.contains(' ') || ty.is_empty() {
+        return None;
+    }
+
+    let (schema, name) = match ty.rsplit_once('.') {
+        Some((schema, name)) => (
+            Some(unquote_identifier(schema.trim())),
+            unquote_identifier(name.trim()),
+        ),
+        None => (None, unquote_identifier(ty)),
+    };
+
+    Some((name, schema))
+}
+
+fn unquote_identifier(value: &str) -> String {
+    value.trim_matches('"').trim_matches('`').to_string()
+}
+
+fn normalize_type_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_uppercase()
+}
+
 /// Default value for a column
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
@@ -511,5 +939,101 @@ impl ReferenceAction {
             ReferenceAction::SetNull => "SET NULL",
             ReferenceAction::SetDefault => "SET DEFAULT",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_postgres_types_from_dialect_tuple() {
+        assert_eq!(
+            DataType::from((SqlDialect::Postgres, "VARCHAR(255)".to_string())),
+            DataType::VarChar { length: Some(255) }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Postgres, "NUMERIC(10, 2)".to_string())),
+            DataType::Numeric {
+                precision: Some(10),
+                scale: Some(2),
+            }
+        );
+        assert_eq!(
+            DataType::from((
+                SqlDialect::Postgres,
+                "TIMESTAMP(3) WITH TIME ZONE".to_string()
+            )),
+            DataType::Timestamp {
+                precision: Some(3),
+                with_timezone: true,
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Postgres, "INTEGER[]".to_string())),
+            DataType::Array {
+                element_type: Box::new(DataType::Integer),
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Postgres, "\"public\".\"status\"".to_string())),
+            DataType::Custom {
+                name: "status".to_string(),
+                schema: Some("public".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_mysql_types_from_dialect_tuple() {
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "INT AUTO_INCREMENT".to_string())),
+            DataType::Serial
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "TINYINT(1)".to_string())),
+            DataType::Boolean
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "MEDIUMINT UNSIGNED".to_string())),
+            DataType::MediumInt { unsigned: true }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "ENUM('draft', 'published')".to_string())),
+            DataType::Enum_ {
+                values: vec!["draft".to_string(), "published".to_string()],
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Mysql, "VARBINARY(255)".to_string())),
+            DataType::VarBinary { length: Some(255) }
+        );
+    }
+
+    #[test]
+    fn parses_sqlite_types_from_dialect_tuple() {
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "INTEGER".to_string())),
+            DataType::SqliteInteger
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "VARCHAR(255)".to_string())),
+            DataType::VarChar { length: Some(255) }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "NUMERIC(10, 2)".to_string())),
+            DataType::Numeric {
+                precision: Some(10),
+                scale: Some(2),
+            }
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "BOOLEAN".to_string())),
+            DataType::Boolean
+        );
+        assert_eq!(
+            DataType::from((SqlDialect::Sqlite, "BLOB".to_string())),
+            DataType::SqliteBlob
+        );
     }
 }
