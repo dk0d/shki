@@ -390,10 +390,7 @@ impl SnapshotProvider for Postgres {
         Ok(map)
     }
 
-    async fn get_tables(
-        &self,
-        schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, Table>> {
+    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, Table>> {
         let table_rows = if let Some(schema) = schema {
             sqlx::query_as::<_, PgTableRow>(
                 r#"
@@ -661,8 +658,11 @@ impl SnapshotProvider for Postgres {
                     "FOREIGN KEY" => Constraint::ForeignKey(ForeignKeyConstraint {
                         name: Some(row.constraint_name.clone()),
                         columns: Vec::new(),
-                        references_schema: row.foreign_table_schema.clone(),
-                        references_table: row.foreign_table_name.clone().unwrap_or_default(),
+                        references: (
+                            row.foreign_table_name.clone().unwrap_or_default(),
+                            row.foreign_table_schema.clone(),
+                        )
+                            .into(),
                         references_columns: Vec::new(),
                         on_delete: parse_reference_action(row.delete_action.as_deref()),
                         on_update: parse_reference_action(row.update_action.as_deref()),
@@ -705,16 +705,6 @@ impl SnapshotProvider for Postgres {
                         constraint
                             .references_columns
                             .push(foreign_column_name.clone());
-                    }
-
-                    if constraint.references_table.is_empty() {
-                        constraint.references_table =
-                            row.foreign_table_name.clone().ok_or_else(|| {
-                                ShkiError::introspection(format!(
-                                    "Foreign key '{}' is missing referenced table metadata",
-                                    row.constraint_name
-                                ))
-                            })?;
                     }
                 }
                 Constraint::Check(_) | Constraint::Exclusion(_) => {}
