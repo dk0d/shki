@@ -341,12 +341,16 @@ macro_rules! backend_suite {
 
             #[tokio::test]
             async fn apply_all_and_pending_detection() {
-                scenario_apply_all_and_pending_detection(<$backend as TestBackend>::setup("apply_all").await).await;
+                scenario_apply_all_and_pending_detection(
+                    <$backend as TestBackend>::setup("apply_all").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn rollback_single() {
-                scenario_rollback_single(<$backend as TestBackend>::setup("rollback_single").await).await;
+                scenario_rollback_single(<$backend as TestBackend>::setup("rollback_single").await)
+                    .await;
             }
 
             #[tokio::test]
@@ -356,32 +360,48 @@ macro_rules! backend_suite {
 
             #[tokio::test]
             async fn rollback_count() {
-                scenario_rollback_count(<$backend as TestBackend>::setup("rollback_count").await).await;
+                scenario_rollback_count(<$backend as TestBackend>::setup("rollback_count").await)
+                    .await;
             }
 
             #[tokio::test]
             async fn transaction_rollback_on_error() {
-                scenario_transaction_rollback_on_error(<$backend as TestBackend>::setup("tx_rollback").await).await;
+                scenario_transaction_rollback_on_error(
+                    <$backend as TestBackend>::setup("tx_rollback").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn checksum_validation_blocks_new_migrations() {
-                scenario_checksum_validation_blocks_new_migrations(<$backend as TestBackend>::setup("checksum").await).await;
+                scenario_checksum_validation_blocks_new_migrations(
+                    <$backend as TestBackend>::setup("checksum").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn custom_migration_table() {
-                scenario_custom_migration_table(<$backend as TestBackend>::setup("migration_table").await).await;
+                scenario_custom_migration_table(
+                    <$backend as TestBackend>::setup("migration_table").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn cli_migrate_applies_pending() {
-                scenario_cli_migrate_applies_pending(<$backend as TestBackend>::setup("cli_migrate").await).await;
+                scenario_cli_migrate_applies_pending(
+                    <$backend as TestBackend>::setup("cli_migrate").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn cli_down_dry_run_does_not_modify_database() {
-                scenario_cli_down_dry_run_does_not_modify_database(<$backend as TestBackend>::setup("cli_down").await).await;
+                scenario_cli_down_dry_run_does_not_modify_database(
+                    <$backend as TestBackend>::setup("cli_down").await,
+                )
+                .await;
             }
         }
     };

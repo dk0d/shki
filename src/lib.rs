@@ -35,12 +35,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             display_config(&config);
             Ok(())
         }
+
         Commands::Init {
             path,
             dialect,
             // language,
             mode,
         } => init::cmd_init(&path, dialect, mode).await,
+
         Commands::Create {
             name,
             sql,
@@ -58,8 +60,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
+
         Commands::Status => status::cmd_status(&config).await,
+
         Commands::Migrate => migrate::cmd_migrate(&config).await, //
+
         //     Commands::Generate {
         //         name,
         //         schema,
@@ -67,13 +72,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         //     } => generate::cmd_generate_sql(&config, name, schema, dry_run),
         //
         //     Commands::Status => status::cmd_status(&config).await,
-        //
-        //     Commands::Pull {
-        //         format,
-        //         output,
-        //         with_migration_table,
-        //     } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
-        //
+        Commands::Pull {
+            format,
+            output,
+            with_migration_table,
+        } => introspect::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
+
         //     Commands::Bootstrap {
         //         name,
         //         legacy_tables,

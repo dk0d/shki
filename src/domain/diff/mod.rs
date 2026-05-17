@@ -1,7 +1,3 @@
-use indexmap::IndexMap;
-use std::collections::HashSet;
-
-use crate::Result;
 use crate::schema::*;
 
 /// A diff between two schema snapshots

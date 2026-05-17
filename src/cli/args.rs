@@ -228,21 +228,21 @@ pub enum Commands {
         #[arg(short, long)]
         edit: bool,
     },
-    //
-    // /// Pull (introspect) the database schema
-    // Pull {
-    //     /// Output format (json, sql, rust)
-    //     #[arg(short, long, default_value = "sql")]
-    //     format: String,
-    //
-    //     /// Output file (defaults to stdout)
-    //     #[arg(long)]
-    //     output: Option<PathBuf>,
-    //
-    //     #[arg(long, short, default_value_t = false)]
-    //     with_migration_table: bool,
-    // },
-    //
+
+    /// Pull (introspect) the database schema
+    Pull {
+        /// Output format (json, sql, rust)
+        #[arg(short, long, default_value = "sql")]
+        format: String,
+
+        /// Output file (defaults to stdout)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        #[arg(long, short, default_value_t = false)]
+        with_migration_table: bool,
+    },
+
     // /// Bootstrap shki from an existing database state
     // #[command(visible_alias = "strap")]
     // Bootstrap {
