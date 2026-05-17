@@ -1,4 +1,5 @@
 .env*
+.old*
 migrations
 /target
 /db
