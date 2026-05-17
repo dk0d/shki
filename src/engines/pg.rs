@@ -4,7 +4,7 @@ use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
@@ -12,28 +12,28 @@ use sqlx::{PgExecutor, Pool};
 use std::path::Path;
 
 pub struct Postgres {
-    migrations_table: TableId,
+    migrations_table: EntityName,
     pub(crate) pool: Pool<sqlx::Postgres>,
 }
 
 impl Postgres {
-    pub fn new(pool: Pool<sqlx::Postgres>, migrations_table: TableId) -> Self {
+    pub fn new(pool: Pool<sqlx::Postgres>, migrations_table: EntityName) -> Self {
         Self {
             pool,
             migrations_table,
         }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
+    pub fn with_table(mut self, table: EntityName) -> Self {
         self.migrations_table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &EntityName {
         &self.migrations_table
     }
 
-    fn insert_migration_query(&self, table: &TableId) -> String {
+    fn insert_migration_query(&self, table: &EntityName) -> String {
         let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(table);
         format!(
             "INSERT INTO {} (name, checksum) VALUES ($1, $2) returning id, name, checksum, applied_at",

@@ -2,8 +2,10 @@
 //!
 //! This module converts diff statements into executable SQL.
 
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::SqlDialect;
+
+use super::utils::{qualified_name, qualified_table_name, quote_identifier};
 
 /// SQL generator for a specific dialect
 pub struct SqlGenerator {
@@ -29,37 +31,15 @@ impl SqlGenerator {
     // Helper methods
 
     fn quote_identifier(&self, name: impl Into<String>) -> String {
-        let name: String = name.into();
-        match self.dialect {
-            SqlDialect::Postgres | SqlDialect::Sqlite => {
-                format!("\"{}\"", name.replace('"', "\"\""))
-            }
-            SqlDialect::Mysql => {
-                format!("`{}`", name.replace('`', "``"))
-            }
-        }
+        quote_identifier(&self.dialect, name)
     }
 
-    pub fn qualified_table_name(&self, id: &TableId) -> String {
-        match id.schema() {
-            Some(s) => format!(
-                "{}.{}",
-                self.quote_identifier(s),
-                self.quote_identifier(id.name.clone())
-            ),
-            None => self.quote_identifier(id.name.clone()),
-        }
+    pub fn qualified_table_name(&self, id: &EntityName) -> String {
+        qualified_table_name(&self.dialect, id)
     }
 
     pub fn qualified_name(&self, name: impl Into<String>, schema: &Option<String>) -> String {
-        match schema {
-            Some(s) => format!(
-                "{}.{}",
-                self.quote_identifier(s),
-                self.quote_identifier(name)
-            ),
-            None => self.quote_identifier(name),
-        }
+        qualified_name(&self.dialect, name, schema)
     }
 }
 
@@ -69,7 +49,7 @@ mod tests {
 
     #[test]
     fn quotes_identifiers_per_dialect() {
-        let table = TableId::new("odd\"name", Some("app\"schema".to_string()));
+        let table = EntityName::new("odd\"name", Some("app\"schema".to_string()));
 
         assert_eq!(
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&table),

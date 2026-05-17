@@ -1,9 +1,9 @@
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::sql::utils::qualified_table_name;
 
-pub fn delete_table(dialect: &SqlDialect, table: &TableId) -> String {
+pub fn delete_table(dialect: &SqlDialect, table: &EntityName) -> String {
     let table_name = qualified_table_name(dialect, table);
 
     match dialect {
@@ -16,7 +16,7 @@ pub fn delete_table(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
+pub fn ensure_migrations(dialect: &SqlDialect, table: &EntityName) -> String {
     let generator = SqlGenerator::new(dialect);
     let table_name = generator.qualified_table_name(table);
 
@@ -60,7 +60,7 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
+pub fn select_migrations(dialect: &SqlDialect, table: &EntityName) -> String {
     let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => format!(
@@ -79,7 +79,7 @@ pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
+pub fn insert_migration(dialect: &SqlDialect, table: &EntityName) -> String {
     let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => {
@@ -101,8 +101,8 @@ pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
 mod tests {
     use super::*;
 
-    fn table() -> TableId {
-        TableId::new("__shki_migrations", Some("meta".to_string()))
+    fn table() -> EntityName {
+        EntityName::new("__shki_migrations", Some("meta".to_string()))
     }
 
     #[test]

@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use super::types::ReferenceAction;
 
+pub enum ConstraintType {
+    PrimaryKey,
+    Unique,
+    ForeignKey,
+    Check,
+    Exclusion,
+}
+
 /// A table constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]

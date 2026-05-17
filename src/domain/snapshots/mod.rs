@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::migrate::manager::MigrationInfo;
-use super::models::table_id::TableId;
+use super::models::entity_name::EntityName;
 use super::schema::{Column, Constraint, DbEnum, Index, Sequence, SqlDialect, Table, View};
 
 /// A snapshot of a database schema
@@ -38,19 +38,19 @@ pub struct Snapshot {
 
     /// Tables in the schema
     #[serde(default)]
-    pub tables: IndexMap<TableId, Table>,
+    pub tables: IndexMap<EntityName, Table>,
 
     /// Enums in the schema
     #[serde(default)]
-    pub enums: IndexMap<String, DbEnum>,
+    pub enums: IndexMap<EntityName, DbEnum>,
 
     /// Sequences in the schema
     #[serde(default)]
-    pub sequences: IndexMap<String, Sequence>,
+    pub sequences: IndexMap<EntityName, Sequence>,
 
     /// Views in the schema
     #[serde(default)]
-    pub views: IndexMap<String, View>,
+    pub views: IndexMap<EntityName, View>,
 
     /// Schemas (PostgreSQL)
     #[serde(default)]
@@ -91,17 +91,23 @@ pub trait Introspectable {
 pub trait SnapshotProvider {
     async fn get_schemas(&self, schema: &Option<String>) -> Result<Vec<String>>;
     async fn get_extensions(&self, schema: &Option<String>) -> Result<Vec<String>>;
-    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<String, DbEnum>>;
-    async fn get_sequences(&self, schema: &Option<String>) -> Result<IndexMap<String, Sequence>>;
-    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<TableId, Table>>;
-    async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<TableId, View>>;
+    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, DbEnum>>;
+    async fn get_sequences(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<EntityName, Sequence>>;
+    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, Table>>;
+    async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, View>>;
     async fn get_columns(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, IndexMap<String, Column>>>;
+    ) -> Result<IndexMap<EntityName, IndexMap<String, Column>>>;
     async fn get_constraints(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, Vec<Constraint>>>;
-    async fn get_indexes(&self, schema: &Option<String>) -> Result<IndexMap<TableId, Vec<Index>>>;
+    ) -> Result<IndexMap<EntityName, Vec<Constraint>>>;
+    async fn get_indexes(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<EntityName, Vec<Index>>>;
 }

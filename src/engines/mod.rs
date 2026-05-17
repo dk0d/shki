@@ -17,7 +17,7 @@ use std::pin::Pin;
 use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::MigrationRow;
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::*;
 use crate::snapshots::{Introspectable, Snapshot, SnapshotProvider};
 
@@ -32,12 +32,12 @@ pub enum Engine {
 }
 
 impl Engine {
-    pub fn detached(dialect: SqlDialect, table: TableId) -> Self {
+    pub fn detached(dialect: SqlDialect, table: EntityName) -> Self {
         Engine::Detached(Detached::new(dialect, table))
     }
 
     pub async fn from_config(config: &Config) -> Result<Self> {
-        let table: TableId = config.migrations.table.clone().into();
+        let table: EntityName = config.migrations.table.clone().into();
 
         if config.database_url.is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
@@ -78,7 +78,7 @@ impl Engine {
         }
     }
 
-    pub fn with_table(self, table: TableId) -> Self {
+    pub fn with_table(self, table: EntityName) -> Self {
         match self {
             Engine::Postgres(engine) => Engine::Postgres(engine.with_table(table)),
             Engine::Sqlite(engine) => Engine::Sqlite(engine.with_table(table)),
@@ -87,7 +87,7 @@ impl Engine {
         }
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &EntityName {
         match self {
             Engine::Postgres(engine) => engine.table(),
             Engine::Sqlite(engine) => engine.table(),

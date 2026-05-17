@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 use sqlx::Row;
 
 use crate::engines::pg::Postgres;
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, DefaultValue, ForeignKeyConstraint,
     GeneratedColumn, IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder,
@@ -272,7 +272,7 @@ impl SnapshotProvider for Postgres {
         Ok(extensions)
     }
 
-    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<String, DbEnum>> {
+    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, DbEnum>> {
         let enum_rows = if let Some(schema) = schema {
             sqlx::query(
                 r#"
@@ -316,7 +316,7 @@ impl SnapshotProvider for Postgres {
             let name: String = row.get("name");
             let values: Vec<String> = row.get("values");
             map.insert(
-                name.clone(),
+                (name.clone(), Some(schema.clone())).into(),
                 DbEnum {
                     name,
                     schema: Some(schema),
@@ -329,7 +329,10 @@ impl SnapshotProvider for Postgres {
         Ok(map)
     }
 
-    async fn get_sequences(&self, _schema: &Option<String>) -> Result<IndexMap<String, Sequence>> {
+    async fn get_sequences(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<EntityName, Sequence>> {
         let rows = sqlx::query_as::<_, PgSequenceRow>(
             r#"
         SELECT
@@ -352,7 +355,7 @@ impl SnapshotProvider for Postgres {
         let mut map = IndexMap::new();
         for row in rows {
             map.insert(
-                row.name.clone(),
+                (row.name.clone(), Some(row.schema.clone())).into(),
                 Sequence {
                     name: row.name,
                     schema: Some(row.schema),
@@ -372,7 +375,7 @@ impl SnapshotProvider for Postgres {
     async fn get_tables(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, crate::schema::Table>> {
+    ) -> Result<IndexMap<EntityName, crate::schema::Table>> {
         let table_rows = if let Some(schema) = schema {
             sqlx::query(
                 r#"
@@ -438,7 +441,7 @@ impl SnapshotProvider for Postgres {
     async fn get_views(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, crate::schema::View>> {
+    ) -> Result<IndexMap<EntityName, crate::schema::View>> {
         let rows = sqlx::query_as::<_, PgViewRow>(
             r#"
         SELECT
@@ -489,7 +492,7 @@ impl SnapshotProvider for Postgres {
     async fn get_columns(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, IndexMap<String, crate::schema::Column>>> {
+    ) -> Result<IndexMap<EntityName, IndexMap<String, crate::schema::Column>>> {
         let rows = sqlx::query_as::<_, PgInfoSchemaColumnRow>(
             r#"
         SELECT 
@@ -523,10 +526,10 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut columns_by_table: IndexMap<TableId, IndexMap<String, Column>> = IndexMap::new();
+        let mut columns_by_table: IndexMap<EntityName, IndexMap<String, Column>> = IndexMap::new();
 
         for row in rows {
-            let table_id = TableId::new(row.table_name.clone(), Some(row.table_schema.clone()));
+            let table_id = EntityName::new(row.table_name.clone(), Some(row.table_schema.clone()));
             let column = Column::from(row);
             columns_by_table
                 .entry(table_id)
@@ -540,7 +543,7 @@ impl SnapshotProvider for Postgres {
     async fn get_constraints(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, Vec<crate::schema::Constraint>>> {
+    ) -> Result<IndexMap<EntityName, Vec<crate::schema::Constraint>>> {
         let rows = sqlx::query_as::<_, PgConstraintRow>(
             r#"
         SELECT
@@ -598,12 +601,12 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut constraints_by_table: IndexMap<TableId, IndexMap<String, Constraint>> =
+        let mut constraints_by_table: IndexMap<EntityName, IndexMap<String, Constraint>> =
             IndexMap::new();
 
         for row in rows {
             let constraint_map = constraints_by_table
-                .entry(TableId::new(
+                .entry(EntityName::new(
                     row.table_name.clone(),
                     Some(row.table_schema.clone()),
                 ))
@@ -693,7 +696,7 @@ impl SnapshotProvider for Postgres {
     async fn get_indexes(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, Vec<crate::schema::Index>>> {
+    ) -> Result<IndexMap<EntityName, Vec<crate::schema::Index>>> {
         let rows = sqlx::query_as::<_, PgIndexRow>(
             r#"
         SELECT
@@ -756,11 +759,11 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut indexes_by_table: IndexMap<TableId, IndexMap<String, Index>> = IndexMap::new();
+        let mut indexes_by_table: IndexMap<EntityName, IndexMap<String, Index>> = IndexMap::new();
 
         for row in rows {
             let index_map = indexes_by_table
-                .entry(TableId::new(
+                .entry(EntityName::new(
                     row.table_name.clone(),
                     Some(row.table_schema.clone()),
                 ))

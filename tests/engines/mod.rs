@@ -8,7 +8,7 @@ pub use sqlite::*;
 
 use shki::engines::Engine;
 use shki::migrate::manager::MigrationManager;
-use shki::models::table_id::TableId;
+use shki::models::entity_name::EntityName;
 use shki::schema::SqlDialect;
 use shki::{Cli, Commands, CommonArgs};
 use sqlx::{Executor, Pool, Postgres};
@@ -21,7 +21,7 @@ pub trait TestBackend: Sized {
     fn migrations_dir(&self) -> &Path;
     fn database_url(&self) -> String;
     fn migration_schema(&self) -> Option<&str>;
-    fn engine(&self, table: TableId) -> Engine;
+    fn engine(&self, table: EntityName) -> Engine;
     fn unique_name(&self, prefix: &str) -> String;
     fn text_type(&self) -> &'static str;
     fn primary_key_type(&self) -> &'static str;
@@ -36,7 +36,7 @@ pub trait TestBackend: Sized {
     }
 
     fn manager_with_table(&self, table_name: &str) -> MigrationManager {
-        let table: TableId = (
+        let table: EntityName = (
             table_name.to_string(),
             self.migration_schema().map(str::to_string),
         )

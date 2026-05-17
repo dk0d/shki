@@ -2,26 +2,26 @@ use std::path::Path;
 
 use super::EngineDriver;
 use crate::migrate::manager::MigrationRow;
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::SqlDialect;
 use crate::{Result, ShkiError};
 
 pub struct Detached {
     dialect: SqlDialect,
-    table: TableId,
+    table: EntityName,
 }
 
 impl Detached {
-    pub fn new(dialect: SqlDialect, table: TableId) -> Self {
+    pub fn new(dialect: SqlDialect, table: EntityName) -> Self {
         Self { dialect, table }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
+    pub fn with_table(mut self, table: EntityName) -> Self {
         self.table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &EntityName {
         &self.table
     }
 

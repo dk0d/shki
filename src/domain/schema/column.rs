@@ -122,6 +122,11 @@ impl Column {
         self
     }
 
+    pub fn as_nullable(mut self, is_nullable: bool) -> Self {
+        self.nullable = is_nullable;
+        self
+    }
+
     /// Set the column as a primary key
     pub fn primary_key(mut self) -> Self {
         self.primary_key = true;
@@ -412,6 +417,11 @@ impl ColumnBuilder {
     /// Set the column as nullable
     pub fn nullable(mut self) -> Self {
         self.column = self.column.nullable();
+        self
+    }
+
+    pub fn as_nullable(mut self, is_nullable: bool) -> Self {
+        self.column = self.column.as_nullable(is_nullable);
         self
     }
 

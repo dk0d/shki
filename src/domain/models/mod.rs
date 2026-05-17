@@ -1,1 +1,1 @@
-pub mod table_id;
+pub mod entity_name;

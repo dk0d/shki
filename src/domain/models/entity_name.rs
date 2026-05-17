@@ -1,17 +1,19 @@
+use serde::{Deserialize, Serialize};
+
 /// Identifier for a table, combining name and optional schema
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TableId {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EntityName {
     pub name: String,
     pub schema: Option<String>,
 }
 
-impl From<(String, Option<String>)> for TableId {
+impl From<(String, Option<String>)> for EntityName {
     fn from((name, schema): (String, Option<String>)) -> Self {
         Self { name, schema }
     }
 }
 
-impl From<&(String, Option<String>)> for TableId {
+impl From<&(String, Option<String>)> for EntityName {
     fn from((name, schema): &(String, Option<String>)) -> Self {
         Self {
             name: name.clone(),
@@ -20,7 +22,7 @@ impl From<&(String, Option<String>)> for TableId {
     }
 }
 
-impl TableId {
+impl EntityName {
     pub fn new(name: impl Into<String>, schema: Option<String>) -> Self {
         Self {
             name: name.into(),
@@ -50,19 +52,19 @@ impl TableId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColumnId {
-    table: TableId,
+    table: EntityName,
     name: String,
 }
 
 impl ColumnId {
-    pub fn new(table: TableId, name: impl Into<String>) -> Self {
+    pub fn new(table: EntityName, name: impl Into<String>) -> Self {
         Self {
             table,
             name: name.into(),
         }
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &EntityName {
         &self.table
     }
 

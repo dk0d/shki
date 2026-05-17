@@ -9,7 +9,7 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{CommonArgs, ShkiError, schema::SqlDialect};
+use crate::{CommonArgs, ShkiError, models::entity_name::EntityName, schema::SqlDialect};
 use clap::ValueEnum;
 
 pub(crate) fn is_false(value: &bool) -> bool {
@@ -105,16 +105,43 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrationTableId {
+    /// Name of the migrations table
+    #[serde(default = "default_migrations_table")]
+    pub name: String,
+
+    /// Schema for the migrations table (PostgreSQL)
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default = "default_migrations_schema"
+    )]
+    pub schema: Option<String>,
+}
+
+impl Default for MigrationTableId {
+    fn default() -> Self {
+        Self {
+            name: default_migrations_table(),
+            schema: default_migrations_schema(),
+        }
+    }
+}
+
+impl From<MigrationTableId> for EntityName {
+    fn from(config: MigrationTableId) -> Self {
+        Self {
+            schema: config.schema,
+            name: config.name,
+        }
+    }
+}
+
 /// Migration-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationConfig {
-    /// Name of the migrations table
-    #[serde(default = "default_migrations_table")]
-    pub table: String,
-
-    /// Schema for the migrations table (PostgreSQL)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<String>,
+    #[serde(flatten)]
+    pub table: MigrationTableId,
 
     /// Migration file name prefix style
     #[serde(default)]
@@ -129,13 +156,16 @@ fn default_migrations_table() -> String {
     "__shki_migrations".to_string()
 }
 
+fn default_migrations_schema() -> Option<String> {
+    "shki".to_string().into()
+}
+
 impl Default for MigrationConfig {
     fn default() -> Self {
         Self {
-            table: default_migrations_table(),
-            schema: None,
             prefix: MigrationPrefix::Index,
             generate_down: false,
+            table: MigrationTableId::default(),
         }
     }
 }
@@ -351,7 +381,7 @@ generate_down = false
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
         assert_eq!(config.out, PathBuf::from("cli-migrations"));
-        assert_eq!(config.migrations.table, "env_migrations");
+        assert_eq!(config.migrations.table.name, "env_migrations");
         assert_eq!(config.migrations.prefix, MigrationPrefix::Timestamp);
         assert!(config.migrations.generate_down);
 

@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 
 use crate::Result;
 use crate::engines::detached::Detached;
-use crate::models::table_id::TableId;
+use crate::models::entity_name::EntityName;
 use crate::schema::{Column, Constraint, DbEnum, Sequence, Table, View};
 use crate::snapshots::SnapshotProvider;
 
@@ -16,38 +16,41 @@ impl SnapshotProvider for Detached {
         Err(self.unavailable())
     }
 
-    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<String, DbEnum>> {
+    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, DbEnum>> {
         Err(self.unavailable())
     }
 
-    async fn get_sequences(&self, schema: &Option<String>) -> Result<IndexMap<String, Sequence>> {
+    async fn get_sequences(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<EntityName, Sequence>> {
         Err(self.unavailable())
     }
 
-    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<TableId, Table>> {
+    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, Table>> {
         Err(self.unavailable())
     }
 
-    async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<TableId, View>> {
+    async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, View>> {
         Err(self.unavailable())
     }
 
     async fn get_columns(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, IndexMap<String, Column>>> {
+    ) -> Result<IndexMap<EntityName, IndexMap<String, Column>>> {
         Err(self.unavailable())
     }
     async fn get_constraints(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, Vec<Constraint>>> {
+    ) -> Result<IndexMap<EntityName, Vec<Constraint>>> {
         Err(self.unavailable())
     }
     async fn get_indexes(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<TableId, Vec<crate::schema::Index>>> {
+    ) -> Result<IndexMap<EntityName, Vec<crate::schema::Index>>> {
         Err(self.unavailable())
     }
 }
