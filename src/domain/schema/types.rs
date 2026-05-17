@@ -869,6 +869,20 @@ pub enum DefaultValue {
     Identity { always: bool },
 }
 
+impl std::fmt::Display for DefaultValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DefaultValue::Null => write!(f, "null"),
+            DefaultValue::Identity { always } => {
+                write!(f, "{}", if *always { "ALWAYS" } else { "BY DEFAULT" })
+            }
+            DefaultValue::Sql(expression) => write!(f, "{}", expression),
+            DefaultValue::Literal(val) => write!(f, "{}", val),
+            DefaultValue::Sequence(val) => write!(f, "{}", val),
+        }
+    }
+}
+
 impl DefaultValue {
     /// Create a literal default value
     pub fn literal(value: impl Into<String>) -> Self {
@@ -922,6 +936,16 @@ pub struct GeneratedColumn {
     pub stored: bool,
 }
 
+impl std::fmt::Display for GeneratedColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.stored {
+            write!(f, "GENERATED ALWAYS AS ({}) STORED", self.expression)
+        } else {
+            write!(f, "GENERATED ALWAYS AS ({})", self.expression)
+        }
+    }
+}
+
 /// On conflict action for constraints
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "UPPERCASE")]
@@ -944,6 +968,12 @@ pub enum ReferenceAction {
     Cascade,
     SetNull,
     SetDefault,
+}
+
+impl std::fmt::Display for ReferenceAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_sql())
+    }
 }
 
 impl ReferenceAction {
