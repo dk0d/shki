@@ -409,6 +409,14 @@ impl DataType {
             _ => "TEXT".to_string(),
         }
     }
+
+    pub fn to_string(&self, dialect: &SqlDialect) -> String {
+        match dialect {
+            SqlDialect::Postgres => self.to_postgres_sql(),
+            SqlDialect::Sqlite => self.to_sqlite_sql(),
+            SqlDialect::Mysql => self.to_mysql_sql(),
+        }
+    }
 }
 
 impl DataType {
@@ -473,50 +481,56 @@ fn parse_postgres_type(value: &str) -> DataType {
         return parsed;
     }
 
+    let core = match normalized.as_str() {
+        "SMALLINT" | "INT2" => Some(DataType::SmallInt),
+        "INTEGER" | "INT" | "INT4" => Some(DataType::Integer),
+        "BIGINT" | "INT8" => Some(DataType::BigInt),
+        "SERIAL" | "SERIAL4" => Some(DataType::Serial),
+        "BIGSERIAL" | "SERIAL8" => Some(DataType::BigSerial),
+        "SMALLSERIAL" | "SERIAL2" => Some(DataType::SmallSerial),
+        "REAL" | "FLOAT4" => Some(DataType::Real),
+        "DOUBLE PRECISION" | "FLOAT8" => Some(DataType::DoublePrecision),
+        "MONEY" => Some(DataType::Money),
+        "TEXT" => Some(DataType::Text),
+        "CITEXT" => Some(DataType::Citext),
+        "BYTEA" => Some(DataType::ByteA),
+        "BOOLEAN" | "BOOL" => Some(DataType::Boolean),
+        "DATE" => Some(DataType::Date),
+        "INTERVAL" => Some(DataType::Interval),
+        "UUID" => Some(DataType::Uuid),
+        "JSON" => Some(DataType::Json),
+        "JSONB" => Some(DataType::JsonB),
+        "INET" => Some(DataType::Inet),
+        "CIDR" => Some(DataType::Cidr),
+        "MACADDR" => Some(DataType::MacAddr),
+        "MACADDR8" => Some(DataType::MacAddr8),
+        "POINT" => Some(DataType::Point),
+        "LINE" => Some(DataType::Line),
+        "LSEG" => Some(DataType::LSeg),
+        "BOX" => Some(DataType::Box),
+        "PATH" => Some(DataType::Path),
+        "POLYGON" => Some(DataType::Polygon),
+        "CIRCLE" => Some(DataType::Circle),
+        "INT4RANGE" => Some(DataType::Int4Range),
+        "INT8RANGE" => Some(DataType::Int8Range),
+        "NUMRANGE" => Some(DataType::NumRange),
+        "TSRANGE" => Some(DataType::TsRange),
+        "TSTZRANGE" => Some(DataType::TsTzRange),
+        "DATERANGE" => Some(DataType::DateRange),
+        _ => None,
+    };
+
+    if let Some(core) = core {
+        return core;
+    }
+
     if let Some((name, schema)) = parse_qualified_identifier(ty) {
         return DataType::Custom { name, schema };
     }
 
-    match normalized.as_str() {
-        "SMALLINT" | "INT2" => DataType::SmallInt,
-        "INTEGER" | "INT" | "INT4" => DataType::Integer,
-        "BIGINT" | "INT8" => DataType::BigInt,
-        "SERIAL" | "SERIAL4" => DataType::Serial,
-        "BIGSERIAL" | "SERIAL8" => DataType::BigSerial,
-        "SMALLSERIAL" | "SERIAL2" => DataType::SmallSerial,
-        "REAL" | "FLOAT4" => DataType::Real,
-        "DOUBLE PRECISION" | "FLOAT8" => DataType::DoublePrecision,
-        "MONEY" => DataType::Money,
-        "TEXT" => DataType::Text,
-        "CITEXT" => DataType::Citext,
-        "BYTEA" => DataType::ByteA,
-        "BOOLEAN" | "BOOL" => DataType::Boolean,
-        "DATE" => DataType::Date,
-        "INTERVAL" => DataType::Interval,
-        "UUID" => DataType::Uuid,
-        "JSON" => DataType::Json,
-        "JSONB" => DataType::JsonB,
-        "INET" => DataType::Inet,
-        "CIDR" => DataType::Cidr,
-        "MACADDR" => DataType::MacAddr,
-        "MACADDR8" => DataType::MacAddr8,
-        "POINT" => DataType::Point,
-        "LINE" => DataType::Line,
-        "LSEG" => DataType::LSeg,
-        "BOX" => DataType::Box,
-        "PATH" => DataType::Path,
-        "POLYGON" => DataType::Polygon,
-        "CIRCLE" => DataType::Circle,
-        "INT4RANGE" => DataType::Int4Range,
-        "INT8RANGE" => DataType::Int8Range,
-        "NUMRANGE" => DataType::NumRange,
-        "TSRANGE" => DataType::TsRange,
-        "TSTZRANGE" => DataType::TsTzRange,
-        "DATERANGE" => DataType::DateRange,
-        _ => DataType::Custom {
-            name: ty.to_string(),
-            schema: None,
-        },
+    DataType::Custom {
+        name: ty.to_string(),
+        schema: None,
     }
 }
 
@@ -728,10 +742,12 @@ fn parse_type_length(ty: &str, names: &[&str]) -> Option<Option<u32>> {
         if normalized == *name {
             return Some(None);
         }
-
         let prefix = format!("{}(", name);
-        if normalized.starts_with(&prefix) && normalized.ends_with(')') {
-            let inner = &normalized[prefix.len()..normalized.len() - 1];
+        let end = normalized.find(")");
+        if normalized.starts_with(&prefix)
+            && let Some(end) = end
+        {
+            let inner = &normalized[prefix.len()..end];
             return Some(inner.trim().parse().ok());
         }
     }
