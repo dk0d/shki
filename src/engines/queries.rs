@@ -1,7 +1,7 @@
 use crate::models::entity_name::EntityName;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
-use crate::sql::utils::qualified_table_name;
+use crate::sql::statements::qualified_table_name;
 
 pub fn delete_table(dialect: &SqlDialect, table: &EntityName) -> String {
     let table_name = qualified_table_name(dialect, table);

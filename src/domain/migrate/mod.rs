@@ -47,7 +47,7 @@ pub async fn cmd_migrate(config: &Config) -> Result<()> {
         let _checksum = manager.apply_migration(&migration_path).await?;
 
         // let mut snapshot = introspect_db(config).await?;
-        // snapshot.tables.shift_remove(&config.migrations.table);
+        // snapshot.tables.shift_remove(&config.migrations.name());
         // migration_manager.save_post_migration_snapshot(snapshot, &name, &checksum)?;
 
         applied.push(name);

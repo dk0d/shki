@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::models::entity_name::EntityName;
+
 use super::types::ReferenceAction;
 
 pub enum ConstraintType {
@@ -115,11 +117,8 @@ pub struct ForeignKeyConstraint {
     pub name: Option<String>,
     /// Local columns
     pub columns: Vec<String>,
-    /// Referenced table schema (if different)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub references_schema: Option<String>,
     /// Referenced table
-    pub references_table: String,
+    pub references: EntityName,
     /// Referenced columns
     pub references_columns: Vec<String>,
     /// ON DELETE action
@@ -140,14 +139,13 @@ impl ForeignKeyConstraint {
     /// Create a new foreign key constraint
     pub fn new(
         columns: Vec<impl Into<String>>,
-        references_table: impl Into<String>,
+        references_table: impl Into<EntityName>,
         references_columns: Vec<impl Into<String>>,
     ) -> Self {
         Self {
             name: None,
             columns: columns.into_iter().map(Into::into).collect(),
-            references_schema: None,
-            references_table: references_table.into(),
+            references: references_table.into(),
             references_columns: references_columns.into_iter().map(Into::into).collect(),
             on_delete: ReferenceAction::NoAction,
             on_update: ReferenceAction::NoAction,
@@ -159,12 +157,6 @@ impl ForeignKeyConstraint {
     /// Set the constraint name
     pub fn named(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
-        self
-    }
-
-    /// Set the referenced schema
-    pub fn references_schema(mut self, schema: impl Into<String>) -> Self {
-        self.references_schema = Some(schema.into());
         self
     }
 

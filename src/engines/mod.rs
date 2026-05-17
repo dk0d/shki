@@ -37,7 +37,7 @@ impl Engine {
     }
 
     pub async fn from_config(config: &Config) -> Result<Self> {
-        let table: EntityName = config.migrations.table.clone().into();
+        let table: EntityName = config.migrations.entity().clone();
 
         if config.database_url.is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
@@ -132,19 +132,23 @@ where
     async fn introspect(&self, config: &Config) -> Result<Snapshot> {
         let mut snapshot = Snapshot::new(config.dialect);
 
-        snapshot.enums = self.get_enums(&config.migrations.table.schema).await?;
-        snapshot.views = self.get_views(&config.migrations.table.schema).await?;
-        snapshot.sequences = self.get_sequences(&config.migrations.table.schema).await?;
-        snapshot.extensions = self.get_extensions(&config.migrations.table.schema).await?;
+        snapshot.enums = self.get_enums(&config.migrations.entity().schema).await?;
+        snapshot.views = self.get_views(&config.migrations.entity().schema).await?;
+        snapshot.sequences = self
+            .get_sequences(&config.migrations.entity().schema)
+            .await?;
+        snapshot.extensions = self
+            .get_extensions(&config.migrations.entity().schema)
+            .await?;
 
-        let mut tables = self.get_tables(&config.migrations.table.schema).await?;
+        let mut tables = self.get_tables(&config.migrations.entity().schema).await?;
         let constraints = self
-            .get_constraints(&config.migrations.table.schema)
+            .get_constraints(&config.migrations.entity().schema)
             .await?;
 
         dbg!("Got tables: {:#?}", &tables.iter().len());
 
-        let columns = self.get_columns(&config.migrations.table.schema).await?;
+        let columns = self.get_columns(&config.migrations.entity().schema).await?;
 
         columns.into_iter().for_each(|(table_id, cols)| {
             if let Some(table) = tables.get_mut(&table_id) {

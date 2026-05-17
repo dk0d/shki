@@ -103,7 +103,7 @@ pub struct MigrationManager {
 
 impl MigrationManager {
     pub async fn from_config(config: &crate::config::Config) -> Result<Self> {
-        let table: EntityName = config.migrations.table.clone().into();
+        let table: EntityName = config.migrations.entity().clone();
 
         Ok(Self {
             out_dir: config.out_dir(),
