@@ -81,14 +81,13 @@ pub struct CommonArgs {
 
 #[derive(Debug, Serialize, Args, Default)]
 pub struct MigrationArgs {
-
     /// Name of the migrations table
-    #[arg(long,  default_value = None)]
+    #[arg(short='T',long,  default_value = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table: Option<String>,
 
     /// Schema for the migrations table (PostgreSQL)
-    #[arg(long,  default_value = None)]
+    #[arg(short='S', long,  default_value = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
 

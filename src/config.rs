@@ -140,8 +140,16 @@ impl From<MigrationTableId> for EntityName {
 /// Migration-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationConfig {
-    #[serde(flatten)]
-    pub table: MigrationTableId,
+    /// Name of the migrations table
+    #[serde(default = "default_migrations_table")]
+    pub table: String,
+
+    /// Schema for the migrations table (PostgreSQL)
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default = "default_migrations_schema"
+    )]
+    pub schema: Option<String>,
 
     /// Migration file name prefix style
     #[serde(default)]
@@ -160,12 +168,19 @@ fn default_migrations_schema() -> Option<String> {
     "shki".to_string().into()
 }
 
+impl MigrationConfig {
+    pub fn entity(&self) -> EntityName {
+        (self.table.clone(), self.schema.clone()).into()
+    }
+}
+
 impl Default for MigrationConfig {
     fn default() -> Self {
         Self {
             prefix: MigrationPrefix::Index,
             generate_down: false,
-            table: MigrationTableId::default(),
+            table: default_migrations_table(),
+            schema: default_migrations_schema(),
         }
     }
 }
@@ -265,6 +280,12 @@ impl Config {
         {
             self.dialect = dialect;
         }
+
+        // Only Postgres supports defining a schema, so we ensure schema is not set
+        if self.dialect != SqlDialect::Postgres {
+            self.migrations.schema = None
+        }
+
         self
     }
 
@@ -370,7 +391,8 @@ generate_down = false
             migrations: crate::cli::args::MigrationArgs {
                 prefix: Some(MigrationPrefix::Timestamp),
                 generate_down: true,
-                ..Default::default()
+                table: None,
+                schema: None,
             },
             ..CommonArgs::default()
         };
@@ -381,7 +403,7 @@ generate_down = false
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
         assert_eq!(config.out, PathBuf::from("cli-migrations"));
-        assert_eq!(config.migrations.table.name, "env_migrations");
+        assert_eq!(config.migrations.entity().name, "env_migrations");
         assert_eq!(config.migrations.prefix, MigrationPrefix::Timestamp);
         assert!(config.migrations.generate_down);
 
