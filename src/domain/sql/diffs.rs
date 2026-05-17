@@ -3,36 +3,40 @@ use crate::diff::DiffStatement;
 use crate::schema::SqlDialect;
 use crate::sql::statements::*;
 
-use super::generator::{SqlStmt, ToSql};
+use super::generator::{SqlOutput, ToSql};
 
 impl ToSql for DiffStatement {
-    fn to_sql(&self, dialect: &SqlDialect) -> Result<SqlStmt> {
+    fn to_sql(&self, dialect: &SqlDialect) -> Result<SqlOutput> {
         match self {
-            DiffStatement::CreateSchema { name } => Ok(create_schema(dialect, name)),
-            DiffStatement::DropSchema { name, cascade } => Ok(drop_schema(dialect, name, *cascade)),
-            DiffStatement::RenameSchema { from, to } => Ok(rename_schema(dialect, from, to)),
+            DiffStatement::CreateSchema { name } => Ok(create_schema(dialect, name).into()),
+            DiffStatement::DropSchema { name, cascade } => {
+                Ok(drop_schema(dialect, name, *cascade).into())
+            }
+            DiffStatement::RenameSchema { from, to } => Ok(rename_schema(dialect, from, to).into()),
             DiffStatement::CreateEnum {
                 name,
                 schema,
                 values,
                 description,
             } => Ok(create_enum(dialect, name, schema, values, description)),
-            DiffStatement::DropEnum { name, schema, .. } => Ok(drop_enum(dialect, name, schema)),
+            DiffStatement::DropEnum { name, schema, .. } => {
+                Ok(drop_enum(dialect, name, schema).into())
+            }
             DiffStatement::RenameEnum { from, to, schema } => {
-                Ok(rename_enum(dialect, from, to, schema))
+                Ok(rename_enum(dialect, from, to, schema).into())
             }
             DiffStatement::AddEnumValue {
                 enum_name,
                 schema,
                 value,
                 position,
-            } => Ok(add_enum_value(dialect, enum_name, schema, value, position)),
+            } => Ok(add_enum_value(dialect, enum_name, schema, value, position).into()),
             DiffStatement::RenameEnumValue {
                 enum_name,
                 schema,
                 from,
                 to,
-            } => Ok(rename_enum_value(dialect, enum_name, schema, from, to)),
+            } => Ok(rename_enum_value(dialect, enum_name, schema, from, to).into()),
             DiffStatement::DropEnumValue {
                 enum_name,
                 schema,
@@ -56,25 +60,27 @@ impl ToSql for DiffStatement {
                 schema,
                 description,
                 ..
-            } => Ok(alter_enum_description(dialect, name, schema, description)),
-            DiffStatement::CreateSequence { sequence } => Ok(create_sequence(dialect, sequence)),
+            } => Ok(alter_enum_description(dialect, name, schema, description).into()),
+            DiffStatement::CreateSequence { sequence } => {
+                Ok(create_sequence(dialect, sequence).into())
+            }
             DiffStatement::DropSequence { name, schema, .. } => {
-                Ok(drop_sequence(dialect, name, schema))
+                Ok(drop_sequence(dialect, name, schema).into())
             }
             DiffStatement::AlterSequence {
                 name,
                 schema,
                 changes,
-            } => Ok(alter_sequence(dialect, name, schema, changes)),
+            } => Ok(alter_sequence(dialect, name, schema, changes).into()),
             DiffStatement::CreateTable { table } => Ok(create_table(dialect, table)),
             DiffStatement::DropTable {
                 name,
                 schema,
                 cascade,
                 ..
-            } => Ok(drop_table(dialect, name, schema, *cascade)),
+            } => Ok(drop_table(dialect, name, schema, *cascade).into()),
             DiffStatement::RenameTable { from, to, schema } => {
-                Ok(rename_table(dialect, from, to, schema))
+                Ok(rename_table(dialect, from, to, schema).into())
             }
             DiffStatement::AlterTableComment {
                 table,
@@ -83,42 +89,42 @@ impl ToSql for DiffStatement {
                 // don't need prev to set the comment -
                 // only used to build down migration
                 prev: _,
-            } => Ok(alter_table_comment(dialect, table, schema, comment)),
+            } => Ok(alter_table_comment(dialect, table, schema, comment).into()),
             DiffStatement::AlterTableOptions {
                 table,
                 schema,
                 changes,
-            } => Ok(alter_table_options(dialect, table, schema, changes)),
+            } => Ok(alter_table_options(dialect, table, schema, changes).into()),
             DiffStatement::AlterTableTablespace {
                 table,
                 schema,
                 tablespace,
                 ..
-            } => Ok(alter_table_tablespace(dialect, table, schema, tablespace)),
+            } => Ok(alter_table_tablespace(dialect, table, schema, tablespace).into()),
             DiffStatement::AlterTablePartition {
                 table,
                 schema,
                 partition,
                 ..
-            } => Ok(alter_table_partition(dialect, table, schema, partition)),
+            } => Ok(alter_table_partition(dialect, table, schema, partition).into()),
             DiffStatement::AddColumn {
                 table,
                 schema,
                 column,
-            } => Ok(add_column(dialect, table, schema, column)),
+            } => Ok(add_column(dialect, table, schema, column).into()),
             DiffStatement::DropColumn {
                 table,
                 schema,
                 column,
                 cascade,
                 ..
-            } => Ok(drop_column(dialect, table, schema, column, *cascade)),
+            } => Ok(drop_column(dialect, table, schema, column, *cascade).into()),
             DiffStatement::RenameColumn {
                 table,
                 schema,
                 from,
                 to,
-            } => Ok(rename_column(dialect, table, schema, from, to)),
+            } => Ok(rename_column(dialect, table, schema, from, to).into()),
             DiffStatement::AlterColumn {
                 table,
                 schema,
@@ -131,44 +137,37 @@ impl ToSql for DiffStatement {
                 column,
                 comment,
                 ..
-            } => Ok(alter_column_comment(
-                dialect, table, schema, column, comment,
-            )),
+            } => Ok(alter_column_comment(dialect, table, schema, column, comment).into()),
             DiffStatement::CreateIndex {
                 table,
                 schema,
                 index,
                 concurrently,
                 if_not_exists,
-            } => Ok(create_index(
-                dialect,
-                table,
-                schema,
-                index,
-                *concurrently,
-                *if_not_exists,
-            )),
+            } => Ok(
+                create_index(dialect, table, schema, index, *concurrently, *if_not_exists).into(),
+            ),
             DiffStatement::DropIndex {
                 name,
                 schema,
                 concurrently,
                 if_exists,
                 ..
-            } => Ok(drop_index(dialect, name, schema, *concurrently, *if_exists)),
+            } => Ok(drop_index(dialect, name, schema, *concurrently, *if_exists).into()),
             DiffStatement::AddConstraint {
                 table,
                 schema,
                 constraint,
-            } => Ok(add_constraint(dialect, table, schema, constraint)),
+            } => Ok(add_constraint(dialect, table, schema, constraint).into()),
             DiffStatement::DropConstraint {
                 table,
                 schema,
                 name,
                 cascade,
                 ..
-            } => Ok(drop_constraint(dialect, table, schema, name, *cascade)),
+            } => Ok(drop_constraint(dialect, table, schema, name, *cascade).into()),
             DiffStatement::CreateView { view, or_replace } => {
-                Ok(create_view(dialect, view, *or_replace))
+                Ok(create_view(dialect, view, *or_replace).into())
             }
             DiffStatement::DropView {
                 name,
@@ -176,15 +175,15 @@ impl ToSql for DiffStatement {
                 materialized,
                 cascade,
                 ..
-            } => Ok(drop_view(dialect, name, schema, *materialized, *cascade)),
+            } => Ok(drop_view(dialect, name, schema, *materialized, *cascade).into()),
             DiffStatement::AlterView {
                 name,
                 schema,
                 new_definition,
                 ..
-            } => Ok(alter_view(dialect, name, schema, new_definition)),
-            DiffStatement::CreateExtension(name) => Ok(create_extension(dialect, name)),
-            DiffStatement::DropExtension(name) => Ok(drop_extension(dialect, name)),
+            } => Ok(alter_view(dialect, name, schema, new_definition).into()),
+            DiffStatement::CreateExtension(name) => Ok(create_extension(dialect, name).into()),
+            DiffStatement::DropExtension(name) => Ok(drop_extension(dialect, name).into()),
         }
     }
 }
@@ -211,7 +210,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("enum sql should render")
                 .to_string(None),
-            "ALTER TYPE \"public\".\"status\" ADD VALUE 'archived' AFTER 'published'"
+            "ALTER TYPE \"public\".\"status\" ADD VALUE 'archived' AFTER 'published';"
         );
 
         let alter_comment = DiffStatement::AlterTableComment {
@@ -225,7 +224,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("table comment sql should render")
                 .to_string(None),
-            "COMMENT ON TABLE \"app\".\"users\" IS 'owner''s records'"
+            "COMMENT ON TABLE \"app\".\"users\" IS 'owner''s records';"
         );
 
         let alter_options = DiffStatement::AlterTableOptions {
@@ -248,7 +247,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("table options sql should render")
                 .to_string(None),
-            "ALTER TABLE \"app\".\"users\" SET (fillfactor=80, autovacuum_enabled=DEFAULT)"
+            "ALTER TABLE \"app\".\"users\" SET (fillfactor=80, autovacuum_enabled=DEFAULT);"
         );
 
         let alter_partition = DiffStatement::AlterTablePartition {
@@ -265,7 +264,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("partition sql should render")
                 .to_string(None),
-            "ALTER TABLE \"app\".\"events\" PARTITION BY HASH (tenant_id, region_id)"
+            "ALTER TABLE \"app\".\"events\" PARTITION BY HASH (tenant_id, region_id);"
         );
     }
 
@@ -292,7 +291,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("column sql should render")
                 .to_string(None),
-            "ALTER TABLE \"app\".\"users\" ALTER COLUMN \"id\" SET NOT NULL ALTER TABLE \"app\".\"users\" ALTER COLUMN \"id\" ADD GENERATED BY DEFAULT AS IDENTITY (START WITH 10 INCREMENT BY 5)"
+            "ALTER TABLE \"app\".\"users\" ALTER COLUMN \"id\" SET NOT NULL;\nALTER TABLE \"app\".\"users\" ALTER COLUMN \"id\" ADD GENERATED BY DEFAULT AS IDENTITY (START WITH 10 INCREMENT BY 5);"
         );
 
         let index = Index::with_columns(
@@ -324,7 +323,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("index sql should render")
                 .to_string(None),
-            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \"users_email_idx\" ON \"app\".\"users\" USING gin (\"email\" text_pattern_ops DESC NULLS LAST, lower(name) ASC) INCLUDE (\"id\", \"tenant_id\") WHERE email IS NOT NULL WITH (fillfactor=80) TABLESPACE \"fastspace\""
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \"users_email_idx\" ON \"app\".\"users\" USING gin (\"email\" text_pattern_ops DESC NULLS LAST, lower(name) ASC) INCLUDE (\"id\", \"tenant_id\") WHERE email IS NOT NULL WITH (fillfactor=80) TABLESPACE \"fastspace\";"
         );
 
         let drop_index = DiffStatement::DropIndex {
@@ -340,7 +339,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("drop index sql should render")
                 .to_string(None),
-            "DROP INDEX CONCURRENTLY IF EXISTS \"app\".\"users_email_idx\""
+            "DROP INDEX CONCURRENTLY IF EXISTS \"app\".\"users_email_idx\";"
         );
     }
 
@@ -361,7 +360,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("view sql should render")
                 .to_string(None),
-            "CREATE OR REPLACE MATERIALIZED VIEW \"app\".\"active_users\" AS SELECT id, email FROM users WHERE active"
+            "CREATE OR REPLACE MATERIALIZED VIEW \"app\".\"active_users\" AS SELECT id, email FROM users WHERE active;"
         );
 
         let alter_view = DiffStatement::AlterView {
@@ -375,7 +374,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("alter view sql should render")
                 .to_string(None),
-            "CREATE OR REPLACE VIEW \"app\".\"active_users\" AS SELECT id FROM users WHERE active"
+            "CREATE OR REPLACE VIEW \"app\".\"active_users\" AS SELECT id FROM users WHERE active;"
         );
 
         let recreate_enum = DiffStatement::RecreateEnum {
@@ -398,7 +397,7 @@ mod tests {
         assert!(sql.contains("ALTER TYPE \"public\".\"status\" RENAME TO \"status__old\""));
         assert!(sql.contains("CREATE TYPE \"public\".\"status\" AS ENUM ("));
         assert!(sql.contains("DROP TYPE \"public\".\"status__old\""));
-        assert!(sql.contains("COMMENT ON TYPE \"public\".\"status\" IS 'workflow states'"));
+        assert!(sql.contains("COMMENT ON TYPE \"public\".\"status\" IS 'workflow states';"));
     }
 
     #[test]
@@ -414,7 +413,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("add column sql should render")
                 .to_string(None),
-            "ALTER TABLE \"app\".\"users\" ADD COLUMN \"email\" VARCHAR(255) NOT NULL"
+            "ALTER TABLE \"app\".\"users\" ADD COLUMN \"email\" VARCHAR(255) NOT NULL;"
         );
     }
 }

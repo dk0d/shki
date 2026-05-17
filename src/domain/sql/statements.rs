@@ -6,7 +6,7 @@ use crate::schema::*;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use super::generator::SqlStmt;
+use super::generator::{SqlOutput, SqlStmt, SqlStmtPart};
 
 pub fn quote_identifier(dialect: &SqlDialect, name: impl Into<String>) -> String {
     let name: String = name.into();
@@ -72,19 +72,19 @@ pub fn create_enum(
     schema: &Option<String>,
     values: &[String],
     description: &Option<String>,
-) -> SqlStmt {
+) -> SqlOutput {
     let qualified = qualified_name(dialect, name, schema);
     let values_str: Vec<String> = values.iter().map(|v| format!("'{}'", v)).collect();
-    let mut result = vec![format!(
+    let mut result = vec![SqlStmt::from(format!(
         "CREATE TYPE {} AS ENUM ({})",
         qualified,
         values_str.join(", ")
-    )];
+    ))];
 
     // Add COMMENT ON TYPE if description is present
     if let Some(desc) = description {
         let escaped = desc.replace('\'', "''");
-        result.push(format!("COMMENT ON TYPE {} IS '{}'", qualified, escaped));
+        result.push(SqlStmt::from(format!("COMMENT ON TYPE {} IS '{}'", qualified, escaped)));
     }
 
     result.into()
@@ -95,7 +95,12 @@ pub fn drop_enum(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> S
     format!("DROP TYPE {}", qualified).into()
 }
 
-pub fn rename_enum(dialect: &SqlDialect, from: &str, to: &str, schema: &Option<String>) -> SqlStmt {
+pub fn rename_enum(
+    dialect: &SqlDialect,
+    from: &str,
+    to: &str,
+    schema: &Option<String>,
+) -> SqlStmt {
     let qualified = qualified_name(dialect, from, schema);
     format!(
         "ALTER TYPE {} RENAME TO {}",
@@ -147,7 +152,7 @@ pub fn drop_enum_value(
     enum_name: &str,
     schema: &Option<String>,
     value: &str,
-) -> SqlStmt {
+) -> SqlOutput {
     rebuild_enum(
         dialect,
         enum_name,
@@ -158,6 +163,7 @@ pub fn drop_enum_value(
         ),
         true,
     )
+    .into()
 }
 
 pub fn reorder_enum_values(
@@ -165,7 +171,7 @@ pub fn reorder_enum_values(
     enum_name: &str,
     schema: &Option<String>,
     values: &[String],
-) -> SqlStmt {
+) -> SqlOutput {
     rebuild_enum(
         dialect,
         enum_name,
@@ -176,6 +182,7 @@ pub fn reorder_enum_values(
         ),
         true,
     )
+    .into()
 }
 
 pub fn recreate_enum(
@@ -184,8 +191,8 @@ pub fn recreate_enum(
     schema: &Option<String>,
     values: &[String],
     description: &Option<String>,
-) -> SqlStmt {
-    SqlStmt::many(vec![
+) -> SqlOutput {
+    SqlOutput::many(vec![
         rebuild_enum(
             dialect,
             name,
@@ -195,9 +202,8 @@ pub fn recreate_enum(
                 render_enum_values(values).replace('\'', "''")
             ),
             false,
-        )
-        .to_string(None),
-        alter_enum_description(dialect, name, schema, description).to_string(None),
+        ),
+        alter_enum_description(dialect, name, schema, description),
     ])
 }
 
@@ -278,7 +284,7 @@ pub fn alter_sequence(
 
 // Table operations
 
-pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlStmt {
+pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
     let name = qualified_name(dialect, &table.name, &table.schema);
 
     let mut table_pk_cols: HashSet<&str> = HashSet::new();
@@ -305,44 +311,44 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlStmt {
                 table_pk_cols.contains(c.name.as_str()),
                 table_unique_cols.contains(c.name.as_str()),
             )
-            .to_string(None)
+            .to_string()
         })
         .collect();
 
     // Add table-level constraints
     for constraint in &table.constraints {
-        column_defs.push(constraint_definition(dialect, constraint).to_string(None));
+        column_defs.push(constraint_definition(dialect, constraint).to_string());
     }
 
-    let mut result = vec![format!(
+    let mut result = vec![SqlStmt::from(format!(
         "CREATE TABLE {} (\n  {}\n)",
         name,
         column_defs.join(",\n  ")
-    )];
+    ))];
 
     // Add COMMENT ON TABLE if comment is present
     if let Some(comment) = &table.comment {
         let escaped = comment.replace('\'', "''");
-        result.push(format!("COMMENT ON TABLE {} IS '{}'", name, escaped));
+        result.push(SqlStmt::from(format!("COMMENT ON TABLE {} IS '{}'", name, escaped)));
     }
 
     // Add COMMENT ON COLUMN for columns with comments
     for col in table.columns.values() {
         if let Some(comment) = &col.comment {
             let escaped = comment.replace('\'', "''");
-            result.push(format!(
+            result.push(SqlStmt::from(format!(
                 "COMMENT ON COLUMN {}.{} IS '{}'",
                 name,
                 quote_identifier(dialect, &col.name),
                 escaped
-            ));
+            )));
         }
     }
 
     result.into()
 }
 
-pub fn column_definition(dialect: &SqlDialect, col: &Column) -> SqlStmt {
+pub fn column_definition(dialect: &SqlDialect, col: &Column) -> SqlStmtPart {
     column_definition_with_suppression(dialect, col, false, false)
 }
 
@@ -351,7 +357,7 @@ fn column_definition_with_suppression(
     col: &Column,
     suppress_primary_key: bool,
     suppress_unique: bool,
-) -> SqlStmt {
+) -> SqlStmtPart {
     let mut parts = vec![
         quote_identifier(dialect, &col.name),
         col.data_type.clone().to_string(dialect),
@@ -384,7 +390,7 @@ fn column_definition_with_suppression(
     parts.join(" ").into()
 }
 
-pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> SqlStmt {
+pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> SqlStmtPart {
     let mut sql = String::new();
 
     if let Some(name) = &constraint.name() {
@@ -635,7 +641,7 @@ pub fn alter_column(
     schema: &Option<String>,
     column: &str,
     changes: &[ColumnChange],
-) -> SqlStmt {
+) -> SqlOutput {
     let qualified = qualified_name(dialect, table, schema);
     let column_quoted = quote_identifier(dialect, column);
 
@@ -737,6 +743,7 @@ pub fn alter_column(
                 )
             }
         })
+        .map(SqlStmt::from)
         .collect::<Vec<_>>()
         .into()
 }
@@ -1161,7 +1168,7 @@ mod tests {
         );
 
         assert_eq!(
-            constraint_definition(&SqlDialect::Postgres, &constraint).to_string(None),
+            constraint_definition(&SqlDialect::Postgres, &constraint).to_string(),
             "CONSTRAINT \"room_booking_excl\" EXCLUDE USING gist (room WITH =, during WITH &&) WHERE (cancelled_at IS NULL)"
         );
     }
@@ -1171,15 +1178,20 @@ mod tests {
         let constraint = Constraint::Exclusion(ExclusionConstraint::new(vec![("room", "=")]));
 
         assert_eq!(
-            constraint_definition(&SqlDialect::Mysql, &constraint).to_string(None),
+            constraint_definition(&SqlDialect::Mysql, &constraint).to_string(),
             ""
         );
     }
 
     #[test]
     fn rebuilds_enum_when_dropping_a_value() {
-        let sql = drop_enum_value(&SqlDialect::Postgres, "status", &Some("public".to_string()), "archived")
-            .to_string(None);
+        let sql = drop_enum_value(
+            &SqlDialect::Postgres,
+            "status",
+            &Some("public".to_string()),
+            "archived",
+        )
+        .to_string(None);
 
         assert!(sql.contains("ALTER TYPE \"public\".\"status\" RENAME TO \"status__old\""));
         assert!(sql.contains("e.enumlabel <> 'archived'"));
@@ -1199,10 +1211,10 @@ mod tests {
 
         let parts = sql.parts();
         assert_eq!(parts.len(), 2);
-        assert!(parts[0].contains("CREATE TYPE \"public\".\"status\" AS ENUM ("));
+        assert!(parts[0].as_sql().contains("CREATE TYPE \"public\".\"status\" AS ENUM ("));
         assert_eq!(
             parts[1],
-            "COMMENT ON TYPE \"public\".\"status\" IS 'workflow state'"
+            "COMMENT ON TYPE \"public\".\"status\" IS 'workflow state'".into()
         );
     }
 }

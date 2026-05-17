@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::generator::{SqlStmt, ToSql};
+use crate::sql::generator::{SqlOutput, SqlStmt, ToSql};
 
 use super::SqlDialect;
 
@@ -182,12 +182,6 @@ pub enum DataType {
     SqliteReal,
     SqliteText,
     SqliteBlob,
-}
-
-impl ToSql for DataType {
-    fn to_sql(&self, dialect: &SqlDialect) -> crate::Result<SqlStmt> {
-        Ok(self.to_string(dialect).into())
-    }
 }
 
 impl DataType {
