@@ -77,9 +77,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
             println!("Rolling back: {}", name);
         }
 
-        migration_manager
-            .rollback_migration(&down_path)
-            .await?;
+        migration_manager.rollback_migration(&down_path).await?;
         rolled_back.push(name);
     }
 

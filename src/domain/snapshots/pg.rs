@@ -1,13 +1,12 @@
 use indexmap::IndexMap;
 // use indexmap::IndexMap;
-use sqlx::Row;
-
 use crate::engines::pg::Postgres;
 use crate::models::entity_name::EntityName;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, DefaultValue, ForeignKeyConstraint,
-    GeneratedColumn, IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder,
-    PrimaryKeyConstraint, Sequence, SequenceOptions, SortOrder, SqlDialect, UniqueConstraint,
+    GeneratedColumn, IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder, PartitionMethod,
+    PartitionSpec, PrimaryKeyConstraint, Sequence, SequenceOptions, SortOrder, SqlDialect, Table,
+    UniqueConstraint,
 };
 use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
@@ -21,6 +20,7 @@ struct PgInfoSchemaColumnRow {
     udt_name: String,
     is_nullable: String,
     column_default: Option<String>,
+    collation_name: Option<String>,
     character_maximum_length: Option<i32>,
     numeric_precision: Option<i32>,
     numeric_scale: Option<i32>,
@@ -34,6 +34,25 @@ struct PgInfoSchemaColumnRow {
     is_generated: String,
     generation_expression: Option<String>,
     is_updatable: String,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgEnumRow {
+    schema: String,
+    name: String,
+    values: Vec<String>,
+    description: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgTableRow {
+    table_schema: String,
+    table_name: String,
+    table_comment: Option<String>,
+    tablespace: Option<String>,
+    reloptions: Vec<String>,
+    partition_strategy: Option<String>,
+    partition_keydef: Option<String>,
 }
 
 #[derive(Clone, sqlx::FromRow)]
@@ -221,7 +240,7 @@ impl From<PgInfoSchemaColumnRow> for Column {
             unique: false,
             generated,
             comment: None,
-            collation: None,
+            collation: row.collation_name,
             identity,
             references: None,
         }
@@ -274,17 +293,18 @@ impl SnapshotProvider for Postgres {
 
     async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, DbEnum>> {
         let enum_rows = if let Some(schema) = schema {
-            sqlx::query(
+            sqlx::query_as::<_, PgEnumRow>(
                 r#"
             SELECT
                 n.nspname AS schema,
                 t.typname AS name,
-                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values,
+                obj_description(t.oid, 'pg_type') AS description
             FROM pg_type t
             JOIN pg_enum e ON t.oid = e.enumtypid
             JOIN pg_namespace n ON n.oid = t.typnamespace
             WHERE n.nspname = $1
-            GROUP BY n.nspname, t.typname
+            GROUP BY n.nspname, t.typname, t.oid
             ORDER BY n.nspname, t.typname
             "#,
             )
@@ -292,17 +312,18 @@ impl SnapshotProvider for Postgres {
             .fetch_all(&self.pool)
             .await?
         } else {
-            sqlx::query(
+            sqlx::query_as::<_, PgEnumRow>(
                 r#"
             SELECT
                 n.nspname AS schema,
                 t.typname AS name,
-                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values,
+                obj_description(t.oid, 'pg_type') AS description
             FROM pg_type t
             JOIN pg_enum e ON t.oid = e.enumtypid
             JOIN pg_namespace n ON n.oid = t.typnamespace
             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-            GROUP BY n.nspname, t.typname
+            GROUP BY n.nspname, t.typname, t.oid
             ORDER BY n.nspname, t.typname
             "#,
             )
@@ -312,16 +333,13 @@ impl SnapshotProvider for Postgres {
 
         let mut map = IndexMap::new();
         enum_rows.into_iter().for_each(|row| {
-            let schema: String = row.get("schema");
-            let name: String = row.get("name");
-            let values: Vec<String> = row.get("values");
             map.insert(
-                (name.clone(), Some(schema.clone())).into(),
+                (row.name.clone(), Some(row.schema.clone())).into(),
                 DbEnum {
-                    name,
-                    schema: Some(schema),
-                    values,
-                    description: None, // TODO: introspect enum comments
+                    name: row.name,
+                    schema: Some(row.schema),
+                    values: row.values,
+                    description: row.description,
                 },
             );
         });
@@ -375,22 +393,28 @@ impl SnapshotProvider for Postgres {
     async fn get_tables(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, crate::schema::Table>> {
+    ) -> Result<IndexMap<EntityName, Table>> {
         let table_rows = if let Some(schema) = schema {
-            sqlx::query(
+            sqlx::query_as::<_, PgTableRow>(
                 r#"
             SELECT
-                t.table_schema,
-                t.table_name,
-                obj_description(c.oid, 'pg_class') AS table_comment
-            FROM information_schema.tables t
-            JOIN pg_namespace n ON n.nspname = t.table_schema
-            JOIN pg_class c ON c.relname = t.table_name
-                AND c.relnamespace = n.oid
-                AND c.relkind = 'r'
-            WHERE t.table_type = 'BASE TABLE'
-                AND t.table_schema = $1
-            ORDER BY t.table_schema, t.table_name
+                n.nspname AS table_schema,
+                c.relname AS table_name,
+                obj_description(c.oid, 'pg_class') AS table_comment,
+                tblsp.spcname AS tablespace,
+                COALESCE(c.reloptions, ARRAY[]::text[]) AS reloptions,
+                pt.partstrat::text AS partition_strategy,
+                pg_get_partkeydef(c.oid) AS partition_keydef
+            FROM pg_class c
+            JOIN pg_namespace n
+                ON n.oid = c.relnamespace
+            LEFT JOIN pg_tablespace tblsp
+                ON tblsp.oid = c.reltablespace
+            LEFT JOIN pg_partitioned_table pt
+                ON pt.partrelid = c.oid
+            WHERE c.relkind IN ('r', 'p')
+                AND n.nspname = $1
+            ORDER BY n.nspname, c.relname
             "#,
             )
             .bind(schema)
@@ -398,20 +422,26 @@ impl SnapshotProvider for Postgres {
             .await
             .map_err(ShkiError::Database)?
         } else {
-            sqlx::query(
+            sqlx::query_as::<_, PgTableRow>(
                 r#"
             SELECT
-                t.table_schema,
-                t.table_name,
-                obj_description(c.oid, 'pg_class') AS table_comment
-            FROM information_schema.tables t
-            JOIN pg_namespace n ON n.nspname = t.table_schema
-            JOIN pg_class c ON c.relname = t.table_name
-                AND c.relnamespace = n.oid
-                AND c.relkind = 'r'
-            WHERE t.table_type = 'BASE TABLE'
-                AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY t.table_schema, t.table_name
+                n.nspname AS table_schema,
+                c.relname AS table_name,
+                obj_description(c.oid, 'pg_class') AS table_comment,
+                tblsp.spcname AS tablespace,
+                COALESCE(c.reloptions, ARRAY[]::text[]) AS reloptions,
+                pt.partstrat::text AS partition_strategy,
+                pg_get_partkeydef(c.oid) AS partition_keydef
+            FROM pg_class c
+            JOIN pg_namespace n
+                ON n.oid = c.relnamespace
+            LEFT JOIN pg_tablespace tblsp
+                ON tblsp.oid = c.reltablespace
+            LEFT JOIN pg_partitioned_table pt
+                ON pt.partrelid = c.oid
+            WHERE c.relkind IN ('r', 'p')
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+            ORDER BY n.nspname, c.relname
             "#,
             )
             .fetch_all(&self.pool)
@@ -420,17 +450,20 @@ impl SnapshotProvider for Postgres {
         };
 
         let mut map = IndexMap::new();
-        table_rows.iter().for_each(|row| {
-            let schema: String = row.get("table_schema");
-            let name: String = row.get("table_name");
-            let comment: Option<String> = row.get("table_comment");
+        table_rows.into_iter().for_each(|row| {
             map.insert(
-                (name.clone(), Some(schema.clone())).into(),
-                crate::schema::Table {
-                    name,
-                    schema: Some(schema),
+                (row.table_name.clone(), Some(row.table_schema.clone())).into(),
+                Table {
+                    name: row.table_name,
+                    schema: Some(row.table_schema),
                     columns: IndexMap::new(), // TODO: introspect columns
-                    comment,
+                    comment: row.table_comment,
+                    options: parse_table_options(&row.reloptions),
+                    tablespace: row.tablespace,
+                    partition: parse_partition_spec(
+                        row.partition_strategy.as_deref(),
+                        row.partition_keydef.as_deref(),
+                    ),
                     ..Default::default()
                 },
             );
@@ -503,6 +536,7 @@ impl SnapshotProvider for Postgres {
             c.udt_name,
             c.is_nullable,
             c.column_default,
+            c.collation_name,
             c.character_maximum_length,
             c.numeric_precision,
             c.numeric_scale,
@@ -874,6 +908,51 @@ fn parse_index_options(options: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
+fn parse_table_options(options: &[String]) -> IndexMap<String, String> {
+    options
+        .iter()
+        .map(|option| {
+            option
+                .split_once('=')
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .unwrap_or_else(|| (option.clone(), String::new()))
+        })
+        .collect()
+}
+
+fn parse_partition_spec(
+    strategy: Option<&str>,
+    key_definition: Option<&str>,
+) -> Option<PartitionSpec> {
+    let method = match strategy {
+        Some("r") => PartitionMethod::Range,
+        Some("l") => PartitionMethod::List,
+        Some("h") => PartitionMethod::Hash,
+        _ => return None,
+    };
+
+    let columns = key_definition
+        .map(|definition| {
+            definition
+                .trim()
+                .strip_prefix("RANGE")
+                .or_else(|| definition.trim().strip_prefix("LIST"))
+                .or_else(|| definition.trim().strip_prefix("HASH"))
+                .unwrap_or(definition.trim())
+                .trim()
+                .trim_start_matches('(')
+                .trim_end_matches(')')
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Some(PartitionSpec { method, columns })
+}
+
 fn parse_check_constraint_expression(definition: &str) -> String {
     definition
         .strip_prefix("CHECK (")
@@ -934,4 +1013,32 @@ fn is_scalar_literal(value: &str) -> bool {
         || lower == "false"
         || value.parse::<i64>().is_ok()
         || value.parse::<f64>().is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_table_options_into_index_map() {
+        let options = parse_table_options(&[
+            "fillfactor=90".to_string(),
+            "autovacuum_enabled=false".to_string(),
+        ]);
+
+        assert_eq!(options.get("fillfactor"), Some(&"90".to_string()));
+        assert_eq!(
+            options.get("autovacuum_enabled"),
+            Some(&"false".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_partition_spec_from_pg_catalog_values() {
+        let partition = parse_partition_spec(Some("r"), Some("RANGE (created_at, tenant_id)"))
+            .expect("partition spec should be parsed");
+
+        assert_eq!(partition.method, PartitionMethod::Range);
+        assert_eq!(partition.columns, vec!["created_at", "tenant_id"]);
+    }
 }
