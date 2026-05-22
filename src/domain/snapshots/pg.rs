@@ -1,7 +1,5 @@
-use indexmap::IndexMap;
-// use indexmap::IndexMap;
 use crate::engines::pg::Postgres;
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, DefaultValue, ForeignKeyConstraint,
     GeneratedColumn, IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder, PartitionMethod,
@@ -10,6 +8,7 @@ use crate::schema::{
 };
 use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
+use indexmap::IndexMap;
 
 #[derive(Clone, sqlx::FromRow)]
 struct PgInfoSchemaColumnRow {
@@ -34,6 +33,16 @@ struct PgInfoSchemaColumnRow {
     is_generated: String,
     generation_expression: Option<String>,
     is_updatable: String,
+
+    // Sequence attached to this column via PG ownership metadata
+    owned_sequence_schema: Option<String>,
+    owned_sequence_name: Option<String>,
+    owned_sequence_increment: Option<i64>,
+    owned_sequence_min_value: Option<i64>,
+    owned_sequence_max_value: Option<i64>,
+    owned_sequence_start: Option<i64>,
+    owned_sequence_cache: Option<i64>,
+    owned_sequence_cycle: Option<bool>,
 }
 
 #[derive(Clone, sqlx::FromRow)]
@@ -101,6 +110,7 @@ struct PgSequenceRow {
     start: i64,
     cache: i64,
     cycle: bool,
+    owned_column_type: Option<String>,
 }
 
 #[derive(Clone, sqlx::FromRow)]
@@ -221,11 +231,17 @@ impl From<PgInfoSchemaColumnRow> for DataType {
 
 impl From<PgInfoSchemaColumnRow> for Column {
     fn from(row: PgInfoSchemaColumnRow) -> Self {
-        let data_type = DataType::from(row.clone());
-        let default = row
-            .column_default
-            .as_ref()
-            .map(|_| DefaultValue::from(row.clone()));
+        let serial_type = inline_serial_data_type(&row);
+        let data_type = serial_type
+            .clone()
+            .unwrap_or_else(|| DataType::from(row.clone()));
+        let default = if serial_type.is_some() {
+            None
+        } else {
+            row.column_default
+                .as_ref()
+                .map(|_| DefaultValue::from(row.clone()))
+        };
         let generated = (row.is_generated == "ALWAYS")
             .then(|| GeneratedColumn::from(row.clone()))
             .filter(|generated| !generated.expression.is_empty());
@@ -291,7 +307,7 @@ impl SnapshotProvider for Postgres {
         Ok(extensions)
     }
 
-    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, DbEnum>> {
+    async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<Iden, DbEnum>> {
         let enum_rows = if let Some(schema) = schema {
             sqlx::query_as::<_, PgEnumRow>(
                 r#"
@@ -347,10 +363,7 @@ impl SnapshotProvider for Postgres {
         Ok(map)
     }
 
-    async fn get_sequences(
-        &self,
-        _schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, Sequence>> {
+    async fn get_sequences(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Sequence>> {
         let rows = sqlx::query_as::<_, PgSequenceRow>(
             r#"
         SELECT
@@ -361,8 +374,24 @@ impl SnapshotProvider for Postgres {
             max_value,
             start_value AS start,
             cache_size AS cache,
-            cycle
-        FROM pg_sequences
+            cycle,
+            format_type(attr.atttypid, attr.atttypmod) AS owned_column_type
+        FROM pg_sequences seq
+        LEFT JOIN pg_class seq_cls
+            ON seq_cls.relname = seq.sequencename
+        LEFT JOIN pg_namespace seq_ns
+            ON seq_ns.oid = seq_cls.relnamespace
+            AND seq_ns.nspname = seq.schemaname
+        LEFT JOIN pg_depend dep
+            ON dep.objid = seq_cls.oid
+            AND dep.classid = 'pg_class'::regclass
+            AND dep.refclassid = 'pg_class'::regclass
+            AND dep.deptype = 'a'
+        LEFT JOIN pg_class table_cls
+            ON table_cls.oid = dep.refobjid
+        LEFT JOIN pg_attribute attr
+            ON attr.attrelid = table_cls.oid
+            AND attr.attnum = dep.refobjsubid
         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
         ORDER BY schemaname, sequencename
         "#,
@@ -372,6 +401,10 @@ impl SnapshotProvider for Postgres {
 
         let mut map = IndexMap::new();
         for row in rows {
+            if is_inline_serial_sequence(&row) {
+                continue;
+            }
+
             map.insert(
                 (row.name.clone(), Some(row.schema.clone())).into(),
                 Sequence {
@@ -390,7 +423,7 @@ impl SnapshotProvider for Postgres {
         Ok(map)
     }
 
-    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<EntityName, Table>> {
+    async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Table>> {
         let table_rows = if let Some(schema) = schema {
             sqlx::query_as::<_, PgTableRow>(
                 r#"
@@ -471,7 +504,7 @@ impl SnapshotProvider for Postgres {
     async fn get_views(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, crate::schema::View>> {
+    ) -> Result<IndexMap<Iden, crate::schema::View>> {
         let rows = sqlx::query_as::<_, PgViewRow>(
             r#"
         SELECT
@@ -522,7 +555,7 @@ impl SnapshotProvider for Postgres {
     async fn get_columns(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, IndexMap<String, crate::schema::Column>>> {
+    ) -> Result<IndexMap<Iden, IndexMap<String, crate::schema::Column>>> {
         let rows = sqlx::query_as::<_, PgInfoSchemaColumnRow>(
             r#"
         SELECT 
@@ -546,10 +579,31 @@ impl SnapshotProvider for Postgres {
             c.identity_cycle,
             c.is_generated,
             c.generation_expression,
-            c.is_updatable
+            c.is_updatable,
+            seq_ns.nspname AS owned_sequence_schema,
+            seq_cls.relname AS owned_sequence_name,
+            serial_seq.increment_by AS owned_sequence_increment,
+            serial_seq.min_value AS owned_sequence_min_value,
+            serial_seq.max_value AS owned_sequence_max_value,
+            serial_seq.start_value AS owned_sequence_start,
+            serial_seq.cache_size AS owned_sequence_cache,
+            serial_seq.cycle AS owned_sequence_cycle
         FROM information_schema.columns c
+        LEFT JOIN pg_class table_cls
+            ON table_cls.relname = c.table_name
+        LEFT JOIN pg_namespace table_ns
+            ON table_ns.oid = table_cls.relnamespace
+            AND table_ns.nspname = c.table_schema
+        LEFT JOIN pg_class seq_cls
+            ON seq_cls.oid = to_regclass(pg_get_serial_sequence(format('%I.%I', c.table_schema, c.table_name), c.column_name))
+        LEFT JOIN pg_namespace seq_ns
+            ON seq_ns.oid = seq_cls.relnamespace
+        LEFT JOIN pg_sequences serial_seq
+            ON serial_seq.schemaname = seq_ns.nspname
+            AND serial_seq.sequencename = seq_cls.relname
         WHERE ($1::text IS NULL OR c.table_schema = $1)
             AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
+            AND (table_cls.oid IS NULL OR table_ns.oid IS NOT NULL)
         ORDER BY c.table_schema, c.table_name, c.ordinal_position
         "#,
         )
@@ -557,10 +611,10 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut columns_by_table: IndexMap<EntityName, IndexMap<String, Column>> = IndexMap::new();
+        let mut columns_by_table: IndexMap<Iden, IndexMap<String, Column>> = IndexMap::new();
 
         for row in rows {
-            let table_id = EntityName::new(row.table_name.clone(), Some(row.table_schema.clone()));
+            let table_id = Iden::new(row.table_name.clone(), Some(row.table_schema.clone()));
             let column = Column::from(row);
             columns_by_table
                 .entry(table_id)
@@ -574,7 +628,7 @@ impl SnapshotProvider for Postgres {
     async fn get_constraints(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, Vec<crate::schema::Constraint>>> {
+    ) -> Result<IndexMap<Iden, Vec<crate::schema::Constraint>>> {
         let rows = sqlx::query_as::<_, PgConstraintRow>(
             r#"
         SELECT
@@ -632,12 +686,12 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut constraints_by_table: IndexMap<EntityName, IndexMap<String, Constraint>> =
+        let mut constraints_by_table: IndexMap<Iden, IndexMap<String, Constraint>> =
             IndexMap::new();
 
         for row in rows {
             let constraint_map = constraints_by_table
-                .entry(EntityName::new(
+                .entry(Iden::new(
                     row.table_name.clone(),
                     Some(row.table_schema.clone()),
                 ))
@@ -720,7 +774,7 @@ impl SnapshotProvider for Postgres {
     async fn get_indexes(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<EntityName, Vec<crate::schema::Index>>> {
+    ) -> Result<IndexMap<Iden, IndexMap<String, Index>>> {
         let rows = sqlx::query_as::<_, PgIndexRow>(
             r#"
         SELECT
@@ -736,7 +790,7 @@ impl SnapshotProvider for Postgres {
             key_col.ordinality > i.indnkeyatts AS is_include_column,
             att.attname AS column_name,
             CASE
-                WHEN key_col.attnum = 0 THEN pg_get_indexdef(i.indexrelid, key_col.ordinality, false)
+                WHEN key_col.attnum = 0 THEN pg_get_indexdef(i.indexrelid, key_col.ordinality::int, false)
                 ELSE NULL
             END AS expression,
             opc.opcname AS opclass,
@@ -776,6 +830,7 @@ impl SnapshotProvider for Postgres {
         WHERE ($1::text IS NULL OR tbl_ns.nspname = $1)
             AND tbl_ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
             AND NOT i.indisprimary
+            AND con.oid IS NULL
         ORDER BY tbl_ns.nspname, tbl.relname, idx.relname, key_col.ordinality
             "#,
         )
@@ -783,67 +838,156 @@ impl SnapshotProvider for Postgres {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut indexes_by_table: IndexMap<EntityName, IndexMap<String, Index>> = IndexMap::new();
+        indexes_from_rows(rows)
+    }
+}
 
-        for row in rows {
-            let index_map = indexes_by_table
-                .entry(EntityName::new(
-                    row.table_name.clone(),
-                    Some(row.table_schema.clone()),
-                ))
-                .or_default();
+fn indexes_from_rows(rows: Vec<PgIndexRow>) -> Result<IndexMap<Iden, IndexMap<String, Index>>> {
+    let mut indexes_by_table: IndexMap<Iden, IndexMap<String, Index>> = IndexMap::new();
 
-            let index = index_map
-                .entry(row.index_name.clone())
-                .or_insert_with(|| Index {
-                    name: row.index_name.clone(),
-                    columns: Vec::new(),
-                    unique: row.is_unique,
-                    method: parse_index_method(&row.index_method),
-                    where_clause: row.where_clause.clone(),
-                    options: parse_index_options(&row.reloptions),
-                    is_constraint: row.is_constraint,
-                    concurrently: false,
-                    include: Vec::new(),
-                    tablespace: row.tablespace.clone(),
-                });
-
-            if row.is_include_column {
-                if let Some(column_name) = row.column_name.as_ref()
-                    && !index.include.contains(column_name)
-                {
-                    index.include.push(column_name.clone());
-                }
-                continue;
-            }
-
-            let index_column = if let Some(expression) = row.expression.as_ref() {
-                IndexColumn::Expression {
-                    expression: expression.clone(),
-                    order: parse_sort_order(row.sort_order.as_deref()),
-                    nulls: parse_nulls_order(row.nulls_order.as_deref()),
-                }
-            } else if let Some(column_name) = row.column_name.as_ref() {
-                IndexColumn::Column {
-                    name: column_name.clone(),
-                    order: parse_sort_order(row.sort_order.as_deref()),
-                    nulls: parse_nulls_order(row.nulls_order.as_deref()),
-                    opclass: row.opclass.clone(),
-                }
-            } else {
-                return Err(ShkiError::introspection(format!(
-                    "Index '{}' is missing column or expression metadata",
-                    row.index_name
-                )));
-            };
-
-            index.columns.push(index_column);
+    for row in rows {
+        if row.is_constraint {
+            continue;
         }
 
-        Ok(indexes_by_table
-            .into_iter()
-            .map(|(table_id, indexes)| (table_id, indexes.into_values().collect()))
-            .collect())
+        let index_map = indexes_by_table
+            .entry(Iden::new(
+                row.table_name.clone(),
+                Some(row.table_schema.clone()),
+            ))
+            .or_default();
+
+        let index = index_map
+            .entry(row.index_name.clone())
+            .or_insert_with(|| Index {
+                name: row.index_name.clone(),
+                columns: Vec::new(),
+                unique: row.is_unique,
+                method: parse_index_method(&row.index_method),
+                where_clause: row.where_clause.clone(),
+                options: parse_index_options(&row.reloptions),
+                is_constraint: row.is_constraint,
+                concurrently: false,
+                include: Vec::new(),
+                tablespace: row.tablespace.clone(),
+            });
+
+        if row.is_include_column {
+            if let Some(column_name) = row.column_name.as_ref()
+                && !index.include.contains(column_name)
+            {
+                index.include.push(column_name.clone());
+            }
+            continue;
+        }
+
+        let index_column = if let Some(expression) = row.expression.as_ref() {
+            IndexColumn::Expression {
+                expression: expression.clone(),
+                order: parse_sort_order(row.sort_order.as_deref()),
+                nulls: parse_nulls_order(row.nulls_order.as_deref()),
+            }
+        } else if let Some(column_name) = row.column_name.as_ref() {
+            IndexColumn::Column {
+                name: column_name.clone(),
+                order: parse_sort_order(row.sort_order.as_deref()),
+                nulls: parse_nulls_order(row.nulls_order.as_deref()),
+                opclass: row.opclass.clone(),
+            }
+        } else {
+            return Err(ShkiError::introspection(format!(
+                "Index '{}' is missing column or expression metadata",
+                row.index_name
+            )));
+        };
+
+        index.columns.push(index_column);
+    }
+
+    Ok(indexes_by_table)
+}
+
+fn is_inline_serial_sequence(row: &PgSequenceRow) -> bool {
+    if row.increment != 1 || row.min_value != 1 || row.start != 1 || row.cache != 1 || row.cycle {
+        return false;
+    }
+
+    match row.owned_column_type.as_deref().map(str::trim) {
+        Some("smallint") => row.max_value == Some(32767),
+        Some("integer") => row.max_value == Some(2147483647),
+        Some("bigint") => row.max_value == Some(9223372036854775807),
+        _ => false,
+    }
+}
+
+fn inline_serial_data_type(row: &PgInfoSchemaColumnRow) -> Option<DataType> {
+    if row.is_identity == "YES" || !matches_owned_sequence_default(row) {
+        return None;
+    }
+
+    if row.owned_sequence_increment != Some(1)
+        || row.owned_sequence_min_value != Some(1)
+        || row.owned_sequence_start != Some(1)
+        || row.owned_sequence_cache != Some(1)
+        || row.owned_sequence_cycle != Some(false)
+    {
+        return None;
+    }
+
+    match DataType::from(row.clone()) {
+        DataType::SmallInt if row.owned_sequence_max_value == Some(32767) => {
+            Some(DataType::SmallSerial)
+        }
+        DataType::Integer if row.owned_sequence_max_value == Some(2147483647) => {
+            Some(DataType::Serial)
+        }
+        DataType::BigInt if row.owned_sequence_max_value == Some(9223372036854775807) => {
+            Some(DataType::BigSerial)
+        }
+        _ => None,
+    }
+}
+
+fn matches_owned_sequence_default(row: &PgInfoSchemaColumnRow) -> bool {
+    let Some(sequence_name) = row.owned_sequence_name.as_deref() else {
+        return false;
+    };
+
+    let Some(DefaultValue::Sequence(expression)) = row
+        .column_default
+        .as_ref()
+        .map(|_| DefaultValue::from(row.clone()))
+    else {
+        return false;
+    };
+
+    let Some((schema, name)) = parse_regclass_name(&expression) else {
+        return false;
+    };
+
+    if name != sequence_name {
+        return false;
+    }
+
+    match (schema.as_deref(), row.owned_sequence_schema.as_deref()) {
+        (Some(actual), Some(expected)) => actual == expected,
+        (None, _) => true,
+        _ => false,
+    }
+}
+
+fn parse_regclass_name(expression: &str) -> Option<(Option<String>, String)> {
+    let normalized = normalize_default_expression(expression);
+    let inner = normalized
+        .strip_prefix("nextval('")?
+        .strip_suffix("'::regclass)")?;
+
+    match inner.split_once('.') {
+        Some((schema, name)) => Some((
+            Some(schema.trim().trim_matches('"').to_string()),
+            name.trim().trim_matches('"').to_string(),
+        )),
+        None => Some((None, inner.trim().trim_matches('"').to_string())),
     }
 }
 
@@ -1030,5 +1174,247 @@ mod tests {
 
         assert_eq!(partition.method, PartitionMethod::Range);
         assert_eq!(partition.columns, vec!["created_at", "tenant_id"]);
+    }
+
+    #[test]
+    fn folds_owned_integer_sequence_into_serial_column() {
+        let row = PgInfoSchemaColumnRow {
+            table_schema: "public".to_string(),
+            table_name: "users".to_string(),
+            column_name: "id".to_string(),
+            data_type: "integer".to_string(),
+            udt_name: "int4".to_string(),
+            is_nullable: "NO".to_string(),
+            column_default: Some("nextval('users_id_seq'::regclass)".to_string()),
+            collation_name: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_identity: "NO".to_string(),
+            identity_generation: None,
+            identity_start: None,
+            identity_increment: None,
+            identity_maximum: None,
+            identity_minimum: None,
+            identity_cycle: None,
+            is_generated: "NEVER".to_string(),
+            generation_expression: None,
+            is_updatable: "YES".to_string(),
+            owned_sequence_schema: Some("public".to_string()),
+            owned_sequence_name: Some("users_id_seq".to_string()),
+            owned_sequence_increment: Some(1),
+            owned_sequence_min_value: Some(1),
+            owned_sequence_max_value: Some(2147483647),
+            owned_sequence_start: Some(1),
+            owned_sequence_cache: Some(1),
+            owned_sequence_cycle: Some(false),
+        };
+
+        let column = Column::from(row);
+
+        assert_eq!(column.data_type, DataType::Serial);
+        assert!(column.default.is_none());
+    }
+
+    #[test]
+    fn keeps_custom_owned_sequence_as_regular_default() {
+        let row = PgInfoSchemaColumnRow {
+            table_schema: "public".to_string(),
+            table_name: "users".to_string(),
+            column_name: "id".to_string(),
+            data_type: "integer".to_string(),
+            udt_name: "int4".to_string(),
+            is_nullable: "NO".to_string(),
+            column_default: Some("nextval('public.users_id_seq'::regclass)".to_string()),
+            collation_name: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_identity: "NO".to_string(),
+            identity_generation: None,
+            identity_start: None,
+            identity_increment: None,
+            identity_maximum: None,
+            identity_minimum: None,
+            identity_cycle: None,
+            is_generated: "NEVER".to_string(),
+            generation_expression: None,
+            is_updatable: "YES".to_string(),
+            owned_sequence_schema: Some("public".to_string()),
+            owned_sequence_name: Some("users_id_seq".to_string()),
+            owned_sequence_increment: Some(5),
+            owned_sequence_min_value: Some(1),
+            owned_sequence_max_value: Some(2147483647),
+            owned_sequence_start: Some(1),
+            owned_sequence_cache: Some(1),
+            owned_sequence_cycle: Some(false),
+        };
+
+        let column = Column::from(row);
+
+        assert_eq!(column.data_type, DataType::Integer);
+        assert!(matches!(column.default, Some(DefaultValue::Sequence(_))));
+    }
+
+    #[test]
+    fn folds_schema_qualified_owned_sequence_into_serial_column() {
+        let row = PgInfoSchemaColumnRow {
+            table_schema: "public".to_string(),
+            table_name: "users".to_string(),
+            column_name: "id".to_string(),
+            data_type: "integer".to_string(),
+            udt_name: "int4".to_string(),
+            is_nullable: "NO".to_string(),
+            column_default: Some("nextval('\"public\".\"users_id_seq\"'::regclass)".to_string()),
+            collation_name: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_identity: "NO".to_string(),
+            identity_generation: None,
+            identity_start: None,
+            identity_increment: None,
+            identity_maximum: None,
+            identity_minimum: None,
+            identity_cycle: None,
+            is_generated: "NEVER".to_string(),
+            generation_expression: None,
+            is_updatable: "YES".to_string(),
+            owned_sequence_schema: Some("public".to_string()),
+            owned_sequence_name: Some("users_id_seq".to_string()),
+            owned_sequence_increment: Some(1),
+            owned_sequence_min_value: Some(1),
+            owned_sequence_max_value: Some(2147483647),
+            owned_sequence_start: Some(1),
+            owned_sequence_cache: Some(1),
+            owned_sequence_cycle: Some(false),
+        };
+
+        let column = Column::from(row);
+
+        assert_eq!(column.data_type, DataType::Serial);
+        assert!(column.default.is_none());
+    }
+
+    #[test]
+    fn keeps_owned_sequence_default_when_schema_does_not_match() {
+        let row = PgInfoSchemaColumnRow {
+            table_schema: "public".to_string(),
+            table_name: "users".to_string(),
+            column_name: "id".to_string(),
+            data_type: "integer".to_string(),
+            udt_name: "int4".to_string(),
+            is_nullable: "NO".to_string(),
+            column_default: Some("nextval('other.users_id_seq'::regclass)".to_string()),
+            collation_name: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_identity: "NO".to_string(),
+            identity_generation: None,
+            identity_start: None,
+            identity_increment: None,
+            identity_maximum: None,
+            identity_minimum: None,
+            identity_cycle: None,
+            is_generated: "NEVER".to_string(),
+            generation_expression: None,
+            is_updatable: "YES".to_string(),
+            owned_sequence_schema: Some("public".to_string()),
+            owned_sequence_name: Some("users_id_seq".to_string()),
+            owned_sequence_increment: Some(1),
+            owned_sequence_min_value: Some(1),
+            owned_sequence_max_value: Some(2147483647),
+            owned_sequence_start: Some(1),
+            owned_sequence_cache: Some(1),
+            owned_sequence_cycle: Some(false),
+        };
+
+        let column = Column::from(row);
+
+        assert_eq!(column.data_type, DataType::Integer);
+        assert!(matches!(column.default, Some(DefaultValue::Sequence(_))));
+    }
+
+    #[test]
+    fn filters_out_constraint_backed_indexes_from_rows() {
+        let indexes = indexes_from_rows(vec![
+            PgIndexRow {
+                table_schema: "public".to_string(),
+                table_name: "users".to_string(),
+                index_name: "users_email_key".to_string(),
+                index_method: "btree".to_string(),
+                is_unique: true,
+                is_constraint: true,
+                where_clause: None,
+                tablespace: None,
+                reloptions: Vec::new(),
+                is_include_column: false,
+                column_name: Some("email".to_string()),
+                expression: None,
+                opclass: Some("text_ops".to_string()),
+                sort_order: Some("ASC".to_string()),
+                nulls_order: Some("LAST".to_string()),
+            },
+            PgIndexRow {
+                table_schema: "public".to_string(),
+                table_name: "users".to_string(),
+                index_name: "users_email_idx".to_string(),
+                index_method: "btree".to_string(),
+                is_unique: false,
+                is_constraint: false,
+                where_clause: None,
+                tablespace: None,
+                reloptions: Vec::new(),
+                is_include_column: false,
+                column_name: Some("email".to_string()),
+                expression: None,
+                opclass: Some("text_ops".to_string()),
+                sort_order: Some("ASC".to_string()),
+                nulls_order: Some("LAST".to_string()),
+            },
+        ])
+        .expect("index rows should aggregate successfully");
+
+        let table_indexes = indexes
+            .get(&Iden::new("users", Some("public".to_string())))
+            .expect("users indexes should be present");
+
+        assert!(!table_indexes.contains_key("users_email_key"));
+        assert!(table_indexes.contains_key("users_email_idx"));
+    }
+
+    #[test]
+    fn does_not_treat_custom_owned_sequence_as_inline_serial_sequence() {
+        let row = PgSequenceRow {
+            schema: "public".to_string(),
+            name: "users_id_seq".to_string(),
+            increment: 5,
+            min_value: 1,
+            max_value: Some(2147483647),
+            start: 1,
+            cache: 1,
+            cycle: false,
+            owned_column_type: Some("integer".to_string()),
+        };
+
+        assert!(!is_inline_serial_sequence(&row));
+    }
+
+    #[test]
+    fn detects_inline_serial_sequence_rows() {
+        let row = PgSequenceRow {
+            schema: "public".to_string(),
+            name: "users_id_seq".to_string(),
+            increment: 1,
+            min_value: 1,
+            max_value: Some(2147483647),
+            start: 1,
+            cache: 1,
+            cycle: false,
+            owned_column_type: Some("integer".to_string()),
+        };
+
+        assert!(is_inline_serial_sequence(&row));
     }
 }
