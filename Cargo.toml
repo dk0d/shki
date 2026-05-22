@@ -69,6 +69,7 @@ sha2 = "0.10"
 serde_yaml = "0.9.34"
 enum_dispatch = "0.3.13"
 async-trait = "0.1.89"
+inquire = { version = "0.9.4", features = ["chrono"] }
 
 [dev-dependencies]
 tempfile = "3.24.0"

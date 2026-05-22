@@ -88,6 +88,9 @@ impl std::fmt::Display for SnapshotValidationSummary {
 /// Main error type for Shki
 #[derive(Error, Debug)]
 pub enum ShkiError {
+    #[error("[Input] {0}")]
+    Input(#[from] inquire::InquireError),
+
     #[error("[DB] {0}")]
     Database(#[from] sqlx::Error),
 
@@ -148,6 +151,9 @@ pub enum ShkiError {
 
     #[error("[USER] Cancelled")]
     Cancelled,
+
+    #[error("[SER] {0}")]
+    Deserialize(String),
 }
 
 impl ShkiError {

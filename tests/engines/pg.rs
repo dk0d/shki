@@ -12,7 +12,7 @@ use super::{TestBackend, cleanup_postgres_schema};
 use shki::engines::Engine;
 use shki::engines::pg::Postgres as PostgresEngine;
 use shki::migrate::manager::MigrationManager;
-use shki::models::entity_name::EntityName;
+use shki::models::iden::Iden;
 use shki::schema::SqlDialect;
 
 use crate::common::{connect_with_retries, unique_suffix};
@@ -115,7 +115,7 @@ impl TestBackend for PgTestContext {
         Some(&self.schema_name)
     }
 
-    fn engine(&self, table: EntityName) -> Engine {
+    fn engine(&self, table: Iden) -> Engine {
         Engine::Postgres(PostgresEngine::new(self.pg_pool.clone(), table))
     }
 

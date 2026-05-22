@@ -1,443 +1,246 @@
-use crate::schema::*;
+pub mod rename;
+pub mod statements;
+pub use statements::*;
+mod helpers;
 
-/// A diff between two schema snapshots
-#[derive(Debug, Clone, Default)]
-pub struct SchemaDiff {
-    /// Statements to execute in order
-    pub statements: Vec<DiffStatement>,
+use crate::Result;
+use crate::config::Config;
+
+use self::rename::RenameScenario;
+
+use super::schema::Table;
+use super::snapshots::Snapshot;
+
+pub async fn cmd_diff(config: &Config) -> Result<()> {
+    Ok(())
 }
 
-/// A single diff statement
-#[derive(Debug, Clone)]
-pub enum DiffStatement {
-    // Schema operations
-    CreateSchema {
-        name: String,
-    },
-    DropSchema {
-        name: String,
-        cascade: bool,
-    },
-    RenameSchema {
-        from: String,
-        to: String,
-    },
+pub fn diff_snapshots(from: &Snapshot, to: &Snapshot) -> Result<SchemaDiff> {
+    let mut statements = Vec::new();
 
-    // Enum operations
-    CreateEnum {
-        name: String,
-        schema: Option<String>,
-        values: Vec<String>,
-        description: Option<String>,
-    },
-    DropEnum {
-        name: String,
-        schema: Option<String>,
-        prev: DbEnum,
-    },
-    RenameEnum {
-        from: String,
-        to: String,
-        schema: Option<String>,
-    },
-    AddEnumValue {
-        enum_name: String,
-        schema: Option<String>,
-        value: String,
-        position: EnumValuePosition,
-    },
-    RenameEnumValue {
-        enum_name: String,
-        schema: Option<String>,
-        from: String,
-        to: String,
-    },
-    DropEnumValue {
-        enum_name: String,
-        schema: Option<String>,
-        value: String,
-    },
-    ReorderEnumValues {
-        enum_name: String,
-        schema: Option<String>,
-        values: Vec<String>,
-        prev_values: Vec<String>,
-    },
-    RecreateEnum {
-        name: String,
-        schema: Option<String>,
-        values: Vec<String>,
-        prev: DbEnum,
-        description: Option<String>,
-    },
-    AlterEnumDescription {
-        name: String,
-        schema: Option<String>,
-        description: Option<String>,
-        prev_description: Option<String>,
-    },
+    // Diff extensions (PostgreSQL)
+    helpers::diff_extensions(&from.extensions, &to.extensions, &mut statements);
 
-    // Sequence operations
-    CreateSequence {
-        sequence: Sequence,
-    },
-    DropSequence {
-        name: String,
-        schema: Option<String>,
-        prev: Sequence,
-    },
-    AlterSequence {
-        name: String,
-        schema: Option<String>,
-        changes: Vec<SequenceChange>,
-    },
+    // Diff schemas
+    helpers::diff_schemas(&from.schemas, &to.schemas, &mut statements);
 
-    // Table operations
-    CreateTable {
-        table: Table,
-    },
-    DropTable {
-        name: String,
-        schema: Option<String>,
-        cascade: bool,
-        prev: Table,
-    },
-    RenameTable {
-        from: String,
-        to: String,
-        schema: Option<String>,
-    },
-    AlterTableComment {
-        table: String,
-        schema: Option<String>,
-        prev: Option<String>,
-        comment: Option<String>,
-    },
-    AlterTableOptions {
-        table: String,
-        schema: Option<String>,
-        changes: Vec<TableOptionChange>,
-    },
-    AlterTableTablespace {
-        table: String,
-        schema: Option<String>,
-        prev_tablespace: Option<String>,
-        tablespace: Option<String>,
-    },
-    AlterTablePartition {
-        table: String,
-        schema: Option<String>,
-        prev_partition: Option<PartitionSpec>,
-        partition: Option<PartitionSpec>,
-    },
+    // Diff enums
+    helpers::diff_enums(&from.enums, &to.enums, &mut statements);
 
-    // Column operations
-    AddColumn {
-        table: String,
-        schema: Option<String>,
-        column: Column,
-    },
-    DropColumn {
-        table: String,
-        schema: Option<String>,
-        column: String,
-        cascade: bool,
-        prev: Column,
-    },
-    RenameColumn {
-        table: String,
-        schema: Option<String>,
-        from: String,
-        to: String,
-    },
-    AlterColumn {
-        table: String,
-        schema: Option<String>,
-        column: String,
-        changes: Vec<ColumnChange>,
-    },
-    AlterColumnComment {
-        table: String,
-        schema: Option<String>,
-        column: String,
-        comment: Option<String>,
-        prev_comment: Option<String>,
-    },
+    // Diff sequences
+    helpers::diff_sequences(&from.sequences, &to.sequences, &mut statements);
 
-    // Index operations
-    CreateIndex {
-        table: String,
-        schema: Option<String>,
-        index: Index,
-        concurrently: bool,
-        if_not_exists: bool,
-    },
-    DropIndex {
-        table: String,
-        name: String,
-        schema: Option<String>,
-        concurrently: bool,
-        if_exists: bool,
-        prev: Index,
-    },
+    // Diff tables
+    helpers::diff_tables(&from.tables, &to.tables, &from.dialect, &mut statements);
 
-    // Constraint operations
-    AddConstraint {
-        table: String,
-        schema: Option<String>,
-        constraint: Constraint,
-    },
-    DropConstraint {
-        table: String,
-        schema: Option<String>,
-        name: String,
-        cascade: bool,
-        prev: Constraint,
-    },
+    // Diff views
+    helpers::diff_views(&from.views, &to.views, &mut statements);
 
-    // View operations
-    CreateView {
-        view: View,
-        or_replace: bool,
-    },
-    DropView {
-        name: String,
-        schema: Option<String>,
-        materialized: bool,
-        cascade: bool,
-        prev: View,
-    },
-    AlterView {
-        name: String,
-        schema: Option<String>,
-        new_definition: String,
-        prev_definition: String,
-    },
+    let mut rename_scenarios = helpers::detect_table_renames(&from.tables, &to.tables);
 
-    // Extension operations (PostgreSQL)
-    CreateExtension(String),
-    DropExtension(String),
-}
+    // detect column renames where the table names haven't changed,
+    // need to do another pass
 
-// Supporting enums for statement fields
-#[derive(Debug, Clone)]
-pub enum EnumValuePosition {
-    End,
-    Before(String),
-    After(String),
-}
-
-#[derive(Debug, Clone)]
-pub enum SequenceChange {
-    Increment(i64),
-    MinValue(i64),
-    MaxValue(Option<i64>),
-    Start(i64),
-    Cache(i64),
-    Cycle(bool),
-}
-
-#[derive(Debug, Clone)]
-pub enum ColumnChange {
-    SetType(String),
-    SetNotNull,
-    DropNotNull,
-    SetDefault(String),
-    DropDefault,
-    SetGenerated(String),
-    DropGenerated,
-    SetCollation(String),
-    DropCollation,
-    SetIdentity(IdentitySpec),
-    DropIdentity,
-    AlterIdentity(Vec<IdentityChange>),
-}
-
-#[derive(Debug, Clone)]
-pub enum IdentityChange {
-    SetGeneratedAlways,
-    SetGeneratedByDefault,
-    SetSequenceOptions(SequenceOptions),
-    DropSequenceOptions,
-}
-
-#[derive(Debug, Clone)]
-pub enum TableOptionChange {
-    Set {
-        key: String,
-        value: String,
-        prev: Option<String>,
-    },
-    Drop {
-        key: String,
-        prev: String,
-    },
-}
-
-impl std::fmt::Display for ColumnChange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ColumnChange::SetType(data_type) => write!(f, "set type {}", data_type),
-            ColumnChange::SetNotNull => write!(f, "set not null"),
-            ColumnChange::DropNotNull => write!(f, "drop not null"),
-            ColumnChange::SetDefault(default) => write!(f, "set default {}", default),
-            ColumnChange::DropDefault => write!(f, "drop default"),
-            ColumnChange::SetGenerated(expr) => write!(f, "set generated {}", expr),
-            ColumnChange::DropGenerated => write!(f, "drop generated"),
-            ColumnChange::SetCollation(collation) => write!(f, "set collation {}", collation),
-            ColumnChange::DropCollation => write!(f, "drop collation"),
-            ColumnChange::SetIdentity(identity) => write!(
-                f,
-                "set identity {}",
-                if identity.always {
-                    "always"
-                } else {
-                    "by default"
-                }
-            ),
-            ColumnChange::DropIdentity => write!(f, "drop identity"),
-            ColumnChange::AlterIdentity(changes) => {
-                let rendered = changes
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "alter identity {}", rendered)
-            }
+    for (name, from_table) in &from.tables {
+        if let Some(to_table) = to.tables.get(name) {
+            detect_nested_renames(from_table, to_table, &mut rename_scenarios, true);
         }
     }
+
+    Ok(SchemaDiff {
+        statements,
+        rename_scenarios,
+    })
 }
 
-impl std::fmt::Display for IdentityChange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IdentityChange::SetGeneratedAlways => write!(f, "set generated always"),
-            IdentityChange::SetGeneratedByDefault => write!(f, "set generated by default"),
-            IdentityChange::SetSequenceOptions(options) => write!(
-                f,
-                "set sequence options {}",
-                format_sequence_options(options)
-            ),
-            IdentityChange::DropSequenceOptions => write!(f, "drop sequence options"),
-        }
-    }
-}
-
-impl std::fmt::Display for TableOptionChange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TableOptionChange::Set { key, value, .. } => {
-                write!(f, "set option {}={}", key, value)
-            }
-            TableOptionChange::Drop { key, .. } => write!(f, "drop option {}", key),
-        }
-    }
-}
-
-fn format_sequence_options(options: &SequenceOptions) -> String {
-    let mut parts = Vec::new();
-
-    if let Some(start) = options.start {
-        parts.push(format!("start {}", start));
-    }
-    if let Some(increment) = options.increment {
-        parts.push(format!("increment {}", increment));
-    }
-    if let Some(min_value) = options.min_value {
-        parts.push(format!("minvalue {}", min_value));
-    }
-    if let Some(max_value) = options.max_value {
-        parts.push(format!("maxvalue {}", max_value));
-    }
-    if let Some(cache) = options.cache {
-        parts.push(format!("cache {}", cache));
-    }
-    if options.cycle {
-        parts.push("cycle".to_string());
-    }
-
-    if parts.is_empty() {
-        "default".to_string()
-    } else {
-        parts.join(" ")
-    }
+pub fn detect_nested_renames(
+    from: &Table,
+    to: &Table,
+    rename_scenarios: &mut Vec<RenameScenario>,
+    require_same_table_name: bool,
+) {
+    // detect column renames where the table names haven't changed,
+    // need to do another pass
+    rename_scenarios.extend(helpers::detect_column_renames(
+        from,
+        to,
+        require_same_table_name,
+    ));
+    rename_scenarios.extend(helpers::detect_index_renames(
+        from,
+        to,
+        require_same_table_name,
+    ));
+    rename_scenarios.extend(helpers::detect_constraint_renames(
+        from,
+        to,
+        require_same_table_name,
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::rename::{RenameDecision, RenameKind, RenameMap};
+    use crate::models::iden::Iden;
+    use crate::schema::{Column, Constraint, Index, PrimaryKeyConstraint, SqlDialect, Table};
+    use crate::snapshots::Snapshot;
 
     #[test]
-    fn displays_column_collation_changes() {
-        assert_eq!(
-            ColumnChange::SetCollation("en_US".to_string()).to_string(),
-            "set collation en_US"
-        );
-        assert_eq!(ColumnChange::DropCollation.to_string(), "drop collation");
+    fn diffs_extensions_and_schemas() {
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        from.extensions = vec!["pgcrypto".to_string()];
+        from.schemas = vec!["public".to_string(), "legacy".to_string()];
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        to.extensions = vec!["uuid-ossp".to_string()];
+        to.schemas = vec!["public".to_string(), "analytics".to_string()];
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert_eq!(diff.len(), 4);
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::CreateExtension(name) if name == "uuid-ossp"
+        ));
+        assert!(matches!(
+            &diff.statements[1],
+            DiffStatement::DropExtension(name) if name == "pgcrypto"
+        ));
+        assert!(matches!(
+            &diff.statements[2],
+            DiffStatement::CreateSchema { name } if name == "analytics"
+        ));
+        assert!(matches!(
+            &diff.statements[3],
+            DiffStatement::DropSchema { name, cascade: false } if name == "legacy"
+        ));
     }
 
     #[test]
-    fn displays_column_identity_changes() {
-        assert_eq!(
-            ColumnChange::SetIdentity(IdentitySpec {
-                always: true,
-                sequence_options: None,
-            })
-            .to_string(),
-            "set identity always"
+    fn skips_builtin_schemas() {
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        from.schemas = vec!["public".to_string(), "main".to_string()];
+
+        let to = Snapshot::new(SqlDialect::Postgres);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn exposes_rename_candidates_for_same_table_objects() {
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        let mut from_table = Table::new("users");
+        from_table.column(Column::new("email", crate::schema::DataType::Text));
+        from_table.index(Index::new("users_email_idx", vec!["email"]));
+        from_table.constraint(Constraint::PrimaryKey(
+            PrimaryKeyConstraint::new(vec!["email"]).named("users_email_key"),
+        ));
+        from.tables.insert(Iden::new("users", None), from_table);
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        let mut to_table = Table::new("users");
+        to_table.column(Column::new("primary_email", crate::schema::DataType::Text));
+        to_table.index(Index::new("users_primary_email_idx", vec!["email"]));
+        to_table.constraint(Constraint::PrimaryKey(
+            PrimaryKeyConstraint::new(vec!["email"]).named("users_primary_email_key"),
+        ));
+        to.tables.insert(Iden::new("users", None), to_table);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert_eq!(diff.rename_scenarios.len(), 3);
+        assert!(diff.rename_scenarios.iter().any(|scenario| {
+            scenario.kind == RenameKind::Column
+                && scenario.dropped.contains_key("email")
+                && scenario.created.contains_key("primary_email")
+        }));
+        assert!(diff.rename_scenarios.iter().any(|scenario| {
+            scenario.kind == RenameKind::Index
+                && scenario.dropped.contains_key("users_email_idx")
+                && scenario.created.contains_key("users_primary_email_idx")
+        }));
+        assert!(diff.rename_scenarios.iter().any(|scenario| {
+            scenario.kind == RenameKind::Constraint
+                && scenario.dropped.contains_key("users_email_key")
+                && scenario.created.contains_key("users_primary_email_key")
+        }));
+    }
+
+    #[test]
+    fn applies_table_rename_decision_with_nested_renames() {
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        from.tables
+            .insert(Iden::new("accounts", None), Table::new("accounts"));
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        to.tables
+            .insert(Iden::new("users", None), Table::new("users"));
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+        assert_eq!(diff.rename_scenarios.len(), 1);
+        assert_eq!(diff.statements.len(), 2);
+
+        let resolved = diff
+            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::table(
+                Iden::new("accounts", None),
+                Iden::new("users", None),
+            ))])
+            .expect("rename decision should apply");
+
+        assert!(matches!(
+            &resolved.statements[..],
+            [DiffStatement::RenameTable { from, to, .. }]
+                if from == "accounts" && to == "users"
+        ));
+    }
+
+    #[test]
+    fn applies_table_and_nested_column_rename_decisions() {
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        let mut old_table = Table::new("accounts");
+        old_table.column(Column::new("email", crate::schema::DataType::Text));
+        from.tables.insert(Iden::new("accounts", None), old_table);
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        let mut new_table = Table::new("users");
+        new_table.column(Column::new("primary_email", crate::schema::DataType::Text));
+        to.tables.insert(Iden::new("users", None), new_table);
+
+        let mut diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+        detect_nested_renames(
+            from.tables.get(&Iden::new("accounts", None)).unwrap(),
+            to.tables.get(&Iden::new("users", None)).unwrap(),
+            &mut diff.rename_scenarios,
+            false,
         );
-        assert_eq!(ColumnChange::DropIdentity.to_string(), "drop identity");
-        assert_eq!(
-            ColumnChange::AlterIdentity(vec![
-                IdentityChange::SetGeneratedByDefault,
-                IdentityChange::SetSequenceOptions(SequenceOptions {
-                    start: Some(100),
-                    increment: Some(10),
-                    ..Default::default()
-                }),
+
+        let resolved = diff
+            .apply_rename_decisions(&[
+                RenameDecision::Rename(RenameMap::table(
+                    Iden::new("accounts", None),
+                    Iden::new("users", None),
+                )),
+                RenameDecision::Rename(RenameMap::column(
+                    Iden::new("users", None),
+                    "email",
+                    "primary_email",
+                )),
             ])
-            .to_string(),
-            "alter identity set generated by default, set sequence options start 100 increment 10"
-        );
-    }
+            .expect("rename decisions should apply");
 
-    #[test]
-    fn supports_non_additive_enum_changes() {
-        let prev = DbEnum {
-            name: "status".to_string(),
-            schema: Some("public".to_string()),
-            values: vec!["draft".to_string(), "published".to_string()],
-            description: Some("state".to_string()),
-        };
-
-        let rename = DiffStatement::RenameEnumValue {
-            enum_name: "status".to_string(),
-            schema: Some("public".to_string()),
-            from: "draft".to_string(),
-            to: "pending".to_string(),
-        };
-        let drop_value = DiffStatement::DropEnumValue {
-            enum_name: "status".to_string(),
-            schema: Some("public".to_string()),
-            value: "draft".to_string(),
-        };
-        let reorder = DiffStatement::ReorderEnumValues {
-            enum_name: "status".to_string(),
-            schema: Some("public".to_string()),
-            values: vec!["published".to_string(), "draft".to_string()],
-            prev_values: prev.values.clone(),
-        };
-        let recreate = DiffStatement::RecreateEnum {
-            name: "status".to_string(),
-            schema: Some("public".to_string()),
-            values: vec!["pending".to_string(), "published".to_string()],
-            prev,
-            description: Some("state".to_string()),
-        };
-
-        assert!(matches!(rename, DiffStatement::RenameEnumValue { .. }));
-        assert!(matches!(drop_value, DiffStatement::DropEnumValue { .. }));
-        assert!(matches!(reorder, DiffStatement::ReorderEnumValues { .. }));
-        assert!(matches!(recreate, DiffStatement::RecreateEnum { .. }));
+        assert!(matches!(
+            &resolved.statements[..],
+            [
+                DiffStatement::RenameTable { from, to, .. },
+                DiffStatement::RenameColumn { table, from: column_from, to: column_to, .. }
+            ] if from == "accounts"
+                && to == "users"
+                && table == "users"
+                && column_from == "email"
+                && column_to == "primary_email"
+        ));
     }
 }

@@ -159,6 +159,14 @@ pub enum CodegenLanguage {
     Protobuf,
 }
 
+#[derive(Debug, clap::ValueEnum, Default, Clone, Serialize)]
+#[value(rename_all = "lowercase")]
+pub enum PullFormat {
+    Json,
+    #[default]
+    Sql,
+}
+
 /// CLI commands
 #[derive(Subcommand, Debug, Serialize)]
 pub enum Commands {
@@ -230,14 +238,19 @@ pub enum Commands {
     },
 
     /// Pull (introspect) the database schema
+    #[command(visible_alias = "introspect")]
     Pull {
-        /// Output format (json, sql, rust)
-        #[arg(short, long, default_value = "sql")]
-        format: String,
+        /// Output format
+        #[arg(short, long, default_value_t = PullFormat::default(), value_enum)]
+        format: PullFormat,
 
         /// Output file (defaults to stdout)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// Schema to introspect (Postgres, defaults to public)
+        #[arg(long)]
+        schema: Option<String>,
 
         #[arg(long, short, default_value_t = false)]
         with_migration_table: bool,

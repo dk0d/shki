@@ -1,1 +1,1 @@
-pub mod entity_name;
+pub mod iden;

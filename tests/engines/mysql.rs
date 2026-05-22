@@ -17,7 +17,7 @@ use super::TestBackend;
 use shki::engines::Engine;
 use shki::engines::mysql::Mysql;
 use shki::migrate::manager::MigrationManager;
-use shki::models::entity_name::EntityName;
+use shki::models::iden::Iden;
 use shki::schema::SqlDialect;
 
 use crate::common::{connect_with_retries, unique_suffix};
@@ -156,7 +156,7 @@ impl TestBackend for MysqlTestContext {
         None
     }
 
-    fn engine(&self, table: EntityName) -> Engine {
+    fn engine(&self, table: Iden) -> Engine {
         Engine::Mysql(Mysql::new(self.mysql_pool.clone(), table))
     }
 

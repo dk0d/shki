@@ -75,8 +75,18 @@ pub async fn run(cli: Cli) -> Result<()> {
         Commands::Pull {
             format,
             output,
+            schema,
             with_migration_table,
-        } => introspect::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
+        } => {
+            introspect::cmd_pull(
+                &config,
+                &format,
+                &output.as_deref(),
+                &schema,
+                with_migration_table,
+            )
+            .await
+        }
 
         //     Commands::Bootstrap {
         //         name,

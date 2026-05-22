@@ -17,7 +17,7 @@ use std::pin::Pin;
 use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::MigrationRow;
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 use crate::schema::*;
 use crate::snapshots::{Introspectable, Snapshot, SnapshotProvider};
 
@@ -32,12 +32,12 @@ pub enum Engine {
 }
 
 impl Engine {
-    pub fn detached(dialect: SqlDialect, table: EntityName) -> Self {
+    pub fn detached(dialect: SqlDialect, table: Iden) -> Self {
         Engine::Detached(Detached::new(dialect, table))
     }
 
     pub async fn from_config(config: &Config) -> Result<Self> {
-        let table: EntityName = config.migrations.entity().clone();
+        let table: Iden = config.migrations.entity().clone();
 
         if config.database_url.is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
@@ -78,7 +78,7 @@ impl Engine {
         }
     }
 
-    pub fn with_table(self, table: EntityName) -> Self {
+    pub fn with_table(self, table: Iden) -> Self {
         match self {
             Engine::Postgres(engine) => Engine::Postgres(engine.with_table(table)),
             Engine::Sqlite(engine) => Engine::Sqlite(engine.with_table(table)),
@@ -87,7 +87,7 @@ impl Engine {
         }
     }
 
-    pub fn table(&self) -> &EntityName {
+    pub fn table(&self) -> &Iden {
         match self {
             Engine::Postgres(engine) => engine.table(),
             Engine::Sqlite(engine) => engine.table(),
@@ -129,26 +129,20 @@ impl<E> Introspectable for E
 where
     E: EngineDriver + SnapshotProvider + Send + Sync,
 {
-    async fn introspect(&self, config: &Config) -> Result<Snapshot> {
+    async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot> {
         let mut snapshot = Snapshot::new(config.dialect);
 
-        snapshot.enums = self.get_enums(&config.migrations.entity().schema).await?;
-        snapshot.views = self.get_views(&config.migrations.entity().schema).await?;
-        snapshot.sequences = self
-            .get_sequences(&config.migrations.entity().schema)
-            .await?;
-        snapshot.extensions = self
-            .get_extensions(&config.migrations.entity().schema)
-            .await?;
+        let schema = Some(schema.clone().unwrap_or("public".to_string()));
 
-        let mut tables = self.get_tables(&config.migrations.entity().schema).await?;
-        let constraints = self
-            .get_constraints(&config.migrations.entity().schema)
-            .await?;
+        snapshot.enums = self.get_enums(&schema).await?;
+        snapshot.views = self.get_views(&schema).await?;
+        snapshot.sequences = self.get_sequences(&schema).await?;
+        snapshot.extensions = self.get_extensions(&schema).await?;
 
-        dbg!("Got tables: {:#?}", &tables.iter().len());
-
-        let columns = self.get_columns(&config.migrations.entity().schema).await?;
+        let mut tables = self.get_tables(&schema).await?;
+        let constraints = self.get_constraints(&schema).await?;
+        let columns = self.get_columns(&schema).await?;
+        let indexes = self.get_indexes(&schema).await?;
 
         columns.into_iter().for_each(|(table_id, cols)| {
             if let Some(table) = tables.get_mut(&table_id) {
@@ -159,6 +153,12 @@ where
         constraints.into_iter().for_each(|(table_id, cons)| {
             if let Some(table) = tables.get_mut(&table_id) {
                 table.constraints = cons;
+            }
+        });
+
+        indexes.into_iter().for_each(|(table_id, index)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.indexes = index;
             }
         });
 

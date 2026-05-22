@@ -9,7 +9,7 @@ use super::checksum::sql_checksum;
 use super::utils::{generate_blank_migration_template, sanitize_migration_name};
 use crate::config::MigrationPrefix;
 use crate::engines::{Engine, EngineDriver};
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
 use chrono::{DateTime, Utc};
 use petname::Generator;
@@ -92,7 +92,7 @@ pub struct MigrationManager {
     pub out_dir: PathBuf,
 
     /// Migration table
-    pub table: EntityName,
+    pub table: Iden,
 
     /// Migration prefix style
     pub prefix: MigrationPrefix,
@@ -103,7 +103,7 @@ pub struct MigrationManager {
 
 impl MigrationManager {
     pub async fn from_config(config: &crate::config::Config) -> Result<Self> {
-        let table: EntityName = config.migrations.entity().clone();
+        let table: Iden = config.migrations.entity().clone();
 
         Ok(Self {
             out_dir: config.out_dir(),
@@ -629,10 +629,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("failed to create temp dir");
         let manager = MigrationManager::new(
             temp_dir.path(),
-            Engine::detached(
-                SqlDialect::Sqlite,
-                EntityName::new("__shki_migrations", None),
-            ),
+            Engine::detached(SqlDialect::Sqlite, Iden::new("__shki_migrations", None)),
         );
         (temp_dir, manager)
     }
@@ -649,7 +646,7 @@ mod tests {
             temp_dir.path(),
             Engine::Sqlite(crate::engines::sqlite::Sqlite::new(
                 pool,
-                EntityName::new("__shki_migrations", None),
+                Iden::new("__shki_migrations", None),
             )),
         );
         (temp_dir, manager)

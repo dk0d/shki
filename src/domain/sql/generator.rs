@@ -3,7 +3,7 @@
 //! This module converts diff statements into executable SQL.
 
 use crate::Result;
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 
 use super::statements::{qualified_name, qualified_table_name, quote_identifier};
@@ -33,9 +33,35 @@ impl AsRef<str> for SqlStmtPart {
 }
 
 /// Single valid sql statement, ';' will be appended
+#[derive(Debug)]
 pub enum SqlOutput {
     Statement(SqlStmt),
     Script(Vec<SqlStmt>),
+}
+
+impl From<SqlStmtPart> for String {
+    fn from(value: SqlStmtPart) -> Self {
+        format!("{}", value)
+    }
+}
+
+impl From<SqlStmt> for String {
+    fn from(value: SqlStmt) -> Self {
+        format!("{}", value)
+    }
+}
+
+impl From<SqlOutput> for String {
+    fn from(value: SqlOutput) -> Self {
+        match value {
+            SqlOutput::Statement(v) => String::from(v),
+            SqlOutput::Script(values) => values
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<String>>()
+                .join("\n"),
+        }
+    }
 }
 
 impl std::fmt::Display for SqlStmtPart {
@@ -146,13 +172,25 @@ impl SqlGenerator {
     }
 
     /// Generate SQL for a vec of statements
-    pub fn generate(&self, statements: &Vec<impl ToSql>) -> Result<Vec<SqlOutput>> {
-        let mut sql_stmts = Vec::new();
+    pub fn generate(&self, statements: &Vec<impl ToSql>) -> Result<Vec<SqlStmt>> {
+        let mut sql_stmts: Vec<SqlStmt> = Vec::new();
         for stmt in statements {
             let sql = stmt.to_sql(&self.dialect)?;
-            sql_stmts.push(sql);
+            match sql {
+                SqlOutput::Statement(stmt) => sql_stmts.push(stmt.clone()),
+                SqlOutput::Script(stmts) => sql_stmts.extend(stmts),
+            }
         }
         Ok(sql_stmts)
+    }
+
+    pub fn generate_string(&self, statements: &Vec<impl ToSql>) -> Result<String> {
+        let sql_stmts: Vec<SqlStmt> = self.generate(statements)?;
+        Ok(sql_stmts
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<String>>()
+            .join("\n"))
     }
 
     /// Set whether to include breakpoints
@@ -166,7 +204,7 @@ impl SqlGenerator {
         quote_identifier(&self.dialect, name)
     }
 
-    pub fn qualified_table_name(&self, id: &EntityName) -> String {
+    pub fn qualified_table_name(&self, id: &Iden) -> String {
         qualified_table_name(&self.dialect, id)
     }
 
@@ -185,7 +223,7 @@ mod tests {
 
     #[test]
     fn quotes_identifiers_per_dialect() {
-        let table = EntityName::new("odd\"name", Some("app\"schema".to_string()));
+        let table = Iden::new("odd\"name", Some("app\"schema".to_string()));
         assert_eq!(
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&table),
             "\"app\"\"schema\".\"odd\"\"name\""

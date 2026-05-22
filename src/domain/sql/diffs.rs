@@ -154,6 +154,9 @@ impl ToSql for DiffStatement {
                 if_exists,
                 ..
             } => Ok(drop_index(dialect, name, schema, *concurrently, *if_exists).into()),
+            DiffStatement::RenameIndex {
+                schema, from, to, ..
+            } => Ok(rename_index(dialect, from, schema, to).into()),
             DiffStatement::AddConstraint {
                 table,
                 schema,
@@ -166,6 +169,12 @@ impl ToSql for DiffStatement {
                 cascade,
                 ..
             } => Ok(drop_constraint(dialect, table, schema, name, *cascade).into()),
+            DiffStatement::RenameConstraint {
+                table,
+                schema,
+                from,
+                to,
+            } => Ok(rename_constraint(dialect, table, schema, from, to).into()),
             DiffStatement::CreateView { view, or_replace } => {
                 Ok(create_view(dialect, view, *or_replace).into())
             }
@@ -193,8 +202,8 @@ mod tests {
     use super::*;
     use crate::diff::{ColumnChange, EnumValuePosition, TableOptionChange};
     use crate::schema::{
-        Column, DataType, Index, IndexColumn, IndexMethod, PartitionMethod, PartitionSpec,
-        SequenceOptions, View,
+        Column, Constraint, DataType, Index, IndexColumn, IndexMethod, PartitionMethod,
+        PartitionSpec, PrimaryKeyConstraint, Sequence, SequenceOptions, UniqueConstraint, View,
     };
 
     #[test]
@@ -415,5 +424,52 @@ mod tests {
                 .to_string(None),
             "ALTER TABLE \"app\".\"users\" ADD COLUMN \"email\" VARCHAR(255) NOT NULL;"
         );
+    }
+
+    #[test]
+    fn renders_sequence_diff_statements_to_sql() {
+        let create_sequence = DiffStatement::CreateSequence {
+            sequence: Sequence {
+                name: "users_id_seq".to_string(),
+                schema: Some("public".to_string()),
+                increment: 1,
+                min_value: 1,
+                max_value: Some(2147483647),
+                start: 1,
+                cache: 1,
+                cycle: false,
+            },
+        };
+
+        assert_eq!(
+            create_sequence
+                .to_sql(&SqlDialect::Postgres)
+                .expect("create sequence sql should render")
+                .to_string(None),
+            "CREATE SEQUENCE \"public\".\"users_id_seq\" INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 CACHE 1 NO CYCLE;"
+        );
+    }
+
+    #[test]
+    fn create_table_diff_does_not_render_redundant_single_column_constraints() {
+        let mut table = crate::schema::Table::in_schema("users", "public");
+        table.column(Column::new("id", DataType::Serial).not_null());
+        table.column(Column::new("email", DataType::Text).not_null());
+        table.constraint(Constraint::PrimaryKey(
+            PrimaryKeyConstraint::new(vec!["id"]).named("users_pkey"),
+        ));
+        table.constraint(Constraint::Unique(
+            UniqueConstraint::new(vec!["email"]).named("users_email_key"),
+        ));
+
+        let sql = DiffStatement::CreateTable { table }
+            .to_sql(&SqlDialect::Postgres)
+            .expect("create table sql should render")
+            .to_string(None);
+
+        assert!(sql.contains("\"id\" SERIAL CONSTRAINT \"users_pkey\" PRIMARY KEY NOT NULL"));
+        assert!(sql.contains("\"email\" TEXT NOT NULL CONSTRAINT \"users_email_key\" UNIQUE"));
+        assert!(!sql.contains("CONSTRAINT \"users_pkey\" PRIMARY KEY (\"id\")"));
+        assert!(!sql.contains("CONSTRAINT \"users_email_key\" UNIQUE (\"email\")"));
     }
 }

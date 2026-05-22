@@ -1,9 +1,9 @@
 use crate::diff::{
     ColumnChange, EnumValuePosition, IdentityChange, SequenceChange, TableOptionChange,
 };
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 use crate::schema::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use super::generator::{SqlOutput, SqlStmt, SqlStmtPart};
@@ -20,7 +20,7 @@ pub fn quote_identifier(dialect: &SqlDialect, name: impl Into<String>) -> String
     }
 }
 
-pub fn qualified_table_name(dialect: &SqlDialect, id: &EntityName) -> String {
+pub fn qualified_table_name(dialect: &SqlDialect, id: &Iden) -> String {
     match id.schema() {
         Some(s) => format!(
             "{}.{}",
@@ -84,7 +84,10 @@ pub fn create_enum(
     // Add COMMENT ON TYPE if description is present
     if let Some(desc) = description {
         let escaped = desc.replace('\'', "''");
-        result.push(SqlStmt::from(format!("COMMENT ON TYPE {} IS '{}'", qualified, escaped)));
+        result.push(SqlStmt::from(format!(
+            "COMMENT ON TYPE {} IS '{}'",
+            qualified, escaped
+        )));
     }
 
     result.into()
@@ -95,12 +98,7 @@ pub fn drop_enum(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> S
     format!("DROP TYPE {}", qualified).into()
 }
 
-pub fn rename_enum(
-    dialect: &SqlDialect,
-    from: &str,
-    to: &str,
-    schema: &Option<String>,
-) -> SqlStmt {
+pub fn rename_enum(dialect: &SqlDialect, from: &str, to: &str, schema: &Option<String>) -> SqlStmt {
     let qualified = qualified_name(dialect, from, schema);
     format!(
         "ALTER TYPE {} RENAME TO {}",
@@ -287,15 +285,15 @@ pub fn alter_sequence(
 pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
     let name = qualified_name(dialect, &table.name, &table.schema);
 
-    let mut table_pk_cols: HashSet<&str> = HashSet::new();
-    let mut table_unique_cols: HashSet<&str> = HashSet::new();
+    let mut table_pk_cols: HashMap<String, Option<String>> = HashMap::new();
+    let mut table_unique_cols: HashMap<String, Option<String>> = HashMap::new();
     for constraint_type in &table.constraints {
         match constraint_type {
             Constraint::PrimaryKey(constraint) if constraint.columns.len() == 1 => {
-                table_pk_cols.insert(constraint.columns[0].as_str());
+                table_pk_cols.insert(constraint.columns[0].clone(), constraint.name.clone());
             }
             Constraint::Unique(constraint) if constraint.columns.len() == 1 => {
-                table_unique_cols.insert(constraint.columns[0].as_str());
+                table_unique_cols.insert(constraint.columns[0].clone(), constraint.name.clone());
             }
             _ => {}
         }
@@ -308,8 +306,8 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
             column_definition_with_suppression(
                 dialect,
                 c,
-                table_pk_cols.contains(c.name.as_str()),
-                table_unique_cols.contains(c.name.as_str()),
+                table_pk_cols.get(&c.name).map(Option::as_deref),
+                table_unique_cols.get(&c.name).map(Option::as_deref),
             )
             .to_string()
         })
@@ -317,6 +315,10 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
 
     // Add table-level constraints
     for constraint in &table.constraints {
+        if is_inlined_single_column_constraint(constraint, table) {
+            continue;
+        }
+
         column_defs.push(constraint_definition(dialect, constraint).to_string());
     }
 
@@ -329,7 +331,10 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
     // Add COMMENT ON TABLE if comment is present
     if let Some(comment) = &table.comment {
         let escaped = comment.replace('\'', "''");
-        result.push(SqlStmt::from(format!("COMMENT ON TABLE {} IS '{}'", name, escaped)));
+        result.push(SqlStmt::from(format!(
+            "COMMENT ON TABLE {} IS '{}'",
+            name, escaped
+        )));
     }
 
     // Add COMMENT ON COLUMN for columns with comments
@@ -349,21 +354,26 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
 }
 
 pub fn column_definition(dialect: &SqlDialect, col: &Column) -> SqlStmtPart {
-    column_definition_with_suppression(dialect, col, false, false)
+    column_definition_with_suppression(dialect, col, None, None)
 }
 
 fn column_definition_with_suppression(
     dialect: &SqlDialect,
     col: &Column,
-    suppress_primary_key: bool,
-    suppress_unique: bool,
+    inline_primary_key: Option<Option<&str>>,
+    inline_unique: Option<Option<&str>>,
 ) -> SqlStmtPart {
     let mut parts = vec![
         quote_identifier(dialect, &col.name),
         col.data_type.clone().to_string(dialect),
     ];
 
-    if col.primary_key && !suppress_primary_key {
+    if let Some(name) = inline_primary_key {
+        if let Some(name) = name {
+            parts.push(format!("CONSTRAINT {}", quote_identifier(dialect, name)));
+        }
+        parts.push("PRIMARY KEY".to_string());
+    } else if col.primary_key {
         parts.push("PRIMARY KEY".to_string());
     }
 
@@ -371,7 +381,12 @@ fn column_definition_with_suppression(
         parts.push("NOT NULL".to_string());
     }
 
-    if col.unique && !col.primary_key && !suppress_unique {
+    if let Some(name) = inline_unique {
+        if let Some(name) = name {
+            parts.push(format!("CONSTRAINT {}", quote_identifier(dialect, name)));
+        }
+        parts.push("UNIQUE".to_string());
+    } else if col.unique && !col.primary_key {
         parts.push("UNIQUE".to_string());
     }
 
@@ -388,6 +403,16 @@ fn column_definition_with_suppression(
     }
 
     parts.join(" ").into()
+}
+
+fn is_inlined_single_column_constraint(constraint: &Constraint, table: &Table) -> bool {
+    match constraint {
+        Constraint::PrimaryKey(c) if c.columns.len() == 1 => {
+            table.columns.contains_key(&c.columns[0])
+        }
+        Constraint::Unique(c) if c.columns.len() == 1 => table.columns.contains_key(&c.columns[0]),
+        _ => false,
+    }
 }
 
 pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> SqlStmtPart {
@@ -770,8 +795,6 @@ pub fn alter_column_comment(
     stmt.into()
 }
 
-// Index operations
-
 pub fn create_index(
     dialect: &SqlDialect,
     table: &str,
@@ -872,6 +895,21 @@ pub fn drop_index(
     sql.into()
 }
 
+pub fn rename_index(
+    dialect: &SqlDialect,
+    from: &str,
+    schema: &Option<String>,
+    to: &str,
+) -> SqlStmt {
+    let qualified = qualified_name(dialect, from, schema);
+    format!(
+        "ALTER INDEX {} RENAME TO {}",
+        qualified,
+        quote_identifier(dialect, to)
+    )
+    .into()
+}
+
 // Constraint operations
 
 pub fn add_constraint(
@@ -903,6 +941,23 @@ pub fn drop_constraint(
         qualified,
         quote_identifier(dialect, name),
         cascade_str
+    )
+    .into()
+}
+
+pub fn rename_constraint(
+    dialect: &SqlDialect,
+    table: &str,
+    schema: &Option<String>,
+    from: &str,
+    to: &str,
+) -> SqlStmt {
+    let qualified = qualified_name(dialect, table, schema);
+    format!(
+        "ALTER TABLE {} RENAME CONSTRAINT {} TO {}",
+        qualified,
+        quote_identifier(dialect, from),
+        quote_identifier(dialect, to)
     )
     .into()
 }
@@ -1211,7 +1266,11 @@ mod tests {
 
         let parts = sql.parts();
         assert_eq!(parts.len(), 2);
-        assert!(parts[0].as_sql().contains("CREATE TYPE \"public\".\"status\" AS ENUM ("));
+        assert!(
+            parts[0]
+                .as_sql()
+                .contains("CREATE TYPE \"public\".\"status\" AS ENUM (")
+        );
         assert_eq!(
             parts[1],
             "COMMENT ON TYPE \"public\".\"status\" IS 'workflow state'".into()

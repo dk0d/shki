@@ -7,7 +7,7 @@ use super::TestBackend;
 use shki::engines::Engine;
 use shki::engines::sqlite::Sqlite;
 use shki::migrate::manager::MigrationManager;
-use shki::models::entity_name::EntityName;
+use shki::models::iden::Iden;
 use shki::schema::SqlDialect;
 
 use crate::unique_suffix;
@@ -68,7 +68,7 @@ impl TestBackend for SqliteTestContext {
         None
     }
 
-    fn engine(&self, table: EntityName) -> Engine {
+    fn engine(&self, table: Iden) -> Engine {
         Engine::Sqlite(Sqlite::new(self.pool.clone(), table))
     }
 

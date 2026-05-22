@@ -1,19 +1,20 @@
 use crate::Config;
-use crate::engines::{Engine, EngineDriver, mysql::*, pg::*, sqlite::*};
-use crate::snapshots::Introspectable;
-use crate::{Result, ShkiError};
+use crate::PullFormat;
+use crate::Result;
+use crate::diff::diff_snapshots;
+use crate::engines::Engine;
+use crate::snapshots::{Introspectable, Snapshot};
+use crate::sql::generator::SqlGenerator;
 
 use colored::Colorize;
-use std::fmt::Write as _;
-
-use super::snapshots::Snapshot;
 
 /// Pull (introspect) the database schema
 pub async fn cmd_pull(
     config: &Config,
-    format: &str,
-    output: Option<&std::path::Path>,
-    with_migration_table: bool,
+    format: &PullFormat,
+    output: &Option<&std::path::Path>,
+    schema: &Option<String>,
+    _with_migration_table: bool,
 ) -> Result<()> {
     if let Some(url) = config.database_url.as_ref() {
         println!("\n{} {}\n", "URL".bold(), url.bright_green());
@@ -21,10 +22,10 @@ pub async fn cmd_pull(
         println!("{}", "No database url found".bright_yellow());
     }
 
-    println!("{}", "Introspecting database...".cyan());
+    println!("{}", "Introspecting database...\n".cyan());
+
     let engine = Engine::from_config(config).await?;
-    let snapshot = engine.introspect(config).await?;
-    dbg!(&snapshot);
+    let snapshot = engine.introspect(config, schema).await?;
 
     // let snapshot = if with_migration_table {
     //     engine.introspect(config).await?
@@ -34,41 +35,36 @@ pub async fn cmd_pull(
     //     snapshot
     // };
 
-    // dbg!(&snapshot);
+    let content = match format {
+        PullFormat::Json => snapshot.to_json()?,
+        PullFormat::Sql => {
+            // Generate CREATE statements
+            let empty = Snapshot::new(config.dialect);
+            let diff = diff_snapshots(&empty, &snapshot)?;
+            let generator = SqlGenerator::new(&config.dialect);
+            // generator.generate_string(&diff.statements)?;
+            generator.generate_string(&diff.statements)?
+        } // "rust" => {
+          // Generate Rust schema code
+          // generate_rust_schema(&snapshot)?
+          // }
+    };
 
-    // let content = match format {
-    //     "json" => snapshot.to_json()?,
-    //     "sql" => {
-    //         // Generate CREATE statements
-    //         let empty = Snapshot::new(config.dialect);
-    //         let diff = diff_snapshots(&empty, &snapshot)?;
-    //         let generator = SqlGenerator::new(config.dialect);
-    //         generator.generate_sql(&diff)?
-    //     }
-    //     "rust" => {
-    //         // Generate Rust schema code
-    //         generate_rust_schema(&snapshot)?
-    //     }
-    //     _ => {
-    //         return Err(ShkiError::config(format!("Unknown format: {}", format)));
-    //     }
-    // };
-
-    // match output {
-    //     Some(path) => {
-    //         // Resolve the output path relative to the project root
-    //         let resolved_path = config.resolve_path(path);
-    //         std::fs::write(&resolved_path, &content)?;
-    //         println!(
-    //             "{} {}",
-    //             "Schema written to:".green(),
-    //             resolved_path.display()
-    //         );
-    //     }
-    //     None => {
-    //         println!("{}", content);
-    //     }
-    // }
+    match output {
+        Some(path) => {
+            // Resolve the output path relative to the project root
+            let resolved_path = config.resolve_path(path);
+            std::fs::write(&resolved_path, &content)?;
+            println!(
+                "{} {}",
+                "Schema written to:".green(),
+                resolved_path.display()
+            );
+        }
+        None => {
+            println!("{}", content);
+        }
+    }
     //
     Ok(())
 }

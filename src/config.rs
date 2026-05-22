@@ -9,7 +9,7 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{CommonArgs, ShkiError, models::entity_name::EntityName, schema::SqlDialect};
+use crate::{CommonArgs, ShkiError, models::iden::Iden, schema::SqlDialect};
 use clap::ValueEnum;
 
 pub(crate) fn is_false(value: &bool) -> bool {
@@ -128,7 +128,7 @@ impl Default for MigrationTableId {
     }
 }
 
-impl From<MigrationTableId> for EntityName {
+impl From<MigrationTableId> for Iden {
     fn from(config: MigrationTableId) -> Self {
         Self {
             schema: config.schema,
@@ -169,7 +169,7 @@ fn default_migrations_schema() -> Option<String> {
 }
 
 impl MigrationConfig {
-    pub fn entity(&self) -> EntityName {
+    pub fn entity(&self) -> Iden {
         (self.table.clone(), self.schema.clone()).into()
     }
 }
@@ -200,13 +200,21 @@ pub enum MigrationPrefix {
     Unix,
 }
 
-/// Introspection configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct IntrospectConfig {
-    /// Casing for generated code
-    #[serde(default)]
-    pub casing: IdentifierCasing,
-}
+// /// Introspection configuration
+// #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+// pub struct IntrospectConfig {
+//     /// Casing for generated code
+//     #[serde(default)]
+//     pub casing: IdentifierCasing,
+//
+//     /// Schema to pull from - (Postgres), defaults to public
+//     #[serde(default = "default_introspect_schema")]
+//     pub schema: Option<String>,
+// }
+
+// fn default_introspect_schema() -> Option<String> {
+//     Some("public".to_string())
+// }
 
 /// Identifier casing style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::entity_name::EntityName;
+use crate::models::iden::Iden;
 
 use super::types::ReferenceAction;
 
@@ -118,7 +118,7 @@ pub struct ForeignKeyConstraint {
     /// Local columns
     pub columns: Vec<String>,
     /// Referenced table
-    pub references: EntityName,
+    pub references: Iden,
     /// Referenced columns
     pub references_columns: Vec<String>,
     /// ON DELETE action
@@ -139,7 +139,7 @@ impl ForeignKeyConstraint {
     /// Create a new foreign key constraint
     pub fn new(
         columns: Vec<impl Into<String>>,
-        references_table: impl Into<EntityName>,
+        references_table: impl Into<Iden>,
         references_columns: Vec<impl Into<String>>,
     ) -> Self {
         Self {
