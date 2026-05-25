@@ -1,9 +1,10 @@
-use crate::models::table_id::TableId;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
+use crate::sql::statements::qualified_table_name;
 
-pub fn delete_table(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
+pub fn delete_table(dialect: &SqlDialect, table: &Iden) -> String {
+    let table_name = qualified_table_name(dialect, table);
 
     match dialect {
         SqlDialect::Postgres | SqlDialect::Sqlite => {
@@ -15,7 +16,7 @@ pub fn delete_table(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
+pub fn ensure_migrations(dialect: &SqlDialect, table: &Iden) -> String {
     let generator = SqlGenerator::new(dialect);
     let table_name = generator.qualified_table_name(table);
 
@@ -59,8 +60,8 @@ pub fn ensure_migrations(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
+pub fn select_migrations(dialect: &SqlDialect, table: &Iden) -> String {
+    let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
@@ -78,9 +79,8 @@ pub fn select_migrations(dialect: &SqlDialect, table: &TableId) -> String {
     }
 }
 
-pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
-    let table_name = SqlGenerator::new(dialect).qualified_table_name(table);
-
+pub fn insert_migration(dialect: &SqlDialect, table: &Iden) -> String {
+    let table_name = qualified_table_name(dialect, table);
     match dialect {
         SqlDialect::Postgres => {
             format!(
@@ -101,8 +101,8 @@ pub fn insert_migration(dialect: &SqlDialect, table: &TableId) -> String {
 mod tests {
     use super::*;
 
-    fn table() -> TableId {
-        TableId::new("__shki_migrations", Some("meta".to_string()))
+    fn table() -> Iden {
+        Iden::new("__shki_migrations", Some("meta".to_string()))
     }
 
     #[test]

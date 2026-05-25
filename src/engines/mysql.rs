@@ -5,28 +5,28 @@ use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
-use crate::models::table_id::TableId;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
 use std::path::Path;
 
 pub struct Mysql {
-    table: TableId,
-    pool: Pool<sqlx::MySql>,
+    table: Iden,
+    pub(crate) pool: Pool<sqlx::MySql>,
 }
 
 impl Mysql {
-    pub fn new(pool: Pool<sqlx::MySql>, table: TableId) -> Self {
+    pub fn new(pool: Pool<sqlx::MySql>, table: Iden) -> Self {
         Self { pool, table }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
+    pub fn with_table(mut self, table: Iden) -> Self {
         self.table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &Iden {
         &self.table
     }
 
@@ -237,8 +237,8 @@ mod tests {
     use super::*;
     use crate::engines::queries;
 
-    fn table() -> TableId {
-        TableId::new("__shki_migrations", Some("meta".to_string()))
+    fn table() -> Iden {
+        Iden::new("__shki_migrations", Some("meta".to_string()))
     }
 
     #[tokio::test]
@@ -246,8 +246,7 @@ mod tests {
         let pool = sqlx::mysql::MySqlPoolOptions::new()
             .connect_lazy("mysql://root:password@localhost/shki")
             .expect("failed to create lazy mysql pool");
-        let engine = Mysql::new(pool, TableId::new("old_table", None))
-            .with_table(table());
+        let engine = Mysql::new(pool, Iden::new("old_table", None)).with_table(table());
 
         assert_eq!(engine.table(), &table());
     }
@@ -256,12 +255,12 @@ mod tests {
     fn mysql_queries_use_mysql_placeholders_and_identifiers() {
         let table = table();
 
-        assert!(queries::ensure_migrations(&SqlDialect::Mysql, &table)
-            .contains("CREATE TABLE IF NOT EXISTS `meta`.`__shki_migrations`"));
-        assert!(queries::insert_migration(&SqlDialect::Mysql, &table)
-            .contains("VALUES (?, ?)"));
-        assert!(queries::select_migrations(&SqlDialect::Mysql, &table)
-            .contains("ORDER BY id"));
+        assert!(
+            queries::ensure_migrations(&SqlDialect::Mysql, &table)
+                .contains("CREATE TABLE IF NOT EXISTS `meta`.`__shki_migrations`")
+        );
+        assert!(queries::insert_migration(&SqlDialect::Mysql, &table).contains("VALUES (?, ?)"));
+        assert!(queries::select_migrations(&SqlDialect::Mysql, &table).contains("ORDER BY id"));
     }
 
     #[test]

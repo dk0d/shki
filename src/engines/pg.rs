@@ -1,36 +1,39 @@
-use sqlx::{PgExecutor, Pool};
-
-use super::EngineDriver;
+use crate::engines::EngineDriver;
+// use indexmap::IndexMap;
 use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
-use crate::models::table_id::TableId;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
+use sqlx::{PgExecutor, Pool};
 use std::path::Path;
 
 pub struct Postgres {
-    table: TableId,
-    pool: Pool<sqlx::Postgres>,
+    migrations_table: Iden,
+    pub(crate) pool: Pool<sqlx::Postgres>,
 }
 
 impl Postgres {
-    pub fn new(pool: Pool<sqlx::Postgres>, table: TableId) -> Self {
-        Self { pool, table }
+    pub fn new(pool: Pool<sqlx::Postgres>, migrations_table: Iden) -> Self {
+        Self {
+            pool,
+            migrations_table,
+        }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
-        self.table = table;
+    pub fn with_table(mut self, table: Iden) -> Self {
+        self.migrations_table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
-        &self.table
+    pub fn table(&self) -> &Iden {
+        &self.migrations_table
     }
 
-    fn insert_migration_query(&self, table: &TableId) -> String {
+    fn insert_migration_query(&self, table: &Iden) -> String {
         let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(table);
         format!(
             "INSERT INTO {} (name, checksum) VALUES ($1, $2) returning id, name, checksum, applied_at",
@@ -38,24 +41,31 @@ impl Postgres {
         )
     }
 
-    async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
-    where
-        E: PgExecutor<'e>,
-    {
-        let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.table);
+    async fn ensure_migrations_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<()> {
+        let table_name =
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+
         let query = format!(
             r#"
+                CREATE SCHEMA IF NOT EXISTS {};
                 CREATE TABLE IF NOT EXISTS {} (
                     id BIGSERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     checksum VARCHAR(64),
                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                "#,
+                );
+            "#,
+            self.migrations_table
+                .schema
+                .clone()
+                .unwrap_or("public".to_string()),
             table_name
         );
-        sqlx::query(&query)
-            .execute(exec)
+        sqlx::raw_sql(&query)
+            .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
         Ok(())
@@ -71,7 +81,7 @@ impl Postgres {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
         let checksum = sql_checksum(&sql);
-        let query = self.insert_migration_query(&self.table);
+        let query = self.insert_migration_query(&self.migrations_table);
         let row = sqlx::query_as::<_, MigrationRow>(&query)
             .bind(name)
             .bind(&checksum)
@@ -118,10 +128,11 @@ impl Postgres {
     where
         E: PgExecutor<'e>,
     {
-        let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.table);
+        let table_name =
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!("DELETE FROM {} WHERE name = $1 returning *", table_name);
         let row = sqlx::query_as::<_, MigrationRow>(&query)
-            .bind(&name)
+            .bind(name)
             .fetch_one(exec)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
@@ -131,9 +142,7 @@ impl Postgres {
 
 impl EngineDriver for Postgres {
     async fn ensure_migrations(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await
-        })
+        with_tx!(self.pool, |tx| { self.ensure_migrations_in(&mut tx).await })
     }
 
     /// Record an existing migration file as applied without executing its SQL.
@@ -184,7 +193,7 @@ impl EngineDriver for Postgres {
             })?;
 
             // Build the SQL for recording the migration
-            let query = self.insert_migration_query(&self.table);
+            let query = self.insert_migration_query(&self.migrations_table);
             let row = sqlx::query_as::<_, MigrationRow>(&query)
                 .bind(name)
                 .bind(&checksum)
@@ -196,7 +205,8 @@ impl EngineDriver for Postgres {
     }
 
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
-        let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.table);
+        let table_name =
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
             table_name
@@ -215,8 +225,8 @@ impl EngineDriver for Postgres {
 
     async fn delete_table(&self) -> Result<()> {
         with_tx!(self.pool, |tx| {
-            let table_name =
-                SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.table);
+            let table_name = SqlGenerator::new(&SqlDialect::Postgres)
+                .qualified_table_name(&self.migrations_table);
             let query = format!("DROP TABLE {}", table_name);
             let _ = sqlx::query(&query).execute(&mut *tx).await;
             Ok(())

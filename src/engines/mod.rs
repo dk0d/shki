@@ -5,6 +5,8 @@ pub mod queries;
 pub mod sqlite;
 pub mod utils;
 
+use indexmap::IndexMap;
+
 use self::detached::Detached;
 use self::mysql::Mysql;
 use self::pg::Postgres;
@@ -15,8 +17,9 @@ use std::pin::Pin;
 use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::MigrationRow;
-use crate::models::table_id::TableId;
-use crate::schema::SqlDialect;
+use crate::models::iden::Iden;
+use crate::schema::*;
+use crate::snapshots::{Introspectable, Snapshot, SnapshotProvider};
 
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -29,16 +32,12 @@ pub enum Engine {
 }
 
 impl Engine {
-    pub fn detached(dialect: SqlDialect, table: TableId) -> Self {
+    pub fn detached(dialect: SqlDialect, table: Iden) -> Self {
         Engine::Detached(Detached::new(dialect, table))
     }
 
     pub async fn from_config(config: &Config) -> Result<Self> {
-        let table: TableId = (
-            config.migrations.table.clone(),
-            config.migrations.schema.clone(),
-        )
-            .into();
+        let table: Iden = config.migrations.entity().clone();
 
         if config.database_url.is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
@@ -79,7 +78,7 @@ impl Engine {
         }
     }
 
-    pub fn with_table(self, table: TableId) -> Self {
+    pub fn with_table(self, table: Iden) -> Self {
         match self {
             Engine::Postgres(engine) => Engine::Postgres(engine.with_table(table)),
             Engine::Sqlite(engine) => Engine::Sqlite(engine.with_table(table)),
@@ -88,7 +87,7 @@ impl Engine {
         }
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &Iden {
         match self {
             Engine::Postgres(engine) => engine.table(),
             Engine::Sqlite(engine) => engine.table(),
@@ -123,4 +122,52 @@ pub(crate) trait EngineDriver {
 
     // /// Delete a single migration
     // async fn delete_migration(&self, name: &str) -> Result<MigrationRow>;
+}
+
+#[async_trait::async_trait]
+impl<E> Introspectable for E
+where
+    E: EngineDriver + SnapshotProvider + Send + Sync,
+{
+    async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot> {
+        let mut snapshot = Snapshot::new(config.dialect);
+
+        let schema = match config.dialect {
+            SqlDialect::Postgres => Some(schema.clone().unwrap_or("public".to_string())),
+            SqlDialect::Mysql | SqlDialect::Sqlite => schema.clone(),
+        };
+
+        snapshot.schemas = self.get_schemas(&schema).await?;
+        snapshot.enums = self.get_enums(&schema).await?;
+        snapshot.views = self.get_views(&schema).await?;
+        snapshot.sequences = self.get_sequences(&schema).await?;
+        snapshot.extensions = self.get_extensions(&schema).await?;
+
+        let mut tables = self.get_tables(&schema).await?;
+        let constraints = self.get_constraints(&schema).await?;
+        let columns = self.get_columns(&schema).await?;
+        let indexes = self.get_indexes(&schema).await?;
+
+        columns.into_iter().for_each(|(table_id, cols)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.columns = cols;
+            }
+        });
+
+        constraints.into_iter().for_each(|(table_id, cons)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.constraints = cons;
+            }
+        });
+
+        indexes.into_iter().for_each(|(table_id, index)| {
+            if let Some(table) = tables.get_mut(&table_id) {
+                table.indexes = index;
+            }
+        });
+
+        snapshot.tables = tables;
+
+        Ok(snapshot)
+    }
 }

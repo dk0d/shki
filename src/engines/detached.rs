@@ -2,30 +2,30 @@ use std::path::Path;
 
 use super::EngineDriver;
 use crate::migrate::manager::MigrationRow;
-use crate::models::table_id::TableId;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::{Result, ShkiError};
 
 pub struct Detached {
     dialect: SqlDialect,
-    table: TableId,
+    table: Iden,
 }
 
 impl Detached {
-    pub fn new(dialect: SqlDialect, table: TableId) -> Self {
+    pub fn new(dialect: SqlDialect, table: Iden) -> Self {
         Self { dialect, table }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
+    pub fn with_table(mut self, table: Iden) -> Self {
         self.table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &Iden {
         &self.table
     }
 
-    fn unavailable(&self) -> ShkiError {
+    pub(crate) fn unavailable(&self) -> ShkiError {
         ShkiError::config(format!(
             "Database URL is required for {} operations",
             self.dialect
@@ -57,6 +57,4 @@ impl EngineDriver for Detached {
     async fn delete_table(&self) -> Result<()> {
         Err(self.unavailable())
     }
-    //     Err(self.unavailable())
-    // }
 }

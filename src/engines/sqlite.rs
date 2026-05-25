@@ -5,28 +5,28 @@ use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
-use crate::models::table_id::TableId;
+use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
 use std::path::Path;
 
 pub struct Sqlite {
-    table: TableId,
-    pool: Pool<sqlx::Sqlite>,
+    table: Iden,
+    pub(crate) pool: Pool<sqlx::Sqlite>,
 }
 
 impl Sqlite {
-    pub fn new(pool: Pool<sqlx::Sqlite>, table: TableId) -> Self {
+    pub fn new(pool: Pool<sqlx::Sqlite>, table: Iden) -> Self {
         Self { pool, table }
     }
 
-    pub fn with_table(mut self, table: TableId) -> Self {
+    pub fn with_table(mut self, table: Iden) -> Self {
         self.table = table;
         self
     }
 
-    pub fn table(&self) -> &TableId {
+    pub fn table(&self) -> &Iden {
         &self.table
     }
 

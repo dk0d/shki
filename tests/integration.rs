@@ -2,7 +2,10 @@ mod engines;
 use engines::*;
 mod common;
 
+use shki::models::iden::Iden;
 use shki::run;
+use shki::snapshots::Snapshot;
+use shki::{Commands, CommonArgs, PullFormat};
 
 use self::common::*;
 
@@ -329,6 +332,66 @@ async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx:
     ctx.cleanup().await;
 }
 
+async fn scenario_cli_pull_json_introspects_schema<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("introspected_users");
+    let output_path = ctx.root_dir().join("snapshot.json");
+    let migration_path = ctx.write_migration(
+        "0001_create_introspected_users.sql",
+        &ctx.create_table_sql(&table_name, &[format!("name {} NOT NULL", ctx.text_type())]),
+    );
+
+    manager
+        .apply_migration(&migration_path)
+        .await
+        .expect("failed to apply migration before introspection");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Pull {
+            format: PullFormat::Json,
+            output: Some(output_path.clone()),
+            schema: ctx.migration_schema().map(str::to_string),
+        },
+    })
+    .await
+    .expect("pull json should introspect database");
+
+    let snapshot_json = std::fs::read_to_string(&output_path).expect("snapshot should be written");
+    let snapshot: Snapshot = serde_json::from_str(&snapshot_json).expect("snapshot should parse");
+    assert_eq!(snapshot.dialect, ctx.dialect());
+
+    let table_id = snapshot
+        .tables
+        .keys()
+        .find(|id| id.name == table_name)
+        .cloned()
+        .expect("created table should be introspected");
+    let table = snapshot
+        .tables
+        .get(&table_id)
+        .expect("created table should be readable");
+
+    assert!(table.columns.contains_key("id"));
+    assert!(table.columns.contains_key("name"));
+    assert!(!table.columns.get("name").expect("name column").nullable);
+    assert!(table.constraints.iter().any(
+        |constraint| matches!(constraint, shki::schema::Constraint::PrimaryKey(pk) if pk.columns == vec!["id"])
+    ));
+
+    if let Some(schema) = ctx.migration_schema() {
+        assert_eq!(table_id, Iden::new(table_name, Some(schema.to_string())));
+    }
+
+    ctx.cleanup().await;
+}
+
 macro_rules! backend_suite {
     ($module:ident, $backend:ty) => {
         mod $module {
@@ -341,12 +404,16 @@ macro_rules! backend_suite {
 
             #[tokio::test]
             async fn apply_all_and_pending_detection() {
-                scenario_apply_all_and_pending_detection(<$backend as TestBackend>::setup("apply_all").await).await;
+                scenario_apply_all_and_pending_detection(
+                    <$backend as TestBackend>::setup("apply_all").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn rollback_single() {
-                scenario_rollback_single(<$backend as TestBackend>::setup("rollback_single").await).await;
+                scenario_rollback_single(<$backend as TestBackend>::setup("rollback_single").await)
+                    .await;
             }
 
             #[tokio::test]
@@ -356,32 +423,56 @@ macro_rules! backend_suite {
 
             #[tokio::test]
             async fn rollback_count() {
-                scenario_rollback_count(<$backend as TestBackend>::setup("rollback_count").await).await;
+                scenario_rollback_count(<$backend as TestBackend>::setup("rollback_count").await)
+                    .await;
             }
 
             #[tokio::test]
             async fn transaction_rollback_on_error() {
-                scenario_transaction_rollback_on_error(<$backend as TestBackend>::setup("tx_rollback").await).await;
+                scenario_transaction_rollback_on_error(
+                    <$backend as TestBackend>::setup("tx_rollback").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn checksum_validation_blocks_new_migrations() {
-                scenario_checksum_validation_blocks_new_migrations(<$backend as TestBackend>::setup("checksum").await).await;
+                scenario_checksum_validation_blocks_new_migrations(
+                    <$backend as TestBackend>::setup("checksum").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn custom_migration_table() {
-                scenario_custom_migration_table(<$backend as TestBackend>::setup("migration_table").await).await;
+                scenario_custom_migration_table(
+                    <$backend as TestBackend>::setup("migration_table").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn cli_migrate_applies_pending() {
-                scenario_cli_migrate_applies_pending(<$backend as TestBackend>::setup("cli_migrate").await).await;
+                scenario_cli_migrate_applies_pending(
+                    <$backend as TestBackend>::setup("cli_migrate").await,
+                )
+                .await;
             }
 
             #[tokio::test]
             async fn cli_down_dry_run_does_not_modify_database() {
-                scenario_cli_down_dry_run_does_not_modify_database(<$backend as TestBackend>::setup("cli_down").await).await;
+                scenario_cli_down_dry_run_does_not_modify_database(
+                    <$backend as TestBackend>::setup("cli_down").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn cli_pull_json_introspects_schema() {
+                scenario_cli_pull_json_introspects_schema(
+                    <$backend as TestBackend>::setup("cli_pull_json").await,
+                )
+                .await;
             }
         }
     };

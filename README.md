@@ -14,8 +14,8 @@ Database migrations with a smaller, rebuilt core.
 Dialects Supported:
 
 - [x] PostgreSQL
-- [x] SQLite
-- [x] MySQL
+- [~] SQLite
+- [~] MySQL
 
 ## Back to basics
 
@@ -28,7 +28,7 @@ That means the current README reflects what is available today, and the missing 
 ## Current feature set
 
 - Manual SQL migration workflow.
-- Project initialization with `sql` mode and an early `lua` mode scaffold.
+- Project initialization with `sql` mode.
 - Create migration files with optional inline SQL, SQL loaded from a file, and optional `.down.sql` companions.
 - Apply pending migrations in order.
 - Track applied migrations in a dedicated migrations table.
@@ -45,7 +45,10 @@ These features existed previously or are still present as partial code paths, bu
 - [ ] Schema diffing against a live database
 - [ ] Generated migrations from Lua schema changes
 - [ ] Full Lua schema authoring workflow and starter files
-- [ ] Database introspection / `pull`
+- [~] Database introspection / `pull`
+  - [x] PostgreSQL
+  - [ ] MySQL
+  - [ ] SQLite
 - [ ] Bootstrap / adopt-existing-database flow
 - [ ] Squash existing migration history
 - [ ] Code generation for Rust, TypeScript, or Protobuf

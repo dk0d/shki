@@ -81,14 +81,13 @@ pub struct CommonArgs {
 
 #[derive(Debug, Serialize, Args, Default)]
 pub struct MigrationArgs {
-
     /// Name of the migrations table
-    #[arg(long,  default_value = None)]
+    #[arg(short='T',long,  default_value = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table: Option<String>,
 
     /// Schema for the migrations table (PostgreSQL)
-    #[arg(long,  default_value = None)]
+    #[arg(short='S', long,  default_value = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
 
@@ -160,6 +159,14 @@ pub enum CodegenLanguage {
     Protobuf,
 }
 
+#[derive(Debug, clap::ValueEnum, Default, Clone, Serialize)]
+#[value(rename_all = "lowercase")]
+pub enum PullFormat {
+    Json,
+    #[default]
+    Sql,
+}
+
 /// CLI commands
 #[derive(Subcommand, Debug, Serialize)]
 pub enum Commands {
@@ -200,13 +207,12 @@ pub enum Commands {
     //
     /// Apply pending migrations to the database
     #[command(visible_alias = "up")]
-    Migrate,
-    // {
-    // /// Only show what would be applied
-    // #[arg(long, short)]
-    // dry_run: bool,
-    // },
-    //
+    Migrate {
+        /// Only show what would be applied
+        #[arg(long, short)]
+        dry_run: bool,
+    },
+
     /// Create a blank migration file for manual SQL editing
     #[command(visible_alias = "new")]
     Create {
@@ -229,21 +235,23 @@ pub enum Commands {
         #[arg(short, long)]
         edit: bool,
     },
-    //
-    // /// Pull (introspect) the database schema
-    // Pull {
-    //     /// Output format (json, sql, rust)
-    //     #[arg(short, long, default_value = "sql")]
-    //     format: String,
-    //
-    //     /// Output file (defaults to stdout)
-    //     #[arg(long)]
-    //     output: Option<PathBuf>,
-    //
-    //     #[arg(long, short, default_value_t = false)]
-    //     with_migration_table: bool,
-    // },
-    //
+
+    /// Pull (introspect) the database schema
+    #[command(visible_alias = "introspect")]
+    Pull {
+        /// Output format
+        #[arg(short, long, default_value_t = PullFormat::default(), value_enum)]
+        format: PullFormat,
+
+        /// Output file (defaults to stdout)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Schema to introspect (Postgres, defaults to public)
+        #[arg(long)]
+        schema: Option<String>,
+    },
+
     // /// Bootstrap shki from an existing database state
     // #[command(visible_alias = "strap")]
     // Bootstrap {

@@ -12,6 +12,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
         .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))?;
 
     let migration_manager = MigrationManager::from_config(config).await?;
+
     // Get migrations that can be rolled back
     let rollback_migrations = migration_manager.get_rollback_migrations().await?;
 
@@ -77,9 +78,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
             println!("Rolling back: {}", name);
         }
 
-        migration_manager
-            .rollback_migration(&down_path)
-            .await?;
+        migration_manager.rollback_migration(&down_path).await?;
         rolled_back.push(name);
     }
 

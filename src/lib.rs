@@ -35,12 +35,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             display_config(&config);
             Ok(())
         }
+
         Commands::Init {
             path,
             dialect,
             // language,
             mode,
         } => init::cmd_init(&path, dialect, mode).await,
+
         Commands::Create {
             name,
             sql,
@@ -58,8 +60,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
+
         Commands::Status => status::cmd_status(&config).await,
-        Commands::Migrate => migrate::cmd_migrate(&config).await, //
+
+        Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await, //
+
         //     Commands::Generate {
         //         name,
         //         schema,
@@ -67,13 +72,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         //     } => generate::cmd_generate_sql(&config, name, schema, dry_run),
         //
         //     Commands::Status => status::cmd_status(&config).await,
-        //
-        //     Commands::Pull {
-        //         format,
-        //         output,
-        //         with_migration_table,
-        //     } => pull::cmd_pull(&config, &format, output.as_deref(), with_migration_table).await,
-        //
+        Commands::Pull {
+            format,
+            output,
+            schema,
+        } => introspect::cmd_pull(&config, &format, &output.as_deref(), &schema).await,
+
         //     Commands::Bootstrap {
         //         name,
         //         legacy_tables,
@@ -104,7 +108,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         //         force,
         //     } => squash::cmd_squash(&config, name, dry_run, force).await,
         //
-        //     Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
+        // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
         //     Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
         //
