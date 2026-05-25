@@ -7,6 +7,7 @@ use super::{Column, ColumnBuilder, Constraint, Index};
 
 /// A database table definition
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub struct Table {
     /// Table name
     pub name: String,
@@ -46,6 +47,7 @@ pub struct Table {
 
 /// Table partitioning specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct PartitionSpec {
     /// Partition method (RANGE, LIST, HASH)
     pub method: PartitionMethod,

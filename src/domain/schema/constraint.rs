@@ -16,7 +16,7 @@ pub enum ConstraintType {
 
 /// A table constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum Constraint {
     /// Primary key constraint
     PrimaryKey(PrimaryKeyConstraint),
@@ -45,6 +45,7 @@ impl Constraint {
 
 /// Primary key constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct PrimaryKeyConstraint {
     /// Constraint name (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,6 +72,7 @@ impl PrimaryKeyConstraint {
 
 /// Unique constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct UniqueConstraint {
     /// Constraint name (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,6 +113,7 @@ impl UniqueConstraint {
 
 /// Foreign key constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ForeignKeyConstraint {
     /// Constraint name (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -188,6 +191,7 @@ impl ForeignKeyConstraint {
 
 /// Check constraint
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct CheckConstraint {
     /// Constraint name (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +218,7 @@ impl CheckConstraint {
 
 /// Exclusion constraint (PostgreSQL)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ExclusionConstraint {
     /// Constraint name (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,6 +6,7 @@ use super::types::{DataType, DefaultValue, GeneratedColumn};
 
 /// A database column definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Column {
     /// Column name
     pub name: String,
@@ -56,6 +57,7 @@ fn default_true() -> bool {
 
 /// Identity column specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct IdentitySpec {
     /// ALWAYS or BY DEFAULT
     pub always: bool,
@@ -66,6 +68,7 @@ pub struct IdentitySpec {
 
 /// Sequence options for identity columns
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub struct SequenceOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<i64>,
@@ -83,6 +86,7 @@ pub struct SequenceOptions {
 
 /// Column-level foreign key reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ColumnReference {
     pub table: String,
     pub column: String,

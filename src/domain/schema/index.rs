@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// An index on a table
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Index {
     /// Index name
     pub name: String,
@@ -82,7 +83,7 @@ impl std::fmt::Display for IndexMethod {
 
 /// A column or expression in an index
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case", untagged)]
 pub enum IndexColumn {
     /// Simple column reference
     Column {

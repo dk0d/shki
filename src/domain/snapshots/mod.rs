@@ -16,6 +16,7 @@ use super::schema::{Column, Constraint, DbEnum, Index, Sequence, SqlDialect, Tab
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Snapshot {
     /// Snapshot format version
     pub version: String,
