@@ -114,7 +114,7 @@ database_url = "{}"
                 database_url: Some(self.database_url()),
                 ..CommonArgs::default()
             },
-            command: Commands::Migrate,
+            command: Commands::Migrate { dry_run: false },
         }
     }
 
