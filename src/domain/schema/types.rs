@@ -8,6 +8,7 @@ use super::SqlDialect;
 
 /// Enum type definition (PostgreSQL)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct DbEnum {
     pub name: String,
     pub schema: Option<String>,
@@ -53,7 +54,7 @@ impl DbEnum {
 
 /// SQL data type representation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "params")]
+#[serde(rename_all = "snake_case", tag = "type", content = "params")]
 pub enum DataType {
     // Numeric types
     SmallInt,
@@ -857,7 +858,7 @@ fn normalize_type_name(value: &str) -> String {
 
 /// Default value for a column
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum DefaultValue {
     /// Literal value
     Literal(String),
@@ -931,6 +932,7 @@ impl DefaultValue {
 
 /// Generated column specification
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct GeneratedColumn {
     /// SQL expression for the generated column
     pub expression: String,

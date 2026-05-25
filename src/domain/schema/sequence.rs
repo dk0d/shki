@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Sequence definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Sequence {
     pub name: String,
     pub schema: Option<String>,

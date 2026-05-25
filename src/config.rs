@@ -7,7 +7,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::{CommonArgs, ShkiError, models::iden::Iden, schema::SqlDialect, utils::resolve_path};
 use clap::ValueEnum;
@@ -230,10 +230,7 @@ impl Default for Config {
 }
 
 fn default_schema_path() -> PathBuf {
-    if Path::new("schema/index.ts").exists() {
-        return PathBuf::from("schema/index.ts");
-    }
-    PathBuf::from("schema.ts")
+    PathBuf::from("schema")
 }
 
 impl Config {

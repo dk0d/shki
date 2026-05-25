@@ -79,6 +79,7 @@ pub struct MigrationRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, tabled::Tabled)]
+#[serde(rename_all = "snake_case")]
 pub struct MigrationInfo {
     pub name: String,
 
