@@ -1,6 +1,7 @@
 use crate::config::Config;
 
 use crate::migrate::manager::MigrationManager;
+use crate::utils::resolve_path;
 use crate::{Result, ShkiError};
 use colored::Colorize;
 
@@ -23,7 +24,7 @@ pub async fn cmd_create(
         Some(sql_content.to_string())
     } else if let Some(file_path) = sql_file {
         // Resolve the SQL file path relative to the project root
-        let resolved_path = config.resolve_path(file_path);
+        let resolved_path = resolve_path(None, file_path);
         Some(
             std::fs::read_to_string(&resolved_path)
                 .map_err(|e| ShkiError::config(format!("Failed to read SQL file: {}", e)))?,

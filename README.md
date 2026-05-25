@@ -43,8 +43,8 @@ That means the current README reflects what is available today, and the missing 
 These features existed previously or are still present as partial code paths, but they are not part of the current supported surface area:
 
 - [ ] Schema diffing against a live database
-- [ ] Generated migrations from Lua schema changes
-- [ ] Full Lua schema authoring workflow and starter files
+- [~] Generated migrations from typescript schema changes
+- [ ] Full typescript schema authoring workflow and starter files
 - [~] Database introspection / `pull`
   - [x] PostgreSQL
   - [ ] MySQL
@@ -174,10 +174,9 @@ Set config in `shki.toml`, env vars, or CLI flags.
 Default config:
 
 ```toml
-root = "db"
 database_url = "postgres://user:pass@localhost:5432/mydb"
-schema = "init.lua"
-out = "./migrations"
+schema = "./schema" # path to schema (typescript schema definitions)
+out = "./migrations" # path to sql migration files
 breakpoints = true
 verbose = false
 timeout_seconds = 2
@@ -223,9 +222,9 @@ Down migrations are optional. `shki down` only considers applied migrations that
 
 When `status` or `migrate` can connect to the database, `shki` validates stored checksums for applied migrations and reports if a migration file has changed since it was applied.
 
-### Lua mode
+### Typescript mode
 
-`init --mode lua` still exists, but the full schema-first Lua workflow is being brought back later as part of the broader rebuild.
+`init --mode ts` still exists, but the full schema-first Typescript workflow is being brought back later as part of the broader rebuild.
 
 ## Contributing
 

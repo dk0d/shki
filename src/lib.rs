@@ -78,36 +78,6 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
         } => introspect::cmd_pull(&config, &format, &output.as_deref(), &schema).await,
 
-        //     Commands::Bootstrap {
-        //         name,
-        //         legacy_tables,
-        //         drop_legacy_tables,
-        //         write_lua,
-        //         lua_output,
-        //         no_mark_applied,
-        //         dry_run,
-        //         force,
-        //     } => {
-        //         bootstrap::cmd_bootstrap(
-        //             &config,
-        //             name,
-        //             legacy_tables,
-        //             drop_legacy_tables,
-        //             write_lua,
-        //             lua_output,
-        //             !no_mark_applied,
-        //             dry_run,
-        //             force,
-        //         )
-        //         .await
-        //     }
-        //
-        //     Commands::Squash {
-        //         name,
-        //         dry_run,
-        //         force,
-        //     } => squash::cmd_squash(&config, name, dry_run, force).await,
-        //
         // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
         //     Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
