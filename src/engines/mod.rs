@@ -134,6 +134,7 @@ where
 
         let schema = Some(schema.clone().unwrap_or("public".to_string()));
 
+        snapshot.schemas = self.get_schemas(&schema).await?;
         snapshot.enums = self.get_enums(&schema).await?;
         snapshot.views = self.get_views(&schema).await?;
         snapshot.sequences = self.get_sequences(&schema).await?;
