@@ -1072,6 +1072,40 @@ fn parse_check_constraint_expression(definition: &str) -> String {
 mod tests {
     use super::*;
 
+    fn base_column_row(name: &str, data_type: &str) -> PgInfoSchemaColumnRow {
+        PgInfoSchemaColumnRow {
+            table_schema: "public".to_string(),
+            table_name: "users".to_string(),
+            column_name: name.to_string(),
+            data_type: data_type.to_string(),
+            udt_name: data_type.to_string(),
+            is_nullable: "YES".to_string(),
+            column_default: None,
+            collation_name: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_identity: "NO".to_string(),
+            identity_generation: None,
+            identity_start: None,
+            identity_increment: None,
+            identity_maximum: None,
+            identity_minimum: None,
+            identity_cycle: None,
+            is_generated: "NEVER".to_string(),
+            generation_expression: None,
+            is_updatable: "YES".to_string(),
+            owned_sequence_schema: None,
+            owned_sequence_name: None,
+            owned_sequence_increment: None,
+            owned_sequence_min_value: None,
+            owned_sequence_max_value: None,
+            owned_sequence_start: None,
+            owned_sequence_cache: None,
+            owned_sequence_cycle: None,
+        }
+    }
+
     #[test]
     fn parses_table_options_into_index_map() {
         let options = parse_table_options(&[
@@ -1335,5 +1369,220 @@ mod tests {
         };
 
         assert!(is_inline_serial_sequence(&row));
+    }
+
+    #[test]
+    fn postgres_column_rows_introspect_column_metadata() {
+        let mut identity_row = base_column_row("id", "integer");
+        identity_row.is_nullable = "NO".to_string();
+        identity_row.is_identity = "YES".to_string();
+        identity_row.identity_generation = Some("ALWAYS".to_string());
+        identity_row.identity_start = Some("10".to_string());
+        identity_row.identity_increment = Some("5".to_string());
+
+        let column = Column::from(identity_row);
+        assert_eq!(column.data_type, DataType::Integer);
+        assert!(!column.nullable);
+        assert!(matches!(
+            column.identity,
+            Some(IdentitySpec {
+                always: true,
+                sequence_options: Some(SequenceOptions {
+                    start: Some(10),
+                    increment: Some(5),
+                    ..
+                })
+            })
+        ));
+
+        let mut generated_row = base_column_row("name_lower", "text");
+        generated_row.is_generated = "ALWAYS".to_string();
+        generated_row.generation_expression = Some("lower(name)".to_string());
+
+        let generated = Column::from(generated_row);
+        assert!(matches!(
+            generated.generated,
+            Some(GeneratedColumn { stored: true, ref expression }) if expression == "lower(name)"
+        ));
+    }
+
+    #[test]
+    fn postgres_constraint_rows_aggregate_table_constraints() {
+        let constraints = {
+            let rows = vec![
+                PgConstraintRow {
+                    table_schema: "public".to_string(),
+                    table_name: "posts".to_string(),
+                    constraint_name: "posts_pkey".to_string(),
+                    constraint_type: "PRIMARY KEY".to_string(),
+                    column_name: Some("id".to_string()),
+                    foreign_table_schema: None,
+                    foreign_table_name: None,
+                    foreign_column_name: None,
+                    update_action: None,
+                    delete_action: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                    constraint_expression: None,
+                },
+                PgConstraintRow {
+                    table_schema: "public".to_string(),
+                    table_name: "posts".to_string(),
+                    constraint_name: "posts_tenant_slug_key".to_string(),
+                    constraint_type: "UNIQUE".to_string(),
+                    column_name: Some("tenant_id".to_string()),
+                    foreign_table_schema: None,
+                    foreign_table_name: None,
+                    foreign_column_name: None,
+                    update_action: None,
+                    delete_action: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                    constraint_expression: None,
+                },
+                PgConstraintRow {
+                    table_schema: "public".to_string(),
+                    table_name: "posts".to_string(),
+                    constraint_name: "posts_tenant_slug_key".to_string(),
+                    constraint_type: "UNIQUE".to_string(),
+                    column_name: Some("slug".to_string()),
+                    foreign_table_schema: None,
+                    foreign_table_name: None,
+                    foreign_column_name: None,
+                    update_action: None,
+                    delete_action: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                    constraint_expression: None,
+                },
+                PgConstraintRow {
+                    table_schema: "public".to_string(),
+                    table_name: "posts".to_string(),
+                    constraint_name: "posts_user_id_fkey".to_string(),
+                    constraint_type: "FOREIGN KEY".to_string(),
+                    column_name: Some("user_id".to_string()),
+                    foreign_table_schema: Some("public".to_string()),
+                    foreign_table_name: Some("users".to_string()),
+                    foreign_column_name: Some("id".to_string()),
+                    update_action: Some("r".to_string()),
+                    delete_action: Some("c".to_string()),
+                    deferrable: true,
+                    initially_deferred: true,
+                    constraint_expression: None,
+                },
+                PgConstraintRow {
+                    table_schema: "public".to_string(),
+                    table_name: "posts".to_string(),
+                    constraint_name: "posts_title_check".to_string(),
+                    constraint_type: "CHECK".to_string(),
+                    column_name: None,
+                    foreign_table_schema: None,
+                    foreign_table_name: None,
+                    foreign_column_name: None,
+                    update_action: None,
+                    delete_action: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                    constraint_expression: Some("CHECK (length(title) > 0)".to_string()),
+                },
+            ];
+
+            let mut constraints_by_table: IndexMap<Iden, IndexMap<String, Constraint>> =
+                IndexMap::new();
+            for row in rows {
+                let constraint_map = constraints_by_table
+                    .entry(Iden::new(
+                        row.table_name.clone(),
+                        Some(row.table_schema.clone()),
+                    ))
+                    .or_default();
+                let entry = constraint_map
+                    .entry(row.constraint_name.clone())
+                    .or_insert_with(|| match row.constraint_type.as_str() {
+                        "PRIMARY KEY" => Constraint::PrimaryKey(PrimaryKeyConstraint {
+                            name: Some(row.constraint_name.clone()),
+                            columns: Vec::new(),
+                        }),
+                        "UNIQUE" => Constraint::Unique(UniqueConstraint {
+                            name: Some(row.constraint_name.clone()),
+                            columns: Vec::new(),
+                            nulls_distinct: true,
+                        }),
+                        "FOREIGN KEY" => Constraint::ForeignKey(ForeignKeyConstraint {
+                            name: Some(row.constraint_name.clone()),
+                            columns: Vec::new(),
+                            references: Iden::new(
+                                row.foreign_table_name.clone().unwrap_or_default(),
+                                row.foreign_table_schema.clone(),
+                            ),
+                            references_columns: Vec::new(),
+                            on_delete: parse_reference_action(row.delete_action.as_deref()),
+                            on_update: parse_reference_action(row.update_action.as_deref()),
+                            deferrable: row.deferrable,
+                            initially_deferred: row.initially_deferred,
+                        }),
+                        _ => Constraint::Check(CheckConstraint {
+                            name: Some(row.constraint_name.clone()),
+                            expression: parse_check_constraint_expression(
+                                row.constraint_expression.as_deref().unwrap_or_default(),
+                            ),
+                        }),
+                    });
+                match entry {
+                    Constraint::PrimaryKey(constraint) => {
+                        if let Some(column_name) = row.column_name.as_ref() {
+                            constraint.columns.push(column_name.clone());
+                        }
+                    }
+                    Constraint::Unique(constraint) => {
+                        if let Some(column_name) = row.column_name.as_ref() {
+                            constraint.columns.push(column_name.clone());
+                        }
+                    }
+                    Constraint::ForeignKey(constraint) => {
+                        if let Some(column_name) = row.column_name.as_ref() {
+                            constraint.columns.push(column_name.clone());
+                        }
+                        if let Some(foreign_column_name) = row.foreign_column_name.as_ref() {
+                            constraint
+                                .references_columns
+                                .push(foreign_column_name.clone());
+                        }
+                    }
+                    Constraint::Check(_) | Constraint::Exclusion(_) => {}
+                }
+            }
+            constraints_by_table
+                .into_iter()
+                .map(|(table_id, constraints)| (table_id, constraints.into_values().collect()))
+                .collect::<IndexMap<_, Vec<_>>>()
+        };
+
+        let table_constraints = constraints
+            .get(&Iden::new("posts", Some("public".to_string())))
+            .expect("posts constraints should exist");
+
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::PrimaryKey(pk) if pk.columns == vec!["id"])
+        ));
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::Unique(unique) if unique.columns == vec!["tenant_id", "slug"])
+        ));
+        assert!(table_constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::ForeignKey(fk)
+                    if fk.references == Iden::new("users", Some("public".to_string()))
+                        && fk.columns == vec!["user_id"]
+                        && fk.references_columns == vec!["id"]
+                        && fk.on_delete == crate::schema::ReferenceAction::Cascade
+                        && fk.on_update == crate::schema::ReferenceAction::Restrict
+                        && fk.deferrable
+                        && fk.initially_deferred
+            )
+        }));
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::Check(check) if check.expression == "length(title) > 0")
+        ));
     }
 }
