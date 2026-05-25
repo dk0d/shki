@@ -391,3 +391,120 @@ fn object_schema(name: &str) -> Option<String> {
 fn quote_sqlite_string(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{DefaultValue, IndexColumn};
+
+    async fn test_engine() -> Sqlite {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite pool should connect");
+
+        sqlx::raw_sql(
+            r#"
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                age INTEGER CHECK (age >= 0),
+                status TEXT DEFAULT 'active'
+            );
+
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                UNIQUE(user_id, title)
+            );
+
+            CREATE INDEX posts_title_idx ON posts(title);
+            CREATE VIEW post_titles AS SELECT title FROM posts;
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("sqlite schema should be created");
+
+        Sqlite::new(pool, Iden::new("__shki_migrations", None))
+    }
+
+    #[tokio::test]
+    async fn sqlite_provider_introspects_schema_objects() {
+        let engine = test_engine().await;
+
+        let schemas = engine.get_schemas(&None).await.expect("schemas");
+        assert_eq!(schemas, vec!["main"]);
+
+        let tables = engine.get_tables(&None).await.expect("tables");
+        assert!(tables.contains_key(&Iden::new("users", None)));
+        assert!(tables.contains_key(&Iden::new("posts", None)));
+
+        let columns = engine.get_columns(&None).await.expect("columns");
+        let user_columns = columns
+            .get(&Iden::new("users", None))
+            .expect("users columns should be introspected");
+        assert!(user_columns.get("id").expect("id column").primary_key);
+        assert!(!user_columns.get("email").expect("email column").nullable);
+        assert!(matches!(
+            user_columns.get("status").expect("status column").default,
+            Some(DefaultValue::Literal(ref value)) if value == "active"
+        ));
+
+        let constraints = engine.get_constraints(&None).await.expect("constraints");
+        let user_constraints = constraints
+            .get(&Iden::new("users", None))
+            .expect("users constraints should be introspected");
+        assert!(
+            user_constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::PrimaryKey(pk) if pk.columns == vec!["id"]))
+        );
+        assert!(
+            user_constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::Unique(unique) if unique.columns == vec!["email"]))
+        );
+        assert!(
+            user_constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::Check(check) if check.expression == "age >= 0"))
+        );
+
+        let post_constraints = constraints
+            .get(&Iden::new("posts", None))
+            .expect("posts constraints should be introspected");
+        assert!(post_constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::ForeignKey(fk)
+                    if fk.columns == vec!["user_id"]
+                        && fk.references == Iden::new("users", None)
+                        && fk.references_columns == vec!["id"]
+                        && fk.on_delete == crate::schema::ReferenceAction::Cascade
+            )
+        }));
+
+        let indexes = engine.get_indexes(&None).await.expect("indexes");
+        let post_indexes = indexes
+            .get(&Iden::new("posts", None))
+            .expect("posts indexes should be introspected");
+        let title_index = post_indexes
+            .get("posts_title_idx")
+            .expect("explicit index should be introspected");
+        assert!(matches!(
+            title_index.columns.as_slice(),
+            [IndexColumn::Column { name, .. }] if name == "title"
+        ));
+
+        let views = engine.get_views(&None).await.expect("views");
+        let view = views
+            .get(&Iden::new("post_titles", None))
+            .expect("view should be introspected");
+        assert_eq!(view.columns[0].name, "title");
+    }
+}
