@@ -2,13 +2,17 @@ use crate::engines::pg::Postgres;
 use crate::models::iden::Iden;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, DefaultValue, ForeignKeyConstraint,
-    GeneratedColumn, IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder, PartitionMethod,
-    PartitionSpec, PrimaryKeyConstraint, Sequence, SequenceOptions, SortOrder, SqlDialect, Table,
-    UniqueConstraint,
+    GeneratedColumn, IdentitySpec, Index, IndexColumn, NullsOrder, PartitionMethod, PartitionSpec,
+    PrimaryKeyConstraint, Sequence, SequenceOptions, SqlDialect, Table, UniqueConstraint,
 };
 use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
 use indexmap::IndexMap;
+
+use super::utils::{
+    is_quoted_literal, is_scalar_literal, normalize_default_expression, parse_index_method,
+    parse_reference_action, parse_sort_order,
+};
 
 #[derive(Clone, sqlx::FromRow)]
 struct PgInfoSchemaColumnRow {
@@ -991,37 +995,6 @@ fn parse_regclass_name(expression: &str) -> Option<(Option<String>, String)> {
     }
 }
 
-fn parse_reference_action(action: Option<&str>) -> crate::schema::ReferenceAction {
-    match action {
-        Some("a") => crate::schema::ReferenceAction::NoAction,
-        Some("r") => crate::schema::ReferenceAction::Restrict,
-        Some("c") => crate::schema::ReferenceAction::Cascade,
-        Some("n") => crate::schema::ReferenceAction::SetNull,
-        Some("d") => crate::schema::ReferenceAction::SetDefault,
-        _ => crate::schema::ReferenceAction::NoAction,
-    }
-}
-
-fn parse_index_method(method: &str) -> IndexMethod {
-    match method {
-        "btree" => IndexMethod::BTree,
-        "hash" => IndexMethod::Hash,
-        "gist" => IndexMethod::Gist,
-        "spgist" => IndexMethod::SpGist,
-        "gin" => IndexMethod::Gin,
-        "brin" => IndexMethod::Brin,
-        _ => IndexMethod::BTree,
-    }
-}
-
-fn parse_sort_order(order: Option<&str>) -> Option<SortOrder> {
-    match order {
-        Some("ASC") => Some(SortOrder::Asc),
-        Some("DESC") => Some(SortOrder::Desc),
-        _ => None,
-    }
-}
-
 fn parse_nulls_order(order: Option<&str>) -> Option<NullsOrder> {
     match order {
         Some("FIRST") => Some(NullsOrder::First),
@@ -1093,60 +1066,6 @@ fn parse_check_constraint_expression(definition: &str) -> String {
         .and_then(|expr| expr.strip_suffix(')'))
         .unwrap_or(definition)
         .to_string()
-}
-
-fn normalize_default_expression(expr: &str) -> String {
-    let mut normalized = expr.trim().to_string();
-
-    while has_wrapping_parentheses(&normalized) {
-        normalized = normalized[1..normalized.len() - 1].trim().to_string();
-    }
-
-    if let Some((value, cast)) = normalized.rsplit_once("::") {
-        let value = value.trim();
-        let cast = cast.trim();
-        if !cast.is_empty() && (is_quoted_literal(value) || is_scalar_literal(value)) {
-            return value.to_string();
-        }
-    }
-
-    normalized
-}
-
-fn has_wrapping_parentheses(expr: &str) -> bool {
-    if !(expr.starts_with('(') && expr.ends_with(')')) {
-        return false;
-    }
-
-    let inner = &expr[1..expr.len() - 1];
-    let mut depth = 0_i32;
-    for ch in inner.chars() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                if depth == 0 {
-                    return false;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-
-    depth == 0
-}
-
-fn is_quoted_literal(value: &str) -> bool {
-    value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'')
-}
-
-fn is_scalar_literal(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    lower == "null"
-        || lower == "true"
-        || lower == "false"
-        || value.parse::<i64>().is_ok()
-        || value.parse::<f64>().is_ok()
 }
 
 #[cfg(test)]

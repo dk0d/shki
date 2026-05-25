@@ -13,7 +13,7 @@ use std::path::Path;
 
 pub struct Sqlite {
     table: Iden,
-    pool: Pool<sqlx::Sqlite>,
+    pub(crate) pool: Pool<sqlx::Sqlite>,
 }
 
 impl Sqlite {

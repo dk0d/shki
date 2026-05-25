@@ -2,6 +2,7 @@ pub mod detached;
 pub mod mysql;
 pub mod pg;
 pub mod sqlite;
+mod utils;
 
 use chrono::{DateTime, Utc};
 

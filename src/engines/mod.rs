@@ -132,7 +132,10 @@ where
     async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot> {
         let mut snapshot = Snapshot::new(config.dialect);
 
-        let schema = Some(schema.clone().unwrap_or("public".to_string()));
+        let schema = match config.dialect {
+            SqlDialect::Postgres => Some(schema.clone().unwrap_or("public".to_string())),
+            SqlDialect::Mysql | SqlDialect::Sqlite => schema.clone(),
+        };
 
         snapshot.schemas = self.get_schemas(&schema).await?;
         snapshot.enums = self.get_enums(&schema).await?;

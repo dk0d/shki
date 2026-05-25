@@ -13,7 +13,7 @@ use std::path::Path;
 
 pub struct Mysql {
     table: Iden,
-    pool: Pool<sqlx::MySql>,
+    pub(crate) pool: Pool<sqlx::MySql>,
 }
 
 impl Mysql {
