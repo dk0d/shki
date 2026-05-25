@@ -251,9 +251,6 @@ pub enum Commands {
         /// Schema to introspect (Postgres, defaults to public)
         #[arg(long)]
         schema: Option<String>,
-
-        #[arg(long, short, default_value_t = false)]
-        with_migration_table: bool,
     },
 
     // /// Bootstrap shki from an existing database state

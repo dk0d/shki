@@ -14,7 +14,6 @@ pub async fn cmd_pull(
     format: &PullFormat,
     output: &Option<&std::path::Path>,
     schema: &Option<String>,
-    _with_migration_table: bool,
 ) -> Result<()> {
     if let Some(url) = config.database_url.as_ref() {
         println!("\n{} {}\n", "URL".bold(), url.bright_green());
@@ -26,14 +25,6 @@ pub async fn cmd_pull(
 
     let engine = Engine::from_config(config).await?;
     let snapshot = engine.introspect(config, schema).await?;
-
-    // let snapshot = if with_migration_table {
-    //     engine.introspect(config).await?
-    // } else {
-    //     let mut snapshot = engine.introspect(config).await?;
-    //     snapshot.tables.shift_remove(&config.migrations.name());
-    //     snapshot
-    // };
 
     let content = match format {
         PullFormat::Json => snapshot.to_json()?,
