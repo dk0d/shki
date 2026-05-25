@@ -98,7 +98,13 @@ impl SnapshotProvider for Mysql {
     async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Table>> {
         let rows = sqlx::query_as::<_, MysqlTableRow>(
             r#"
-            SELECT table_schema, table_name, table_comment, engine, table_collation, create_options
+            SELECT
+                CAST(table_schema AS CHAR) AS table_schema,
+                CAST(table_name AS CHAR) AS table_name,
+                CAST(table_comment AS CHAR) AS table_comment,
+                CAST(engine AS CHAR) AS engine,
+                CAST(table_collation AS CHAR) AS table_collation,
+                CAST(create_options AS CHAR) AS create_options
             FROM information_schema.tables
             WHERE table_schema = ?
                 AND table_type = 'BASE TABLE'
@@ -142,7 +148,12 @@ impl SnapshotProvider for Mysql {
     async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<Iden, View>> {
         let rows = sqlx::query_as::<_, MysqlViewRow>(
             r#"
-            SELECT v.table_schema, v.table_name, v.view_definition, c.column_name, c.column_type
+            SELECT
+                CAST(v.table_schema AS CHAR) AS table_schema,
+                CAST(v.table_name AS CHAR) AS table_name,
+                CAST(v.view_definition AS CHAR) AS view_definition,
+                CAST(c.column_name AS CHAR) AS column_name,
+                CAST(c.column_type AS CHAR) AS column_type
             FROM information_schema.views v
             JOIN information_schema.columns c
                 ON c.table_schema = v.table_schema
@@ -182,17 +193,17 @@ impl SnapshotProvider for Mysql {
         let rows = sqlx::query_as::<_, MysqlColumnRow>(
             r#"
             SELECT
-                table_schema,
-                table_name,
-                column_name,
-                column_type,
-                is_nullable,
-                column_default,
-                extra,
-                generation_expression,
-                collation_name,
-                column_comment,
-                column_key
+                CAST(table_schema AS CHAR) AS table_schema,
+                CAST(table_name AS CHAR) AS table_name,
+                CAST(column_name AS CHAR) AS column_name,
+                CAST(column_type AS CHAR) AS column_type,
+                CAST(is_nullable AS CHAR) AS is_nullable,
+                CAST(column_default AS CHAR) AS column_default,
+                CAST(extra AS CHAR) AS extra,
+                CAST(generation_expression AS CHAR) AS generation_expression,
+                CAST(collation_name AS CHAR) AS collation_name,
+                CAST(column_comment AS CHAR) AS column_comment,
+                CAST(column_key AS CHAR) AS column_key
             FROM information_schema.columns
             WHERE table_schema = ?
             ORDER BY table_schema, table_name, ordinal_position
@@ -221,17 +232,17 @@ impl SnapshotProvider for Mysql {
         let rows = sqlx::query_as::<_, MysqlConstraintRow>(
             r#"
             SELECT
-                tc.table_schema,
-                tc.table_name,
-                tc.constraint_name,
-                tc.constraint_type,
-                kcu.column_name,
-                kcu.referenced_table_schema,
-                kcu.referenced_table_name,
-                kcu.referenced_column_name,
-                rc.update_rule,
-                rc.delete_rule,
-                cc.check_clause
+                CAST(tc.table_schema AS CHAR) AS table_schema,
+                CAST(tc.table_name AS CHAR) AS table_name,
+                CAST(tc.constraint_name AS CHAR) AS constraint_name,
+                CAST(tc.constraint_type AS CHAR) AS constraint_type,
+                CAST(kcu.column_name AS CHAR) AS column_name,
+                CAST(kcu.referenced_table_schema AS CHAR) AS referenced_table_schema,
+                CAST(kcu.referenced_table_name AS CHAR) AS referenced_table_name,
+                CAST(kcu.referenced_column_name AS CHAR) AS referenced_column_name,
+                CAST(rc.update_rule AS CHAR) AS update_rule,
+                CAST(rc.delete_rule AS CHAR) AS delete_rule,
+                CAST(cc.check_clause AS CHAR) AS check_clause
             FROM information_schema.table_constraints tc
             LEFT JOIN information_schema.key_column_usage kcu
                 ON kcu.constraint_schema = tc.constraint_schema
@@ -263,15 +274,15 @@ impl SnapshotProvider for Mysql {
         let rows = sqlx::query_as::<_, MysqlIndexRow>(
             r#"
             SELECT
-                s.table_schema,
-                s.table_name,
-                s.index_name,
-                s.non_unique,
-                s.seq_in_index,
-                s.column_name,
-                s.expression,
-                s.collation,
-                s.index_type
+                CAST(s.table_schema AS CHAR) AS table_schema,
+                CAST(s.table_name AS CHAR) AS table_name,
+                CAST(s.index_name AS CHAR) AS index_name,
+                s.non_unique AS non_unique,
+                s.seq_in_index AS seq_in_index,
+                CAST(s.column_name AS CHAR) AS column_name,
+                CAST(s.expression AS CHAR) AS expression,
+                CAST(s.collation AS CHAR) AS collation,
+                CAST(s.index_type AS CHAR) AS index_type
             FROM information_schema.statistics s
             LEFT JOIN information_schema.table_constraints tc
                 ON tc.table_schema = s.table_schema
@@ -472,4 +483,199 @@ fn indexes_from_rows(rows: Vec<MysqlIndexRow>) -> Result<IndexMap<Iden, IndexMap
     }
 
     Ok(indexes_by_table)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{DefaultValue, IndexColumn, ReferenceAction, SortOrder};
+
+    #[test]
+    fn mysql_column_rows_introspect_column_metadata() {
+        let id = Column::from(MysqlColumnRow {
+            table_schema: "app".to_string(),
+            table_name: "users".to_string(),
+            column_name: "id".to_string(),
+            column_type: "int".to_string(),
+            is_nullable: "NO".to_string(),
+            column_default: None,
+            extra: "auto_increment".to_string(),
+            generation_expression: None,
+            collation_name: None,
+            column_comment: "primary id".to_string(),
+            column_key: "PRI".to_string(),
+        });
+
+        assert_eq!(id.data_type, DataType::Serial);
+        assert!(id.primary_key);
+        assert!(!id.nullable);
+        assert_eq!(id.comment, Some("primary id".to_string()));
+
+        let generated = Column::from(MysqlColumnRow {
+            table_schema: "app".to_string(),
+            table_name: "users".to_string(),
+            column_name: "full_name".to_string(),
+            column_type: "varchar(255)".to_string(),
+            is_nullable: "YES".to_string(),
+            column_default: Some("'anonymous'".to_string()),
+            extra: "STORED GENERATED".to_string(),
+            generation_expression: Some("concat(first_name, ' ', last_name)".to_string()),
+            collation_name: Some("utf8mb4_0900_ai_ci".to_string()),
+            column_comment: String::new(),
+            column_key: String::new(),
+        });
+
+        assert_eq!(generated.data_type, DataType::VarChar { length: Some(255) });
+        assert!(matches!(
+            generated.default,
+            Some(DefaultValue::Literal(ref value)) if value == "anonymous"
+        ));
+        assert!(matches!(
+            generated.generated,
+            Some(crate::schema::GeneratedColumn { stored: true, ref expression })
+                if expression == "concat(first_name, ' ', last_name)"
+        ));
+    }
+
+    #[test]
+    fn mysql_constraint_rows_aggregate_table_constraints() {
+        let constraints = constraints_from_rows(vec![
+            MysqlConstraintRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                constraint_name: "PRIMARY".to_string(),
+                constraint_type: "PRIMARY KEY".to_string(),
+                column_name: Some("id".to_string()),
+                referenced_table_schema: None,
+                referenced_table_name: None,
+                referenced_column_name: None,
+                update_rule: None,
+                delete_rule: None,
+                check_clause: None,
+            },
+            MysqlConstraintRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                constraint_name: "uq_posts_slug".to_string(),
+                constraint_type: "UNIQUE".to_string(),
+                column_name: Some("tenant_id".to_string()),
+                referenced_table_schema: None,
+                referenced_table_name: None,
+                referenced_column_name: None,
+                update_rule: None,
+                delete_rule: None,
+                check_clause: None,
+            },
+            MysqlConstraintRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                constraint_name: "uq_posts_slug".to_string(),
+                constraint_type: "UNIQUE".to_string(),
+                column_name: Some("slug".to_string()),
+                referenced_table_schema: None,
+                referenced_table_name: None,
+                referenced_column_name: None,
+                update_rule: None,
+                delete_rule: None,
+                check_clause: None,
+            },
+            MysqlConstraintRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                constraint_name: "fk_posts_user".to_string(),
+                constraint_type: "FOREIGN KEY".to_string(),
+                column_name: Some("user_id".to_string()),
+                referenced_table_schema: Some("app".to_string()),
+                referenced_table_name: Some("users".to_string()),
+                referenced_column_name: Some("id".to_string()),
+                update_rule: Some("RESTRICT".to_string()),
+                delete_rule: Some("CASCADE".to_string()),
+                check_clause: None,
+            },
+            MysqlConstraintRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                constraint_name: "chk_posts_title".to_string(),
+                constraint_type: "CHECK".to_string(),
+                column_name: None,
+                referenced_table_schema: None,
+                referenced_table_name: None,
+                referenced_column_name: None,
+                update_rule: None,
+                delete_rule: None,
+                check_clause: Some("(`title` <> '')".to_string()),
+            },
+        ])
+        .expect("constraints should aggregate");
+
+        let table_constraints = constraints
+            .get(&Iden::new("posts", Some("app".to_string())))
+            .expect("posts constraints should exist");
+
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::PrimaryKey(pk) if pk.columns == vec!["id"])
+        ));
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::Unique(unique) if unique.columns == vec!["tenant_id", "slug"])
+        ));
+        assert!(table_constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::ForeignKey(fk)
+                    if fk.references == Iden::new("users", Some("app".to_string()))
+                        && fk.columns == vec!["user_id"]
+                        && fk.references_columns == vec!["id"]
+                        && fk.on_delete == ReferenceAction::Cascade
+                        && fk.on_update == ReferenceAction::Restrict
+            )
+        }));
+        assert!(table_constraints.iter().any(
+            |constraint| matches!(constraint, Constraint::Check(check) if check.expression == "(`title` <> '')")
+        ));
+    }
+
+    #[test]
+    fn mysql_index_rows_aggregate_non_constraint_indexes() {
+        let indexes = indexes_from_rows(vec![
+            MysqlIndexRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                index_name: "posts_search_idx".to_string(),
+                non_unique: 1,
+                seq_in_index: 2,
+                column_name: Some("created_at".to_string()),
+                expression: None,
+                collation: Some("D".to_string()),
+                index_type: "BTREE".to_string(),
+            },
+            MysqlIndexRow {
+                table_schema: "app".to_string(),
+                table_name: "posts".to_string(),
+                index_name: "posts_search_idx".to_string(),
+                non_unique: 1,
+                seq_in_index: 1,
+                column_name: None,
+                expression: Some("lower(`title`)".to_string()),
+                collation: Some("A".to_string()),
+                index_type: "BTREE".to_string(),
+            },
+        ])
+        .expect("indexes should aggregate");
+
+        let table_indexes = indexes
+            .get(&Iden::new("posts", Some("app".to_string())))
+            .expect("posts indexes should exist");
+        let index = table_indexes
+            .get("posts_search_idx")
+            .expect("search index should exist");
+
+        assert!(!index.unique);
+        assert!(matches!(
+            index.columns.as_slice(),
+            [
+                IndexColumn::Expression { expression, order: Some(SortOrder::Asc), .. },
+                IndexColumn::Column { name, order: Some(SortOrder::Desc), .. }
+            ] if expression == "lower(`title`)" && name == "created_at"
+        ));
+    }
 }
