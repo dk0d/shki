@@ -63,7 +63,7 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         Commands::Status => status::cmd_status(&config).await,
 
-        Commands::Migrate => migrate::cmd_migrate(&config).await, //
+        Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await, //
 
         //     Commands::Generate {
         //         name,
@@ -108,7 +108,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         //         force,
         //     } => squash::cmd_squash(&config, name, dry_run, force).await,
         //
-        //     Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
+        // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
         //     Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
         //

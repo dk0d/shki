@@ -207,13 +207,12 @@ pub enum Commands {
     //
     /// Apply pending migrations to the database
     #[command(visible_alias = "up")]
-    Migrate,
-    // {
-    // /// Only show what would be applied
-    // #[arg(long, short)]
-    // dry_run: bool,
-    // },
-    //
+    Migrate {
+        /// Only show what would be applied
+        #[arg(long, short)]
+        dry_run: bool,
+    },
+
     /// Create a blank migration file for manual SQL editing
     #[command(visible_alias = "new")]
     Create {

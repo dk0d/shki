@@ -12,7 +12,7 @@ use colored::Colorize;
 
 use self::manager::MigrationManager;
 
-pub async fn cmd_migrate(config: &Config) -> Result<()> {
+pub async fn cmd_migrate(config: &Config, dry_run: bool) -> Result<()> {
     if let Some(url) = config.database_url.as_ref() {
         println!("\n{} {}\n", "URL".bold(), url.bright_green());
     }
@@ -31,11 +31,11 @@ pub async fn cmd_migrate(config: &Config) -> Result<()> {
     let pending = manager.get_pending_migrations().await?;
     let mut applied = Vec::with_capacity(pending.len());
 
-    // if dry_run {
-    //     display_migrations(&manager, config).await?;
-    //     println!("{}", "(dry run - no changes applied)".cyan());
-    //     return Ok(());
-    // }
+    if dry_run {
+        display_migrations(&manager, config).await?;
+        println!("{}", "(dry run - no changes applied)".cyan());
+        return Ok(());
+    }
 
     for migration_path in pending {
         let name = migration_path
