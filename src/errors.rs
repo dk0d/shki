@@ -146,8 +146,8 @@ pub enum ShkiError {
     #[error("[VALIDATION] {0}")]
     Validation(String),
 
-    #[error("[LUA] {0}")]
-    Lua(String),
+    #[error("[TYPESCRIPT] {0}")]
+    Typescript(String),
 
     #[error("[USER] Cancelled")]
     Cancelled,
@@ -217,7 +217,7 @@ impl ShkiError {
         ShkiError::Validation(msg.into())
     }
 
-    pub fn lua(msg: impl Into<String>) -> Self {
-        ShkiError::Lua(msg.into())
+    pub fn typescript(msg: impl Into<String>) -> Self {
+        ShkiError::Typescript(msg.into())
     }
 }

@@ -87,7 +87,7 @@ pub trait TestBackend: Sized {
                 r#"
 root = "{}"
 dialect = "{}"
-schema = "init.lua"
+schema = "schema"
 out = "migrations"
 database_url = "{}"
 {}"#,

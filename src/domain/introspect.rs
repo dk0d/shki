@@ -5,6 +5,7 @@ use crate::diff::diff_snapshots;
 use crate::engines::Engine;
 use crate::snapshots::{Introspectable, Snapshot};
 use crate::sql::generator::SqlGenerator;
+use crate::utils::resolve_path;
 
 use colored::Colorize;
 
@@ -44,7 +45,7 @@ pub async fn cmd_pull(
     match output {
         Some(path) => {
             // Resolve the output path relative to the project root
-            let resolved_path = config.resolve_path(path);
+            let resolved_path = resolve_path(None, path);
             std::fs::write(&resolved_path, &content)?;
             println!(
                 "{} {}",

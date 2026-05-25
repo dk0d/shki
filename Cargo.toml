@@ -45,12 +45,6 @@ sqlx = { version = "0.8.6", features = [
 ] }
 tokio = { version = "1.49.0", features = ["full"] }
 uuid = { version = "1.20.0", features = ["v4", "v7", "serde"] }
-mlua = { version = "0.11.6", features = [
-  "lua54",
-  "anyhow",
-  "serde",
-  "vendored",
-] }
 glob = "0.3.3"
 petname = "2.0.2"
 tabled = { version = "0.20.0", features = ["ansi", "derive"] }
@@ -74,7 +68,10 @@ inquire = { version = "0.9.4", features = ["chrono"] }
 [dev-dependencies]
 tempfile = "3.24.0"
 testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
-testcontainers-modules = { version = "0.15.0", features = ["mysql", "postgres"] }
+testcontainers-modules = { version = "0.15.0", features = [
+  "mysql",
+  "postgres",
+] }
 
 # The profile that 'dist' will build with
 [profile.dist]

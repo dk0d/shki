@@ -9,7 +9,7 @@ use clap::builder::styling::{AnsiColor, Color, Style};
 // pub mod templates;
 
 use clap::{Args, Parser, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // use crate::model::schema::SchemaDialect;
@@ -133,14 +133,16 @@ pub struct Cli {
 }
 
 /// Schema definition language
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, Serialize, Deserialize)]
 pub enum ShkiMode {
     /// Define schemas using Rust code
     // Rust,
 
-    /// Define schemas using Lua scripts
+    /// Define schemas using Typescript
     #[default]
-    Lua,
+    #[serde(alias = "ts")]
+    #[value(alias = "ts")]
+    Typscript,
 }
 
 /// Output language for code generation

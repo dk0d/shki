@@ -7,9 +7,9 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::{CommonArgs, ShkiError, models::iden::Iden, schema::SqlDialect};
+use crate::{CommonArgs, ShkiError, models::iden::Iden, schema::SqlDialect, utils::resolve_path};
 use clap::ValueEnum;
 
 pub(crate) fn is_false(value: &bool) -> bool {
@@ -22,22 +22,25 @@ struct ExplicitConfigProbe {
 }
 
 /// Schema definition language
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SchemaMode {
     /// Just write SQL migration files without any schema definition or diffing
+    /// (disables schema path config)
     #[default]
     Sql,
 
     /// Define schemas using Lua scripts
-    Lua,
+    #[serde(alias = "ts")]
+    #[value(alias = "ts")]
+    Typescript,
 }
 
 impl std::fmt::Display for SchemaMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SchemaMode::Sql => write!(f, "sql"),
-            SchemaMode::Lua => write!(f, "lua"),
+            SchemaMode::Typescript => write!(f, "typescript"),
         }
     }
 }
@@ -45,15 +48,12 @@ impl std::fmt::Display for SchemaMode {
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Project root directory
-    pub root: PathBuf,
-
     /// Database dialect
     pub dialect: SqlDialect,
 
-    /// Path to schema files (glob pattern)
+    /// Path to schema dir/file (unused when mode is `sql)
     #[serde(default)]
-    pub schema: String,
+    pub schema: PathBuf,
 
     /// Output directory for migrations
     #[serde(default = "default_out")]
@@ -75,18 +75,14 @@ pub struct Config {
     #[serde(default)]
     pub migrations: MigrationConfig,
 
-    // Introspection settings
-    // #[serde(default)]
-    // pub introspect: IntrospectConfig,
-
-    // #[serde(default)]
-    // pub codegen: CodegenConfig,
     /// Database connection timeout in seconds
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
 
     #[serde(default)]
     pub mode: SchemaMode,
+    // #[serde(default)]
+    // pub codegen: CodegenConfig,
 }
 
 fn default_timeout() -> u64 {
@@ -111,7 +107,7 @@ pub struct MigrationTableId {
     #[serde(default = "default_migrations_table")]
     pub name: String,
 
-    /// Schema for the migrations table (PostgreSQL)
+    /// Schema name for the migrations table (PostgreSQL)
     #[serde(
         skip_serializing_if = "Option::is_none",
         default = "default_migrations_schema"
@@ -200,22 +196,6 @@ pub enum MigrationPrefix {
     Unix,
 }
 
-// /// Introspection configuration
-// #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-// pub struct IntrospectConfig {
-//     /// Casing for generated code
-//     #[serde(default)]
-//     pub casing: IdentifierCasing,
-//
-//     /// Schema to pull from - (Postgres), defaults to public
-//     #[serde(default = "default_introspect_schema")]
-//     pub schema: Option<String>,
-// }
-
-// fn default_introspect_schema() -> Option<String> {
-//     Some("public".to_string())
-// }
-
 /// Identifier casing style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -234,10 +214,9 @@ pub enum IdentifierCasing {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            root: default_root(),
             dialect: SqlDialect::default(),
             mode: SchemaMode::default(),
-            schema: "init.lua".to_string(),
+            schema: default_schema_path(),
             out: default_out(),
             database_url: None,
             breakpoints: true,
@@ -248,6 +227,13 @@ impl Default for Config {
             timeout_seconds: default_timeout(),
         }
     }
+}
+
+fn default_schema_path() -> PathBuf {
+    if Path::new("schema/index.ts").exists() {
+        return PathBuf::from("schema/index.ts");
+    }
+    PathBuf::from("schema.ts")
 }
 
 impl Config {
@@ -305,27 +291,14 @@ impl Config {
         Ok(())
     }
 
-    /// Resolve a path relative to the project root.
-    ///
-    /// If the path is absolute, it is returned as-is.
-    /// If the path is relative, it is joined with the root directory.
-    pub fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> PathBuf {
-        let path = path.as_ref();
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.root.join(path)
-        }
-    }
-
     /// Get the resolved output directory for migrations
     pub fn out_dir(&self) -> PathBuf {
-        self.resolve_path(&self.out)
+        resolve_path(None, &self.out)
     }
 
     /// Get the resolved schema path
     pub fn schema_path(&self) -> PathBuf {
-        self.resolve_path(&self.schema)
+        resolve_path(None, &self.schema)
     }
 
     // Get the resolved codegen output directory (if configured)
@@ -343,26 +316,6 @@ mod tests {
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[test]
-    fn resolve_path_uses_root_for_relative_paths_only() {
-        let config = Config {
-            root: PathBuf::from("/tmp/shki-root"),
-            out: PathBuf::from("migrations"),
-            schema: "schema/init.lua".to_string(),
-            ..Config::default()
-        };
-
-        assert_eq!(config.out_dir(), PathBuf::from("/tmp/shki-root/migrations"));
-        assert_eq!(
-            config.schema_path(),
-            PathBuf::from("/tmp/shki-root/schema/init.lua")
-        );
-        assert_eq!(
-            config.resolve_path("/var/tmp/already-absolute.sql"),
-            PathBuf::from("/var/tmp/already-absolute.sql")
-        );
     }
 
     #[test]
@@ -407,7 +360,6 @@ generate_down = false
 
         let config = Config::load(&config_path, &args).expect("config should load");
 
-        assert_eq!(config.root, PathBuf::from("db"));
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
         assert_eq!(config.out, PathBuf::from("cli-migrations"));
