@@ -63,15 +63,8 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         Commands::Status => status::cmd_status(&config).await,
 
-        Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await, //
+        Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
 
-        //     Commands::Generate {
-        //         name,
-        //         schema,
-        //         dry_run,
-        //     } => generate::cmd_generate_sql(&config, name, schema, dry_run),
-        //
-        //     Commands::Status => status::cmd_status(&config).await,
         Commands::Pull {
             format,
             output,
@@ -80,16 +73,15 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
-        //     Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
-        //
-        //     Commands::Codegen {
-        //         out,
-        //         mode,
-        //         schema,
-        //         language,
-        //         verbose,
-        //     } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose), language),
-        //
+        // Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
+        Commands::Codegen {
+            out,
+            mode,
+            schema,
+            language,
+            verbose,
+        } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose), language),
+
         Commands::Down { count, dry_run } => down::cmd_down(&config, count, dry_run).await,
     }
 }

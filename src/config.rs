@@ -9,7 +9,10 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{CommonArgs, ShkiError, models::iden::Iden, schema::SqlDialect, utils::resolve_path};
+use crate::{
+    CommonArgs, ShkiError, codegen::CodegenConfig, models::iden::Iden, schema::SqlDialect,
+    utils::resolve_path,
+};
 use clap::ValueEnum;
 
 pub(crate) fn is_false(value: &bool) -> bool {
@@ -48,6 +51,10 @@ impl std::fmt::Display for SchemaMode {
 /// Main configuration for Shki
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Project root used to resolve relative paths
+    #[serde(default = "default_root")]
+    pub root: PathBuf,
+
     /// Database dialect
     pub dialect: SqlDialect,
 
@@ -81,8 +88,9 @@ pub struct Config {
 
     #[serde(default)]
     pub mode: SchemaMode,
-    // #[serde(default)]
-    // pub codegen: CodegenConfig,
+
+    #[serde(default)]
+    pub codegen: CodegenConfig,
 }
 
 fn default_timeout() -> u64 {
@@ -214,6 +222,7 @@ pub enum IdentifierCasing {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            root: default_root(),
             dialect: SqlDialect::default(),
             mode: SchemaMode::default(),
             schema: default_schema_path(),
@@ -221,7 +230,7 @@ impl Default for Config {
             database_url: None,
             breakpoints: true,
             verbose: false,
-            // codegen: CodegenConfig::default(),
+            codegen: CodegenConfig::default(),
             migrations: MigrationConfig::default(),
             // introspect: IntrospectConfig::default(),
             timeout_seconds: default_timeout(),
@@ -290,12 +299,12 @@ impl Config {
 
     /// Get the resolved output directory for migrations
     pub fn out_dir(&self) -> PathBuf {
-        resolve_path(None, &self.out)
+        resolve_path(Some(self.root.clone()), &self.out)
     }
 
     /// Get the resolved schema path
     pub fn schema_path(&self) -> PathBuf {
-        resolve_path(None, &self.schema)
+        resolve_path(Some(self.root.clone()), &self.schema)
     }
 
     // Get the resolved codegen output directory (if configured)
