@@ -190,9 +190,7 @@ impl CodegenConfig {
 
     /// Set the output directory
     pub fn output_dir(mut self, dir: Option<impl Into<PathBuf>>) -> Self {
-        if let Some(d) = dir {
-            self.output = Some(d.into());
-        }
+        self.output = dir.map(Into::into);
         self
     }
 

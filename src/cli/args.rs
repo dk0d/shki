@@ -18,8 +18,9 @@ use std::path::PathBuf;
 // use self::commands::codegen::languages::TypescriptFlavor;
 pub use CodegenLanguage as LanguageArg;
 
+use crate::codegen::OutputMode;
 use crate::config::{MigrationPrefix, SchemaMode};
-use crate::domain::codegen::lang::TypescriptFlavor;
+use crate::domain::codegen::lang::typescript::TypescriptFlavor;
 use crate::schema::SqlDialect;
 
 pub fn get_styles() -> clap::builder::Styles {
@@ -150,12 +151,11 @@ pub enum ShkiMode {
 /// also allows for language specific flags and configuration
 #[derive(Subcommand, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CodegenLanguage {
+    #[command(visible_alias = "rs")]
     Rust,
 
     #[command(visible_alias = "ts")]
-    Typescript {
-        flavor: TypescriptFlavor,
-    },
+    Typescript { flavor: TypescriptFlavor },
 
     #[command(visible_alias = "proto")]
     Protobuf,
@@ -319,34 +319,32 @@ pub enum Commands {
     /// List migrations and their status
     #[command(visible_alias = "s")]
     Status,
-    // /// Generate Rust structs/enums from database schema
-    // #[command(visible_alias = "code")]
-    // Codegen {
-    //     /// Output language (rust, protobuf, ts)
-    //     #[command(subcommand)]
-    //     language: CodegenLanguage,
-    //
-    //     /// Path to output directory
-    //     #[arg(short, long)]
-    //     out: Option<PathBuf>,
-    //
-    //     /// Path to schema file(s) or directory
-    //     #[arg(short, long)]
-    //     schema: Option<PathBuf>,
-    //
-    //     /// Output mode (module or single file)
-    //     #[arg(long, short)]
-    //     mode: Option<OutputMode>,
-    //
-    //     // Output language (rust or protobuf)
-    //     // #[arg(long, short = 'L', value_enum, default_value = "rust")]
-    //     // language: CodegenLanguage,
-    //     /// Enable verbose output
-    //     /// Will print the generated code to stdout as well as writing to files
-    //     #[arg(short, long, default_value_t = false)]
-    //     verbose: bool,
-    // },
-    //
+
+    /// Generate Rust structs/enums from database schema
+    #[command(visible_alias = "code")]
+    Codegen {
+        /// Output language (rust, protobuf, ts)
+        #[command(subcommand)]
+        language: CodegenLanguage,
+
+        /// Path to output directory
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+
+        /// Path to schema file(s) or directory
+        #[arg(short, long)]
+        schema: Option<PathBuf>,
+
+        /// Output mode (module or single file)
+        #[arg(long, short)]
+        mode: Option<OutputMode>,
+
+        /// Enable verbose output
+        /// Will print the generated code to stdout as well as writing to files
+        #[arg(short, long, default_value_t = false)]
+        verbose: bool,
+    },
+
     // /// Drop a migration file
     // #[command()]
     // Drop {
