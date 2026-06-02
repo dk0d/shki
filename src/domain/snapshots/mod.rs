@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use super::migrate::manager::MigrationInfo;
 use super::models::iden::Iden;
-use super::schema::{Column, Constraint, DbEnum, Index, Sequence, SqlDialect, Table, View};
+use super::schema::{Catalog, Column, Constraint, DbEnum, Extension, Index, Sequence, SqlDialect, Table, View};
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     /// Snapshot format version
     pub version: String,
@@ -38,29 +38,9 @@ pub struct Snapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migration: Option<MigrationInfo>,
 
-    /// Tables in the schema
+    /// Normalized database shape for this Snapshot.
     #[serde(default)]
-    pub tables: IndexMap<Iden, Table>,
-
-    /// Enums in the schema
-    #[serde(default)]
-    pub enums: IndexMap<Iden, DbEnum>,
-
-    /// Sequences in the schema
-    #[serde(default)]
-    pub sequences: IndexMap<Iden, Sequence>,
-
-    /// Views in the schema
-    #[serde(default)]
-    pub views: IndexMap<Iden, View>,
-
-    /// Schemas (PostgreSQL)
-    #[serde(default)]
-    pub schemas: Vec<String>,
-
-    /// Extensions (PostgreSQL)
-    #[serde(default)]
-    pub extensions: Vec<String>,
+    pub catalog: Catalog,
 }
 
 impl Snapshot {
@@ -72,19 +52,116 @@ impl Snapshot {
             dialect,
             created_at: Utc::now(),
             migration: None,
-            tables: IndexMap::new(),
-            enums: IndexMap::new(),
-            sequences: IndexMap::new(),
-            views: IndexMap::new(),
-            schemas: Vec::new(),
-            extensions: Vec::new(),
+            catalog: Catalog::default(),
         }
+    }
+
+    pub fn schemas(&self) -> Vec<String> {
+        self.catalog.schema_names()
+    }
+
+    pub fn extensions(&self) -> Vec<String> {
+        self.catalog.extension_names()
+    }
+
+    pub fn enums(&self) -> IndexMap<Iden, DbEnum> {
+        self.catalog.flat_enums()
+    }
+
+    pub fn sequences(&self) -> IndexMap<Iden, Sequence> {
+        self.catalog.flat_sequences()
+    }
+
+    pub fn tables(&self) -> IndexMap<Iden, Table> {
+        self.catalog.flat_tables()
+    }
+
+    pub fn views(&self) -> IndexMap<Iden, View> {
+        self.catalog.flat_views()
+    }
+
+    pub fn set_schemas(&mut self, schemas: Vec<String>) {
+        for schema in schemas {
+            self.catalog.ensure_schema(schema);
+        }
+    }
+
+    pub fn set_extensions(&mut self, extensions: Vec<String>) {
+        self.catalog.extensions = extensions
+            .into_iter()
+            .map(|name| (name.clone(), Extension::new(name)))
+            .collect();
+    }
+
+    pub fn set_enums(&mut self, enums: IndexMap<Iden, DbEnum>) {
+        for (id, mut db_enum) in enums {
+            let schema_name = catalog_schema(&id.schema, &db_enum.schema);
+            if id.schema.is_some() || db_enum.schema.is_some() {
+                db_enum.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .enums
+                .insert(id.name, db_enum);
+        }
+    }
+
+    pub fn set_sequences(&mut self, sequences: IndexMap<Iden, Sequence>) {
+        for (id, mut sequence) in sequences {
+            let schema_name = catalog_schema(&id.schema, &sequence.schema);
+            if id.schema.is_some() || sequence.schema.is_some() {
+                sequence.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .sequences
+                .insert(id.name, sequence);
+        }
+    }
+
+    pub fn set_tables(&mut self, tables: IndexMap<Iden, Table>) {
+        for (id, mut table) in tables {
+            let schema_name = catalog_schema(&id.schema, &table.schema);
+            if id.schema.is_some() || table.schema.is_some() {
+                table.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .tables
+                .insert(id.name, table);
+        }
+    }
+
+    pub fn set_views(&mut self, views: IndexMap<Iden, View>) {
+        for (id, mut view) in views {
+            let schema_name = catalog_schema(&id.schema, &view.schema);
+            if id.schema.is_some() || view.schema.is_some() {
+                view.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .views
+                .insert(id.name, view);
+        }
+    }
+
+    pub fn insert_table(&mut self, id: Iden, table: Table) {
+        let mut tables = IndexMap::new();
+        tables.insert(id, table);
+        self.set_tables(tables);
     }
 
     /// Save snapshot to JSON
     pub fn to_json(&self) -> crate::Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
     }
+}
+
+fn catalog_schema(id_schema: &Option<String>, object_schema: &Option<String>) -> String {
+    id_schema
+        .clone()
+        .or_else(|| object_schema.clone())
+        .unwrap_or_else(|| "public".to_string())
 }
 
 #[async_trait::async_trait]

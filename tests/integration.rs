@@ -367,14 +367,13 @@ async fn scenario_cli_pull_json_introspects_schema<T: TestBackend>(ctx: T) {
     let snapshot: Snapshot = serde_json::from_str(&snapshot_json).expect("snapshot should parse");
     assert_eq!(snapshot.dialect, ctx.dialect());
 
-    let table_id = snapshot
-        .tables
+    let tables = snapshot.tables();
+    let table_id = tables
         .keys()
         .find(|id| id.name == table_name)
         .cloned()
         .expect("created table should be introspected");
-    let table = snapshot
-        .tables
+    let table = tables
         .get(&table_id)
         .expect("created table should be readable");
 

@@ -17,32 +17,44 @@ pub async fn cmd_diff(config: &Config) -> Result<()> {
 
 pub fn diff_snapshots(from: &Snapshot, to: &Snapshot) -> Result<SchemaDiff> {
     let mut statements = Vec::new();
+    let from_extensions = from.extensions();
+    let to_extensions = to.extensions();
+    let from_schemas = from.schemas();
+    let to_schemas = to.schemas();
+    let from_enums = from.enums();
+    let to_enums = to.enums();
+    let from_sequences = from.sequences();
+    let to_sequences = to.sequences();
+    let from_tables = from.tables();
+    let to_tables = to.tables();
+    let from_views = from.views();
+    let to_views = to.views();
 
     // Diff extensions (PostgreSQL)
-    helpers::diff_extensions(&from.extensions, &to.extensions, &mut statements);
+    helpers::diff_extensions(&from_extensions, &to_extensions, &mut statements);
 
     // Diff schemas
-    helpers::diff_schemas(&from.schemas, &to.schemas, &mut statements);
+    helpers::diff_schemas(&from_schemas, &to_schemas, &mut statements);
 
     // Diff enums
-    helpers::diff_enums(&from.enums, &to.enums, &mut statements);
+    helpers::diff_enums(&from_enums, &to_enums, &mut statements);
 
     // Diff sequences
-    helpers::diff_sequences(&from.sequences, &to.sequences, &mut statements);
+    helpers::diff_sequences(&from_sequences, &to_sequences, &mut statements);
 
     // Diff tables
-    helpers::diff_tables(&from.tables, &to.tables, &from.dialect, &mut statements);
+    helpers::diff_tables(&from_tables, &to_tables, &from.dialect, &mut statements);
 
     // Diff views
-    helpers::diff_views(&from.views, &to.views, &mut statements);
+    helpers::diff_views(&from_views, &to_views, &mut statements);
 
-    let mut rename_scenarios = helpers::detect_table_renames(&from.tables, &to.tables);
+    let mut rename_scenarios = helpers::detect_table_renames(&from_tables, &to_tables);
 
     // detect column renames where the table names haven't changed,
     // need to do another pass
 
-    for (name, from_table) in &from.tables {
-        if let Some(to_table) = to.tables.get(name) {
+    for (name, from_table) in &from_tables {
+        if let Some(to_table) = to_tables.get(name) {
             detect_nested_renames(from_table, to_table, &mut rename_scenarios, true);
         }
     }
@@ -89,12 +101,12 @@ mod tests {
     #[test]
     fn diffs_extensions_and_schemas() {
         let mut from = Snapshot::new(SqlDialect::Postgres);
-        from.extensions = vec!["pgcrypto".to_string()];
-        from.schemas = vec!["public".to_string(), "legacy".to_string()];
+        from.set_extensions(vec!["pgcrypto".to_string()]);
+        from.set_schemas(vec!["public".to_string(), "legacy".to_string()]);
 
         let mut to = Snapshot::new(SqlDialect::Postgres);
-        to.extensions = vec!["uuid-ossp".to_string()];
-        to.schemas = vec!["public".to_string(), "analytics".to_string()];
+        to.set_extensions(vec!["uuid-ossp".to_string()]);
+        to.set_schemas(vec!["public".to_string(), "analytics".to_string()]);
 
         let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
 
@@ -120,7 +132,7 @@ mod tests {
     #[test]
     fn skips_builtin_schemas() {
         let mut from = Snapshot::new(SqlDialect::Postgres);
-        from.schemas = vec!["public".to_string(), "main".to_string()];
+        from.set_schemas(vec!["public".to_string(), "main".to_string()]);
 
         let to = Snapshot::new(SqlDialect::Postgres);
 
@@ -138,7 +150,7 @@ mod tests {
         from_table.constraint(Constraint::PrimaryKey(
             PrimaryKeyConstraint::new(vec!["email"]).named("users_email_key"),
         ));
-        from.tables.insert(Iden::new("users", None), from_table);
+        from.insert_table(Iden::new("users", None), from_table);
 
         let mut to = Snapshot::new(SqlDialect::Postgres);
         let mut to_table = Table::new("users");
@@ -147,7 +159,7 @@ mod tests {
         to_table.constraint(Constraint::PrimaryKey(
             PrimaryKeyConstraint::new(vec!["email"]).named("users_primary_email_key"),
         ));
-        to.tables.insert(Iden::new("users", None), to_table);
+        to.insert_table(Iden::new("users", None), to_table);
 
         let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
 
@@ -172,12 +184,10 @@ mod tests {
     #[test]
     fn applies_table_rename_decision_with_nested_renames() {
         let mut from = Snapshot::new(SqlDialect::Postgres);
-        from.tables
-            .insert(Iden::new("accounts", None), Table::new("accounts"));
+        from.insert_table(Iden::new("accounts", None), Table::new("accounts"));
 
         let mut to = Snapshot::new(SqlDialect::Postgres);
-        to.tables
-            .insert(Iden::new("users", None), Table::new("users"));
+        to.insert_table(Iden::new("users", None), Table::new("users"));
 
         let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
         assert_eq!(diff.rename_scenarios.len(), 1);
@@ -202,17 +212,19 @@ mod tests {
         let mut from = Snapshot::new(SqlDialect::Postgres);
         let mut old_table = Table::new("accounts");
         old_table.column(Column::new("email", crate::schema::DataType::Text));
-        from.tables.insert(Iden::new("accounts", None), old_table);
+        from.insert_table(Iden::new("accounts", None), old_table);
 
         let mut to = Snapshot::new(SqlDialect::Postgres);
         let mut new_table = Table::new("users");
         new_table.column(Column::new("primary_email", crate::schema::DataType::Text));
-        to.tables.insert(Iden::new("users", None), new_table);
+        to.insert_table(Iden::new("users", None), new_table);
 
         let mut diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+        let from_tables = from.tables();
+        let to_tables = to.tables();
         detect_nested_renames(
-            from.tables.get(&Iden::new("accounts", None)).unwrap(),
-            to.tables.get(&Iden::new("users", None)).unwrap(),
+            from_tables.get(&Iden::new("accounts", None)).unwrap(),
+            to_tables.get(&Iden::new("users", None)).unwrap(),
             &mut diff.rename_scenarios,
             false,
         );

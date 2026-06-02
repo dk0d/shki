@@ -12,6 +12,16 @@ pub mod sequence;
 pub use sequence::*;
 pub mod views;
 pub use views::*;
+pub mod function;
+pub use function::*;
+pub mod extension;
+pub use extension::*;
+
+pub mod trigger;
+pub use trigger::*;
+
+pub mod catalog;
+pub use catalog::*;
 
 // pub mod builders;
 // pub use builders::*;

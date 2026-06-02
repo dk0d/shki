@@ -137,11 +137,11 @@ where
             SqlDialect::Mysql | SqlDialect::Sqlite => schema.clone(),
         };
 
-        snapshot.schemas = self.get_schemas(&schema).await?;
-        snapshot.enums = self.get_enums(&schema).await?;
-        snapshot.views = self.get_views(&schema).await?;
-        snapshot.sequences = self.get_sequences(&schema).await?;
-        snapshot.extensions = self.get_extensions(&schema).await?;
+        snapshot.set_schemas(self.get_schemas(&schema).await?);
+        snapshot.set_enums(self.get_enums(&schema).await?);
+        snapshot.set_views(self.get_views(&schema).await?);
+        snapshot.set_sequences(self.get_sequences(&schema).await?);
+        snapshot.set_extensions(self.get_extensions(&schema).await?);
 
         let mut tables = self.get_tables(&schema).await?;
         let constraints = self.get_constraints(&schema).await?;
@@ -166,7 +166,7 @@ where
             }
         });
 
-        snapshot.tables = tables;
+        snapshot.set_tables(tables);
 
         Ok(snapshot)
     }
