@@ -118,7 +118,7 @@ impl CodeGenerator for ProtobufGenerator {
         snapshot: &Snapshot,
         config: &CodegenConfig,
     ) -> Self::TableDef {
-        self.build_message(name, table_snapshot, &snapshot.enums, config)
+        self.build_message(name, table_snapshot, &snapshot.enums(), config)
     }
 
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef) {
@@ -527,7 +527,7 @@ mod tests {
         ));
 
         let mut snapshot = Snapshot::new(crate::schema::SqlDialect::Postgres);
-        snapshot.tables.insert(Iden::new("events", None), table);
+        snapshot.insert_table(Iden::new("events", None), table);
 
         let generator = ProtobufGenerator::default();
         let output = generator.generate(&snapshot, &CodegenConfig::default());

@@ -57,14 +57,14 @@ pub async fn cmd_generate(config: &Config) -> Result<()> {
     if diff.has_rename_scenarios() {
         let mut results = prompt_for_rename(&diff.rename_scenarios).await?;
         let mut nested: Vec<RenameScenario> = Vec::new();
+        let prev_tables = prev.tables();
+        let curr_tables = curr.tables();
         for res in results.iter() {
             if let RenameDecision::Rename(rename) = res {
-                let from = prev
-                    .tables
+                let from = prev_tables
                     .get(&rename.source.table)
                     .expect("table should exist");
-                let to = curr
-                    .tables
+                let to = curr_tables
                     .get(&rename.target.table)
                     .expect("table should exist");
                 detect_nested_renames(from, to, &mut nested, false);

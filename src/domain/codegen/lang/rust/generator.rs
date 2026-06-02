@@ -161,7 +161,7 @@ impl CodeGenerator for RustGenerator {
         snapshot: &Snapshot,
         config: &CodegenConfig,
     ) -> Self::TableDef {
-        self.build_struct(name, table_snapshot, &snapshot.enums, config)
+        self.build_struct(name, table_snapshot, &snapshot.enums(), config)
     }
 
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef) {

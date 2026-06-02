@@ -60,13 +60,15 @@ pub trait CodeGenerator: Default {
     /// Generate code from a schema snapshot
     fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> Self::Output {
         let mut output = self.init_output(config);
+        let enums = snapshot.enums();
+        let tables = snapshot.tables();
 
-        for (name, enum_snapshot) in &snapshot.enums {
+        for (name, enum_snapshot) in &enums {
             let generated_enum = self.generate_enum(name, enum_snapshot, config);
             self.insert_enum(&mut output, name, generated_enum);
         }
 
-        for (table, table_snapshot) in &snapshot.tables {
+        for (table, table_snapshot) in &tables {
             if !config.should_include_table(&table.name) {
                 continue;
             }
