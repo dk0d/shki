@@ -178,8 +178,7 @@ impl SnapshotProvider for Mysql {
             });
             view.columns.push(ViewColumn {
                 name: row.column_name,
-                data_type: DataType::parse(row.column_type, &SqlDialect::Mysql)
-                    .to_string(&SqlDialect::Mysql),
+                data_type: DataType::parse(row.column_type, &SqlDialect::Mysql),
             });
         }
 

@@ -548,8 +548,11 @@ impl SnapshotProvider for Postgres {
             });
 
             if let (Some(name), Some(data_type)) = (row.column_name, row.column_data_type) {
-                view.columns
-                    .push(crate::schema::ViewColumn { name, data_type });
+                view.columns.push(crate::schema::ViewColumn::parse(
+                    name,
+                    data_type,
+                    &SqlDialect::Postgres,
+                ));
             }
         }
 
