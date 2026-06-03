@@ -121,7 +121,7 @@ impl SnapshotProvider for Sqlite {
                 .into_iter()
                 .map(|column| ViewColumn {
                     name: column.name,
-                    data_type: column.data_type.to_string(&SqlDialect::Sqlite),
+                    data_type: column.data_type,
                 })
                 .collect();
             views.insert(
