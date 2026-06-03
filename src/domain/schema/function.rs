@@ -37,7 +37,19 @@ pub struct FunctionParameter {
     pub data_type: DataType,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
+    pub mode: Option<FunctionParameterMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FunctionParameterMode {
+    #[serde(rename = "IN")]
+    In,
+    #[serde(rename = "OUT")]
+    Out,
+    #[serde(rename = "INOUT")]
+    InOut,
+    #[serde(rename = "VARIADIC")]
+    Variadic,
 }
 
 impl Function {
@@ -60,16 +72,12 @@ impl FunctionParameter {
         }
     }
 
-    pub fn parse(
-        name: Option<String>,
-        data_type: impl Into<String>,
-        dialect: &SqlDialect,
-    ) -> Self {
+    pub fn parse(name: Option<String>, data_type: impl Into<String>, dialect: &SqlDialect) -> Self {
         Self::new(name, DataType::parse(data_type, dialect))
     }
 
-    pub fn with_mode(mut self, mode: impl Into<String>) -> Self {
-        self.mode = Some(mode.into());
+    pub fn with_mode(mut self, mode: FunctionParameterMode) -> Self {
+        self.mode = Some(mode);
         self
     }
 }
@@ -85,7 +93,7 @@ mod tests {
             "character varying(255)",
             &SqlDialect::Postgres,
         )
-        .with_mode("in");
+        .with_mode(FunctionParameterMode::In);
 
         assert_eq!(parameter.data_type, DataType::VarChar { length: Some(255) });
     }
