@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::models::iden::Iden;
+
 use super::types::{DataType, DefaultValue, GeneratedColumn};
 
 /// A database column definition
@@ -88,7 +90,7 @@ pub struct SequenceOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ColumnReference {
-    pub table: String,
+    pub table: Iden,
     pub column: String,
     #[serde(default)]
     pub on_delete: super::types::ReferenceAction,
@@ -193,11 +195,7 @@ impl Column {
     }
 
     /// Set a foreign key reference
-    pub fn references_column(
-        mut self,
-        table: impl Into<String>,
-        column: impl Into<String>,
-    ) -> Self {
+    pub fn references_column(mut self, table: impl Into<Iden>, column: impl Into<String>) -> Self {
         self.references = Some(ColumnReference {
             table: table.into(),
             column: column.into(),
@@ -210,7 +208,7 @@ impl Column {
     /// Set a foreign key reference with ON DELETE action
     pub fn references_with_delete(
         mut self,
-        table: impl Into<String>,
+        table: impl Into<Iden>,
         column: impl Into<String>,
         on_delete: super::types::ReferenceAction,
     ) -> Self {
@@ -491,7 +489,7 @@ impl ColumnBuilder {
     }
 
     /// Set a foreign key reference
-    pub fn references(mut self, table: impl Into<String>, column: impl Into<String>) -> Self {
+    pub fn references(mut self, table: impl Into<Iden>, column: impl Into<String>) -> Self {
         self.column = self.column.references_column(table, column);
         self
     }
@@ -499,7 +497,7 @@ impl ColumnBuilder {
     /// Set a foreign key reference with ON DELETE action
     pub fn references_on_delete(
         mut self,
-        table: impl Into<String>,
+        table: impl Into<Iden>,
         column: impl Into<String>,
         on_delete: super::types::ReferenceAction,
     ) -> Self {
@@ -619,7 +617,7 @@ mod tests {
 
         assert!(col.references.is_some());
         let refs = col.references.expect("column reference not set");
-        assert_eq!(refs.table, "users");
+        assert_eq!(refs.table, Iden::new("users", None));
         assert_eq!(refs.column, "id");
     }
 
@@ -930,7 +928,7 @@ mod tests {
 
         assert!(col.references.is_some());
         let refs = col.references.expect("column reference not set");
-        assert_eq!(refs.table, "users");
+        assert_eq!(refs.table, Iden::new("users", None));
         assert_eq!(refs.column, "id");
     }
 
@@ -1020,12 +1018,12 @@ mod tests {
     #[test]
     fn test_column_reference() {
         let refs = ColumnReference {
-            table: "users".to_string(),
+            table: Iden::new("users", None),
             column: "id".to_string(),
             on_delete: ReferenceAction::Cascade,
             on_update: ReferenceAction::NoAction,
         };
-        assert_eq!(refs.table, "users");
+        assert_eq!(refs.table, Iden::new("users", None));
         assert_eq!(refs.column, "id");
     }
 }
