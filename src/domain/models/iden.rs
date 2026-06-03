@@ -1,6 +1,8 @@
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::ShkiError;
+
 /// Identifier for a table, combining name and optional schema
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Iden {
@@ -32,25 +34,10 @@ impl<'de> Deserialize<'de> for Iden {
             }
 
             fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                let parts: Vec<&str> = v.split('.').collect();
-                let (schema, name) = match parts.as_slice() {
-                    [name] if !name.is_empty() => (None, name.to_string()),
-                    [schema, name] if !schema.is_empty() && !name.is_empty() => {
-                        (Some(schema.to_string()), name.to_string())
-                    }
-                    _ => {
-                        return Err(E::custom(format!(
-                            "invalid Iden `{v}`, expected {}",
-                            EXPECTED.join(" or ")
-                        )));
-                    }
-                };
-
-                Ok(Iden { name, schema })
+                Iden::parse(v).map_err(|e| E::custom(format!("{e}")))
             }
         }
 
-        const EXPECTED: &[&str] = &["name", "schema.name"];
         deserializer.deserialize_str(IdenVisitor)
     }
 }
@@ -74,12 +61,15 @@ impl From<(String, Option<String>)> for Iden {
     }
 }
 
-impl From<&(String, Option<String>)> for Iden {
-    fn from((name, schema): &(String, Option<String>)) -> Self {
-        Self {
-            name: name.clone(),
-            schema: schema.clone(),
-        }
+impl From<String> for Iden {
+    fn from(name: String) -> Self {
+        Self::unsafe_parse(&name)
+    }
+}
+
+impl From<&str> for Iden {
+    fn from(name: &str) -> Self {
+        Self::unsafe_parse(name)
     }
 }
 
@@ -89,6 +79,36 @@ impl Iden {
             name: name.into(),
             schema,
         }
+    }
+
+    pub fn unsafe_parse(value: &str) -> Self {
+        let parsed = Self::parse(value);
+        match parsed {
+            Ok(iden) => iden,
+            Err(_) => Iden {
+                name: value.to_owned(),
+                schema: None,
+            },
+        }
+    }
+
+    pub fn parse(value: &str) -> crate::Result<Self> {
+        let parts: Vec<&str> = value.split('.').collect();
+        const EXPECTED: &[&str] = &["name", "schema.name"];
+        let (schema, name) = match parts.as_slice() {
+            [name] if !name.is_empty() => (None, name.to_string()),
+            [schema, name] if !schema.is_empty() && !name.is_empty() => {
+                (Some(schema.to_string()), name.to_string())
+            }
+            _ => {
+                return Err(ShkiError::Parse(format!(
+                    "invalid Iden `{value}`, expected {}",
+                    EXPECTED.join(" or ")
+                )));
+            }
+        };
+
+        Ok(Iden { name, schema })
     }
 
     fn with_name(&self, name: impl Into<String>) -> Self {
