@@ -146,6 +146,9 @@ pub enum ShkiError {
     #[error("[VALIDATION] {0}")]
     Validation(String),
 
+    #[error("[PARSE] {0}")]
+    Parse(String),
+
     #[error("[TYPESCRIPT] {0}")]
     Typescript(String),
 
