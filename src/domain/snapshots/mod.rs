@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::migrate::manager::MigrationInfo;
 use super::models::iden::Iden;
-use super::schema::{Catalog, Column, Constraint, DbEnum, Extension, Index, Sequence, SqlDialect, Table, View};
+use super::schema::{
+    Catalog, Column, Constraint, DbEnum, Extension, Index, Sequence, SqlDialect, Table, View,
+};
 
 /// A snapshot of a database schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +167,6 @@ fn catalog_schema(id_schema: &Option<String>, object_schema: &Option<String>) ->
 }
 
 #[async_trait::async_trait]
-
 pub trait Introspectable {
     async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot>;
 }
@@ -191,4 +192,70 @@ pub trait SnapshotProvider {
         &self,
         schema: &Option<String>,
     ) -> Result<IndexMap<Iden, IndexMap<String, Index>>>;
+}
+
+#[async_trait::async_trait]
+impl<E> Introspectable for E
+where
+    E: SnapshotProvider + Send + Sync,
+{
+    async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot> {
+        let mut snapshot = Snapshot::new(config.dialect);
+
+        let schema = match config.dialect {
+            SqlDialect::Postgres => Some(schema.clone().unwrap_or("public".to_string())),
+            SqlDialect::Mysql | SqlDialect::Sqlite => schema.clone(),
+        };
+
+        snapshot.set_schemas(self.get_schemas(&schema).await?);
+        snapshot.set_enums(self.get_enums(&schema).await?);
+        snapshot.set_views(self.get_views(&schema).await?);
+        snapshot.set_sequences(self.get_sequences(&schema).await?);
+        snapshot.set_extensions(self.get_extensions(&schema).await?);
+
+        let mut tables = self.get_tables(&schema).await?;
+        let constraints = self.get_constraints(&schema).await?;
+        let columns = self.get_columns(&schema).await?;
+        let indexes = self.get_indexes(&schema).await?;
+
+        attach_columns(&mut tables, columns);
+        attach_constraints(&mut tables, constraints);
+        attach_indexes(&mut tables, indexes);
+        snapshot.set_tables(tables);
+
+        Ok(snapshot)
+    }
+}
+
+fn attach_columns(
+    tables: &mut IndexMap<Iden, Table>,
+    columns: IndexMap<Iden, IndexMap<String, Column>>,
+) {
+    for (table_id, columns) in columns {
+        if let Some(table) = tables.get_mut(&table_id) {
+            table.columns = columns;
+        }
+    }
+}
+
+fn attach_constraints(
+    tables: &mut IndexMap<Iden, Table>,
+    constraints: IndexMap<Iden, Vec<Constraint>>,
+) {
+    for (table_id, constraints) in constraints {
+        if let Some(table) = tables.get_mut(&table_id) {
+            table.constraints = constraints;
+        }
+    }
+}
+
+fn attach_indexes(
+    tables: &mut IndexMap<Iden, Table>,
+    indexes: IndexMap<Iden, IndexMap<String, Index>>,
+) {
+    for (table_id, indexes) in indexes {
+        if let Some(table) = tables.get_mut(&table_id) {
+            table.indexes = indexes;
+        }
+    }
 }
