@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod compiler;
 pub mod create;
 pub mod declarative;
 pub mod diff;
