@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::checksum::sql_checksum;
+use super::journal::{Journal, MigrationKind, journal_path};
 use super::utils::{generate_blank_migration_template, sanitize_migration_name};
 use crate::config::MigrationPrefix;
 use crate::engines::{Engine, EngineDriver};
@@ -151,8 +152,43 @@ impl MigrationManager {
     /// Ensure the migrations directory exists
     pub fn ensure_dir(&self) -> Result<()> {
         std::fs::create_dir_all(&self.out_dir)?;
-        // TODO: [snapshots] std::fs::create_dir_all(self.out_dir.join("_meta"))?;
+        std::fs::create_dir_all(self.meta_dir())?;
         Ok(())
+    }
+
+    pub fn meta_dir(&self) -> PathBuf {
+        self.out_dir.join("_meta")
+    }
+
+    pub fn journal_path(&self) -> PathBuf {
+        journal_path(&self.out_dir)
+    }
+
+    pub fn load_journal(&self) -> Result<Journal> {
+        Journal::load(&self.journal_path())
+    }
+
+    pub fn save_journal(&self, journal: &Journal) -> Result<()> {
+        journal.save(&self.journal_path())
+    }
+
+    pub fn record_migration_in_journal(
+        &self,
+        migration_path: &Path,
+        kind: MigrationKind,
+        snapshot_path: Option<&Path>,
+        snapshot_id: Option<String>,
+        prev_snapshot_id: Option<String>,
+    ) -> Result<()> {
+        let mut journal = self.load_journal()?;
+        journal.record_migration(
+            migration_path,
+            kind,
+            snapshot_path,
+            snapshot_id,
+            prev_snapshot_id,
+        )?;
+        self.save_journal(&journal)
     }
 
     /// Generate the next migration name
@@ -517,6 +553,14 @@ impl MigrationManager {
             None
         };
 
+        self.record_migration_in_journal(
+            &up_path,
+            MigrationKind::Custom,
+            None,
+            None,
+            None,
+        )?;
+
         Ok((up_path, down_path))
     }
 
@@ -615,6 +659,14 @@ impl MigrationManager {
         } else {
             None
         };
+
+        self.record_migration_in_journal(
+            &up_path,
+            MigrationKind::Custom,
+            None,
+            None,
+            None,
+        )?;
 
         Ok((up_path, down_path))
     }
@@ -723,6 +775,50 @@ mod tests {
         assert!(up.contains("CREATE TABLE users (id INTEGER PRIMARY KEY);\n"));
         assert!(down.contains("-- Migration: 0000_add-users-table (down)"));
         assert!(down.contains("DROP TABLE users;\n"));
+
+        let journal = manager.load_journal().expect("journal should load");
+        assert_eq!(journal.entries.len(), 1);
+        let entry = &journal.entries[0];
+        assert_eq!(entry.migration, "0000_add-users-table");
+        assert_eq!(entry.kind, MigrationKind::Custom);
+        assert_eq!(entry.snapshot_path, None);
+        assert_eq!(entry.snapshot_id, None);
+        assert_eq!(entry.prev_snapshot_id, None);
+        assert_eq!(entry.checksum, sql_checksum(&up));
+    }
+
+    #[test]
+    fn journal_recording_upserts_existing_migration_entry() {
+        let (_temp_dir, manager) = temp_manager();
+        let up_path = manager
+            .create_blank_migration_with_content("custom", Some("SELECT 1;"))
+            .expect("failed to create migration");
+
+        manager
+            .record_migration_in_journal(
+                &up_path,
+                MigrationKind::Schema,
+                Some(&manager.meta_dir().join("0000_custom_snapshot.json")),
+                Some("snapshot-1".to_string()),
+                Some("snapshot-0".to_string()),
+            )
+            .expect("failed to record schema entry");
+
+        let journal = manager.load_journal().expect("journal should load");
+        assert_eq!(journal.entries.len(), 1);
+        let entry = &journal.entries[0];
+        assert_eq!(entry.migration, "0000_custom");
+        assert_eq!(entry.kind, MigrationKind::Schema);
+        let expected_snapshot_path = format!(
+            "{}/_meta/0000_custom_snapshot.json",
+            manager.out_dir.to_string_lossy()
+        );
+        assert_eq!(
+            entry.snapshot_path.as_deref(),
+            Some(expected_snapshot_path.as_str())
+        );
+        assert_eq!(entry.snapshot_id.as_deref(), Some("snapshot-1"));
+        assert_eq!(entry.prev_snapshot_id.as_deref(), Some("snapshot-0"));
     }
 
     #[tokio::test]
