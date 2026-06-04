@@ -1,5 +1,6 @@
 pub mod codegen;
 pub mod create;
+pub mod declarative;
 pub mod diff;
 pub mod display;
 pub mod down;
