@@ -1,4 +1,5 @@
 pub mod checksum;
+pub mod journal;
 pub mod manager;
 pub mod utils;
 
