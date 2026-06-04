@@ -70,6 +70,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_url: Option<String>,
 
+    /// Disposable Shadow Database URL used to compile Declarative Schemas
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_database_url: Option<String>,
+
     /// Whether to add breakpoints between SQL statements
     #[serde(default = "default_true")]
     pub breakpoints: bool,
@@ -228,6 +232,7 @@ impl Default for Config {
             schema: default_schema_path(),
             out: default_out(),
             database_url: None,
+            shadow_database_url: None,
             breakpoints: true,
             verbose: false,
             codegen: CodegenConfig::default(),

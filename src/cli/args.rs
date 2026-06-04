@@ -65,6 +65,11 @@ pub struct CommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database_url: Option<String>,
 
+    /// Shadow Database connection URL used to compile Declarative Schemas
+    #[arg(long, global = true, env = "SHKI_SHADOW_DATABASE_URL")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_database_url: Option<String>,
+
     /// Output directory for migrations
     #[arg(short, long, global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
