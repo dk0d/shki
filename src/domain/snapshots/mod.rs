@@ -259,3 +259,32 @@ fn attach_indexes(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+    use crate::schema::{Column, DataType, SqlDialect, Table};
+
+    #[test]
+    fn snapshot_json_uses_catalog_shaped_contract() {
+        let mut snapshot = Snapshot::new(SqlDialect::Postgres);
+        snapshot.prev_id = Some("previous-snapshot".to_string());
+        let mut table = Table::in_schema("users", "app");
+        table.column(Column::new("id", DataType::Integer).not_null());
+        snapshot.insert_table(Iden::new("users", Some("app".to_string())), table);
+
+        let json = snapshot.to_json().expect("snapshot should serialize");
+        let value: Value = serde_json::from_str(&json).expect("snapshot json should parse");
+
+        assert!(value.get("catalog").is_some());
+        assert_eq!(value["prevId"], "previous-snapshot");
+        assert!(value.get("createdAt").is_some());
+        assert!(value["catalog"]["schemas"]["app"]["tables"]["users"].is_object());
+        assert!(value.get("tables").is_none());
+        assert!(value.get("enums").is_none());
+        assert!(value.get("sequences").is_none());
+        assert!(value.get("views").is_none());
+    }
+}
