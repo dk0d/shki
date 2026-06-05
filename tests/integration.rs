@@ -2,10 +2,16 @@ mod engines;
 use engines::*;
 mod common;
 
+use shki::codegen::OutputMode;
+use shki::codegen::lang::typescript::TypescriptFlavor;
+use shki::compiler::{ExternalShadowDBCompiler, SchemaCompiler};
+use shki::config::Config;
+use shki::migrate::journal::{Journal, MigrationKind};
 use shki::models::iden::Iden;
 use shki::run;
+use shki::schema::{Column, DataType, DbEnum, Table};
 use shki::snapshots::Snapshot;
-use shki::{Commands, CommonArgs, PullFormat};
+use shki::{Cli, CodegenLanguage, Commands, CommonArgs, PullFormat};
 
 use self::common::*;
 
@@ -304,6 +310,42 @@ async fn scenario_cli_migrate_applies_pending<T: TestBackend>(ctx: T) {
     ctx.cleanup().await;
 }
 
+async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>(ctx: T) {
+    let config_path = ctx.write_config();
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Create {
+            name: "Add audit table".to_string(),
+            sql: Some(ctx.create_table_sql(&ctx.unique_name("audit"), &[])),
+            sql_file: None,
+            with_down: false,
+            edit: false,
+        },
+    })
+    .await
+    .expect("cli create should succeed");
+
+    let journal_path = ctx.migrations_dir().join("_meta/_journal.json");
+    let journal_json = std::fs::read_to_string(&journal_path).expect("journal should be written");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+
+    assert_eq!(journal.entries.len(), 1);
+    assert_eq!(journal.entries[0].migration, "0000_add-audit-table");
+    assert_eq!(journal.entries[0].kind, MigrationKind::Custom);
+    assert!(journal.entries[0].snapshot_id.is_none());
+
+    let migration_path = ctx.migrations_dir().join("0000_add-audit-table.sql");
+    assert!(migration_path.exists());
+
+    ctx.cleanup().await;
+}
+
 async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();
@@ -459,6 +501,14 @@ macro_rules! backend_suite {
             }
 
             #[tokio::test]
+            async fn cli_create_records_custom_migration_in_journal() {
+                scenario_cli_create_records_custom_migration_in_journal(
+                    <$backend as TestBackend>::setup("cli_create_journal").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
             async fn cli_down_dry_run_does_not_modify_database() {
                 scenario_cli_down_dry_run_does_not_modify_database(
                     <$backend as TestBackend>::setup("cli_down").await,
@@ -480,3 +530,232 @@ macro_rules! backend_suite {
 backend_suite!(sqlite, SqliteTestContext);
 backend_suite!(postgres, PgTestContext);
 backend_suite!(mysql, MysqlTestContext);
+
+fn write_codegen_fixture_snapshot(root: &std::path::Path) -> std::path::PathBuf {
+    let mut snapshot = Snapshot::new(shki::schema::SqlDialect::Postgres);
+    let mut enums = indexmap::IndexMap::new();
+    enums.insert(
+        Iden::new("user_status", Some("public".to_string())),
+        DbEnum::with_values("user_status", vec!["active", "inactive"]),
+    );
+    snapshot.set_enums(enums);
+
+    let mut table = Table::in_schema("users", "public");
+    table.column(Column::new("id", DataType::Integer).primary_key());
+    table.column(Column::new("email", DataType::Text).not_null());
+    table.column(Column::new(
+        "status",
+        DataType::Enum {
+            name: "user_status".to_string(),
+            schema: Some("public".to_string()),
+        },
+    ));
+    snapshot.insert_table(Iden::new("users", Some("public".to_string())), table);
+
+    let path = root.join("snapshot.json");
+    std::fs::write(
+        &path,
+        snapshot.to_json().expect("snapshot should serialize"),
+    )
+    .expect("failed to write snapshot fixture");
+    path
+}
+
+fn write_codegen_config(
+    root: &std::path::Path,
+    snapshot_path: &std::path::Path,
+) -> std::path::PathBuf {
+    let config_path = root.join("shki.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+root = "{}"
+dialect = "postgres"
+schema = "{}"
+"#,
+            root.display(),
+            snapshot_path.display(),
+        ),
+    )
+    .expect("failed to write codegen config");
+    config_path
+}
+
+#[tokio::test]
+async fn codegen_writes_typescript_module_from_snapshot() {
+    let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let snapshot_path = write_codegen_fixture_snapshot(temp_dir.path());
+    let config_path = write_codegen_config(temp_dir.path(), &snapshot_path);
+    let output_dir = temp_dir.path().join("generated-ts");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs::default(),
+        command: Commands::Codegen {
+            language: CodegenLanguage::Typescript {
+                flavor: TypescriptFlavor::Interface,
+            },
+            out: Some(output_dir.clone()),
+            schema: None,
+            mode: Some(OutputMode::SingleModule),
+            verbose: false,
+        },
+    })
+    .await
+    .expect("typescript codegen should succeed");
+
+    let user = std::fs::read_to_string(output_dir.join("user.ts"))
+        .expect("user interface should be written");
+    let status = std::fs::read_to_string(output_dir.join("user_status.ts"))
+        .expect("status enum should be written");
+    let index =
+        std::fs::read_to_string(output_dir.join("index.ts")).expect("index should be written");
+
+    assert!(user.contains("interface User"));
+    assert!(user.contains("import { UserStatus } from './user_status';"));
+    assert!(status.contains("enum UserStatus"));
+    assert!(index.contains("export { User } from './user';"));
+}
+
+#[tokio::test]
+async fn codegen_writes_rust_nested_modules_from_snapshot() {
+    let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let snapshot_path = write_codegen_fixture_snapshot(temp_dir.path());
+    let config_path = write_codegen_config(temp_dir.path(), &snapshot_path);
+    let output_dir = temp_dir.path().join("generated-rs");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs::default(),
+        command: Commands::Codegen {
+            language: CodegenLanguage::Rust,
+            out: Some(output_dir.clone()),
+            schema: None,
+            mode: Some(OutputMode::Modules),
+            verbose: false,
+        },
+    })
+    .await
+    .expect("rust codegen should succeed");
+
+    let user = std::fs::read_to_string(output_dir.join("user/user.rs"))
+        .expect("user struct module should be written");
+    let status = std::fs::read_to_string(output_dir.join("user_status/user_status.rs"))
+        .expect("status enum module should be written");
+    let root_mod =
+        std::fs::read_to_string(output_dir.join("mod.rs")).expect("root module should be written");
+
+    assert!(user.contains("pub struct User"));
+    assert!(user.contains("use super::user_status::UserStatus;"));
+    assert!(status.contains("pub enum UserStatus"));
+    assert!(root_mod.contains("pub use user::User;"));
+}
+
+#[tokio::test]
+async fn codegen_writes_protobuf_files_from_snapshot() {
+    let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let snapshot_path = write_codegen_fixture_snapshot(temp_dir.path());
+    let config_path = write_codegen_config(temp_dir.path(), &snapshot_path);
+    let output_dir = temp_dir.path().join("generated-proto");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs::default(),
+        command: Commands::Codegen {
+            language: CodegenLanguage::Protobuf,
+            out: Some(output_dir.clone()),
+            schema: None,
+            mode: Some(OutputMode::SingleModule),
+            verbose: false,
+        },
+    })
+    .await
+    .expect("protobuf codegen should succeed");
+
+    let user = std::fs::read_to_string(output_dir.join("user.proto"))
+        .expect("user message should be written");
+    let status = std::fs::read_to_string(output_dir.join("user_status.proto"))
+        .expect("status enum should be written");
+
+    assert!(user.contains("message User"));
+    assert!(user.contains("import \"user_status.proto\";"));
+    assert!(status.contains("enum UserStatus"));
+}
+
+#[tokio::test]
+async fn compiler_turns_declarative_schema_sql_into_snapshot() {
+    let ctx = PgTestContext::setup("compiler_single_file").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let table_name = ctx.unique_name("declared_users");
+    let schema_path = ctx.root_dir().join("schema.sql");
+    std::fs::write(
+        &schema_path,
+        format!("CREATE TABLE {table_name} (id integer primary key, name text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    let config = Config {
+        root: ctx.root_dir().to_path_buf(),
+        dialect: shki::schema::SqlDialect::Postgres,
+        schema: schema_path,
+        database_url: Some(ctx.database_url()),
+        shadow_database_url: Some(shadow.database_url),
+        ..Config::default()
+    };
+
+    let snapshot = ExternalShadowDBCompiler::from_config(&config)
+        .expect("compiler should configure")
+        .compile(&config)
+        .await
+        .expect("declarative schema should compile");
+
+    let tables = snapshot.tables();
+    let table = tables
+        .iter()
+        .find(|(id, _)| id.name == table_name)
+        .map(|(_, table)| table)
+        .expect("declared table should be in snapshot");
+
+    assert!(table.columns.contains_key("id"));
+    assert!(table.columns.contains_key("name"));
+    assert!(!table.columns.get("name").expect("name column").nullable);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn compiler_consumes_directory_schema_with_i_includes() {
+    let ctx = PgTestContext::setup("compiler_directory").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let table_name = ctx.unique_name("included_users");
+    let schema_dir = ctx.root_dir().join("schema");
+    let tables_dir = schema_dir.join("tables");
+    std::fs::create_dir_all(&tables_dir).expect("failed to create schema directory");
+    std::fs::write(schema_dir.join("main.sql"), "\\i tables/users.sql\n")
+        .expect("failed to write main.sql");
+    std::fs::write(
+        tables_dir.join("users.sql"),
+        format!("CREATE TABLE {table_name} (id integer primary key);\n"),
+    )
+    .expect("failed to write included table sql");
+
+    let config = Config {
+        root: ctx.root_dir().to_path_buf(),
+        dialect: shki::schema::SqlDialect::Postgres,
+        schema: schema_dir,
+        database_url: Some(ctx.database_url()),
+        shadow_database_url: Some(shadow.database_url),
+        ..Config::default()
+    };
+
+    let snapshot = ExternalShadowDBCompiler::from_config(&config)
+        .expect("compiler should configure")
+        .compile(&config)
+        .await
+        .expect("directory schema should compile");
+
+    assert!(snapshot.tables().keys().any(|id| id.name == table_name));
+
+    ctx.cleanup().await;
+}
