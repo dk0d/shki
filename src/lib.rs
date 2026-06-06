@@ -61,6 +61,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             .await
         }
 
+        Commands::Generate {
+            name,
+            custom,
+            with_down,
+        } => generate::cmd_generate(&config, &name, custom, with_down).await,
+
         Commands::Status => status::cmd_status(&config).await,
 
         Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
