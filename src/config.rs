@@ -74,6 +74,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow_database_url: Option<String>,
 
+    /// PostgreSQL major version for embedded Shadow Database compilation, defaults to 18
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pg_version: Option<u8>,
+
     /// Whether to add breakpoints between SQL statements
     #[serde(default = "default_true")]
     pub breakpoints: bool,
@@ -240,6 +244,7 @@ impl Default for Config {
             out: default_out(),
             database_url: None,
             shadow_database_url: None,
+            pg_version: None,
             breakpoints: true,
             verbose: false,
             no_color: false,
@@ -364,12 +369,14 @@ generate_down = false
         unsafe {
             std::env::set_var("DATABASE_URL", "sqlite://from-raw-env.db");
             std::env::set_var("SHKI_DATABASE_URL", "sqlite://from-shki-env.db");
+            std::env::set_var("SHKI_SHADOW_DATABASE_POSTGRES_VERSION", "16");
             std::env::set_var("SHKI_MIGRATIONS__TABLE", "env_migrations");
         }
 
         let args = CommonArgs {
             dialect: Some(SqlDialect::Postgres),
             database_url: Some("postgres://from-cli".to_string()),
+            pg_version: Some(17),
             migrations_dir: Some(PathBuf::from("cli-migrations")),
             migrations: crate::cli::args::MigrationArgs {
                 prefix: Some(MigrationPrefix::Timestamp),
@@ -384,6 +391,7 @@ generate_down = false
 
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
+        assert_eq!(config.pg_version, Some(17));
         assert_eq!(config.out, PathBuf::from("cli-migrations"));
         assert_eq!(config.migrations.entity().name, "env_migrations");
         assert_eq!(config.migrations.prefix, MigrationPrefix::Timestamp);
@@ -392,6 +400,7 @@ generate_down = false
         unsafe {
             std::env::remove_var("DATABASE_URL");
             std::env::remove_var("SHKI_DATABASE_URL");
+            std::env::remove_var("SHKI_SHADOW_DATABASE_POSTGRES_VERSION");
             std::env::remove_var("SHKI_MIGRATIONS__TABLE");
         }
     }
