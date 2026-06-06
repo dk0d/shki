@@ -10,8 +10,9 @@ use shki::migrate::journal::{Journal, MigrationKind};
 use shki::models::iden::Iden;
 use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
-use shki::snapshots::Snapshot;
-use shki::{Cli, CodegenLanguage, Commands, CommonArgs, PullFormat};
+use shki::snapshots::{Introspectable, Snapshot};
+use shki::{Cli, CodegenLanguage, Commands, CommonArgs, DumpFormat, PullFormat};
+use sqlx::Executor;
 
 use self::common::*;
 
@@ -433,6 +434,46 @@ async fn scenario_cli_pull_json_introspects_schema<T: TestBackend>(ctx: T) {
     ctx.cleanup().await;
 }
 
+async fn scenario_cli_dump_sql_writes_declarative_schema<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("dumped_users");
+    let output_path = ctx.root_dir().join("schema.sql");
+    let migration_path = ctx.write_migration(
+        "0001_create_dumped_users.sql",
+        &ctx.create_table_sql(&table_name, &[format!("name {} NOT NULL", ctx.text_type())]),
+    );
+
+    manager
+        .apply_migration(&migration_path)
+        .await
+        .expect("failed to apply migration before dump");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Dump {
+            format: DumpFormat::Sql,
+            output: Some(output_path.clone()),
+            schema: ctx.migration_schema().map(str::to_string),
+        },
+    })
+    .await
+    .expect("dump sql should introspect and write schema SQL");
+
+    let schema_sql = std::fs::read_to_string(&output_path).expect("schema SQL should be written");
+    assert!(schema_sql.contains("CREATE TABLE"));
+    assert!(schema_sql.contains(&table_name));
+    assert!(schema_sql.contains("name"));
+    assert!(schema_sql.contains("NOT NULL"));
+
+    ctx.cleanup().await;
+}
+
 macro_rules! backend_suite {
     ($module:ident, $backend:ty) => {
         mod $module {
@@ -517,9 +558,17 @@ macro_rules! backend_suite {
             }
 
             #[tokio::test]
-            async fn cli_pull_json_introspects_schema() {
-                scenario_cli_pull_json_introspects_schema(
-                    <$backend as TestBackend>::setup("cli_pull_json").await,
+            async fn cli_dump_json_introspects_schema() {
+                scenario_cli_dump_json_introspects_schema(
+                    <$backend as TestBackend>::setup("cli_dump_json").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn cli_dump_sql_writes_declarative_schema() {
+                scenario_cli_dump_sql_writes_declarative_schema(
+                    <$backend as TestBackend>::setup("cli_dump_sql").await,
                 )
                 .await;
             }
@@ -681,6 +730,391 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
     assert!(user.contains("message User"));
     assert!(user.contains("import \"user_status.proto\";"));
     assert!(status.contains("enum UserStatus"));
+}
+
+#[tokio::test]
+async fn postgres_catalog_includes_functions_and_triggers() {
+    let ctx = PgTestContext::setup("catalog_functions_triggers").await;
+    let table_name = ctx.unique_name("audited_users");
+    let function_name = ctx.unique_name("format_label");
+    let trigger_function_name = ctx.unique_name("touch_updated_at");
+    let trigger_name = ctx.unique_name("set_updated_at");
+
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"
+        CREATE TABLE "{schema}"."{table}" (
+            id integer primary key,
+            updated_at timestamp without time zone
+        );
+
+        CREATE FUNCTION "{schema}"."{function}"(prefix text, retries integer DEFAULT 0)
+        RETURNS text
+        LANGUAGE sql
+        AS $$
+            SELECT prefix || retries::text
+        $$;
+
+        CREATE FUNCTION "{schema}"."{trigger_function}"()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            NEW.updated_at = now();
+            RETURN NEW;
+        END;
+        $$;
+
+        CREATE TRIGGER "{trigger}"
+        BEFORE INSERT OR UPDATE ON "{schema}"."{table}"
+        FOR EACH ROW
+        EXECUTE FUNCTION "{schema}"."{trigger_function}"();
+        "#,
+                schema = ctx.schema_name,
+                table = table_name,
+                function = function_name,
+                trigger_function = trigger_function_name,
+                trigger = trigger_name,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to create function and trigger fixture");
+
+    let config = Config {
+        dialect: shki::schema::SqlDialect::Postgres,
+        ..Config::default()
+    };
+    let snapshot = ctx
+        .engine(Iden::new(
+            "__shki_migrations",
+            Some(ctx.schema_name.clone()),
+        ))
+        .introspect(&config, &Some(ctx.schema_name.clone()))
+        .await
+        .expect("postgres snapshot should introspect functions and triggers");
+
+    let functions = snapshot.functions();
+    let function = functions
+        .values()
+        .find(|function| function.name == function_name)
+        .expect("trigger function should be present in catalog");
+    assert_eq!(function.schema.as_deref(), Some(ctx.schema_name.as_str()));
+    assert_eq!(function.return_type, Some(DataType::Text));
+    assert_eq!(function.language.as_deref(), Some("sql"));
+    assert_eq!(function.parameters.len(), 2);
+    assert_eq!(function.parameters[0].name.as_deref(), Some("prefix"));
+    assert_eq!(function.parameters[0].data_type, DataType::Text);
+    assert_eq!(function.parameters[1].name.as_deref(), Some("retries"));
+    assert_eq!(function.parameters[1].data_type, DataType::Integer);
+    assert!(
+        function
+            .body
+            .as_deref()
+            .unwrap_or_default()
+            .contains("prefix")
+    );
+
+    let triggers = snapshot.triggers();
+    let trigger = triggers
+        .values()
+        .find(|trigger| trigger.name == trigger_name)
+        .expect("table trigger should be present in catalog");
+    assert_eq!(
+        trigger.table,
+        Iden::new(table_name, Some(ctx.schema_name.clone()))
+    );
+    assert_eq!(
+        trigger.function,
+        Iden::new(trigger_function_name, Some(ctx.schema_name.clone()))
+    );
+    assert_eq!(trigger.timing, Some(shki::schema::TriggerTiming::Before));
+    assert_eq!(
+        trigger.orientation,
+        Some(shki::schema::TriggerOrientation::Row)
+    );
+    assert!(trigger.events.contains(&shki::schema::TriggerEvent::Insert));
+    assert!(trigger.events.contains(&shki::schema::TriggerEvent::Update));
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_catalog_includes_composite_types_and_domains() {
+    let ctx = PgTestContext::setup("catalog_types_domains").await;
+    let composite_name = ctx.unique_name("postal_address");
+    let domain_name = ctx.unique_name("email_address");
+
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"
+        CREATE TYPE "{schema}"."{composite}" AS (
+            street text,
+            zip_code integer
+        );
+
+        CREATE DOMAIN "{schema}"."{domain}" AS text
+        NOT NULL
+        CHECK (VALUE LIKE '%@%');
+        "#,
+                schema = ctx.schema_name,
+                composite = composite_name,
+                domain = domain_name,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to create composite type and domain fixture");
+
+    let config = Config {
+        dialect: shki::schema::SqlDialect::Postgres,
+        ..Config::default()
+    };
+    let snapshot = ctx
+        .engine(Iden::new(
+            "__shki_migrations",
+            Some(ctx.schema_name.clone()),
+        ))
+        .introspect(&config, &Some(ctx.schema_name.clone()))
+        .await
+        .expect("postgres snapshot should introspect composite types and domains");
+
+    let composite_types = snapshot.composite_types();
+    let composite = composite_types
+        .values()
+        .find(|composite_type| composite_type.name == composite_name)
+        .expect("composite type should be present in catalog");
+    assert_eq!(composite.schema.as_deref(), Some(ctx.schema_name.as_str()));
+    assert_eq!(composite.columns.len(), 2);
+    assert_eq!(composite.columns[0].name, "street");
+    assert_eq!(composite.columns[0].data_type, DataType::Text);
+    assert_eq!(composite.columns[1].name, "zip_code");
+    assert_eq!(composite.columns[1].data_type, DataType::Integer);
+
+    let domains = snapshot.domains();
+    let domain = domains
+        .values()
+        .find(|domain| domain.name == domain_name)
+        .expect("domain should be present in catalog");
+    assert_eq!(domain.schema.as_deref(), Some(ctx.schema_name.as_str()));
+    assert_eq!(domain.base_type, DataType::Text);
+    assert!(domain.not_null);
+    assert!(domain.constraints.iter().any(|constraint| {
+        constraint.definition.contains("CHECK") && constraint.definition.contains("VALUE")
+    }));
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_catalog_includes_procedures_aggregates_rls_and_partitions() {
+    let ctx = PgTestContext::setup("catalog_remaining_objects").await;
+    let procedure_name = ctx.unique_name("record_audit");
+    let state_function_name = ctx.unique_name("sum_state");
+    let aggregate_name = ctx.unique_name("sum_all");
+    let rls_table = ctx.unique_name("tenant_docs");
+    let policy_name = ctx.unique_name("tenant_docs_policy");
+    let parent_table = ctx.unique_name("events");
+    let child_table = ctx.unique_name("events_2026");
+
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"
+        CREATE PROCEDURE "{schema}"."{procedure}"(message text)
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            PERFORM message;
+        END;
+        $$;
+
+        CREATE FUNCTION "{schema}"."{state_function}"(state integer, value integer)
+        RETURNS integer
+        LANGUAGE sql
+        IMMUTABLE
+        AS $$ SELECT COALESCE(state, 0) + COALESCE(value, 0) $$;
+
+        CREATE AGGREGATE "{schema}"."{aggregate}"(integer) (
+            SFUNC = "{schema}"."{state_function}",
+            STYPE = integer,
+            INITCOND = '0'
+        );
+
+        CREATE TABLE "{schema}"."{rls_table}" (
+            tenant_id integer,
+            body text
+        );
+        ALTER TABLE "{schema}"."{rls_table}" ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY "{policy}" ON "{schema}"."{rls_table}"
+            FOR SELECT
+            USING (tenant_id > 0);
+
+        CREATE TABLE "{schema}"."{parent}" (
+            id integer,
+            created_at date not null
+        ) PARTITION BY RANGE (created_at);
+        CREATE TABLE "{schema}"."{child}" PARTITION OF "{schema}"."{parent}"
+            FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+        "#,
+                schema = ctx.schema_name,
+                procedure = procedure_name,
+                state_function = state_function_name,
+                aggregate = aggregate_name,
+                rls_table = rls_table,
+                policy = policy_name,
+                parent = parent_table,
+                child = child_table,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to create remaining catalog fixture");
+
+    let config = Config {
+        dialect: shki::schema::SqlDialect::Postgres,
+        ..Config::default()
+    };
+    let snapshot = ctx
+        .engine(Iden::new(
+            "__shki_migrations",
+            Some(ctx.schema_name.clone()),
+        ))
+        .introspect(&config, &Some(ctx.schema_name.clone()))
+        .await
+        .expect("postgres snapshot should introspect remaining catalog objects");
+
+    let procedure = snapshot
+        .procedures()
+        .values()
+        .find(|procedure| procedure.name == procedure_name)
+        .expect("procedure should be present in catalog")
+        .clone();
+    assert_eq!(procedure.language.as_deref(), Some("plpgsql"));
+    assert_eq!(procedure.parameters.len(), 1);
+    assert_eq!(procedure.parameters[0].data_type, DataType::Text);
+
+    let aggregate = snapshot
+        .aggregates()
+        .values()
+        .find(|aggregate| aggregate.name == aggregate_name)
+        .expect("aggregate should be present in catalog")
+        .clone();
+    assert_eq!(aggregate.return_type, DataType::Integer);
+    assert_eq!(aggregate.state_type, DataType::Integer);
+    assert_eq!(aggregate.parameters.len(), 1);
+    assert_eq!(aggregate.parameters[0].data_type, DataType::Integer);
+
+    let rls = snapshot.row_level_security();
+    assert!(rls.contains_key(&Iden::new(rls_table.clone(), Some(ctx.schema_name.clone()))));
+
+    let policies = snapshot.row_level_security_policies();
+    let policy = policies
+        .values()
+        .find(|policy| policy.name == policy_name)
+        .expect("RLS policy should be present in catalog");
+    assert_eq!(
+        policy.table,
+        Iden::new(rls_table, Some(ctx.schema_name.clone()))
+    );
+    assert_eq!(policy.command, "SELECT");
+    assert!(
+        policy
+            .using_expression
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tenant_id")
+    );
+
+    let attachments = snapshot.partition_attachments();
+    let attachment = attachments
+        .values()
+        .find(|attachment| attachment.child.name == child_table)
+        .expect("partition attachment should be present in catalog");
+    assert_eq!(
+        attachment.parent,
+        Iden::new(parent_table, Some(ctx.schema_name.clone()))
+    );
+    assert!(attachment.bound.contains("2026-01-01"));
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_catalog_includes_privileges() {
+    let ctx = PgTestContext::setup("catalog_privileges").await;
+    let table_name = ctx.unique_name("secure_docs");
+    let role_name = format!("shki_test_role_{}", unique_suffix());
+
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"
+        CREATE ROLE "{role}";
+        CREATE TABLE "{schema}"."{table}" (
+            id integer,
+            body text
+        );
+        GRANT SELECT ON "{schema}"."{table}" TO "{role}";
+        GRANT UPDATE (body) ON "{schema}"."{table}" TO "{role}";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT SELECT ON TABLES TO "{role}";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+        "#,
+                schema = ctx.schema_name,
+                table = table_name,
+                role = role_name,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to create privilege fixture");
+
+    let config = Config {
+        dialect: shki::schema::SqlDialect::Postgres,
+        ..Config::default()
+    };
+    let snapshot = ctx
+        .engine(Iden::new(
+            "__shki_migrations",
+            Some(ctx.schema_name.clone()),
+        ))
+        .introspect(&config, &Some(ctx.schema_name.clone()))
+        .await
+        .expect("postgres snapshot should introspect privileges");
+
+    assert!(snapshot.object_privileges().iter().any(|privilege| {
+        privilege.object == Iden::new(table_name.clone(), Some(ctx.schema_name.clone()))
+            && privilege.grantee == role_name
+            && privilege.privilege_type == "SELECT"
+    }));
+    assert!(snapshot.column_privileges().iter().any(|privilege| {
+        privilege.table == Iden::new(table_name.clone(), Some(ctx.schema_name.clone()))
+            && privilege.column == "body"
+            && privilege.grantee == role_name
+            && privilege.privilege_type == "UPDATE"
+    }));
+    assert!(snapshot.default_privileges().iter().any(|privilege| {
+        privilege.object_type == "TABLES"
+            && privilege.grantee == role_name
+            && privilege.privilege_type == "SELECT"
+    }));
+
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA "{schema}" REVOKE ALL ON TABLES FROM "{role}";
+DROP OWNED BY "{role}";
+DROP ROLE IF EXISTS "{role}""#,
+                schema = ctx.schema_name,
+                role = role_name,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to drop test role");
+    ctx.cleanup().await;
 }
 
 #[tokio::test]

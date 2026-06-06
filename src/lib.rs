@@ -71,6 +71,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
         } => introspect::cmd_pull(&config, &format, &output.as_deref(), &schema).await,
 
+        Commands::Dump {
+            format,
+            output,
+            schema,
+        } => dump::cmd_dump(&config, &format, output.as_deref(), &schema).await,
+
         // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
         // Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,

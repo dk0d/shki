@@ -73,7 +73,7 @@ pub struct CommonArgs {
     /// Output directory for migrations
     #[arg(short, long, global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub out: Option<PathBuf>,
+    pub migrations_dir: Option<PathBuf>,
 
     /// Verbose output
     #[arg(short, long, global = true)]
