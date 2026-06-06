@@ -246,7 +246,7 @@ fn render_schema_directory(
             schema_root
                 .join("types")
                 .join(format!("{}.sql", sanitize_file_name(&composite_type.name))),
-            render_composite_type(&snapshot.dialect, composite_type),
+            render_composite_type(&snapshot.dialect, composite_type)?,
         );
     }
 
@@ -257,7 +257,7 @@ fn render_schema_directory(
             schema_root
                 .join("types")
                 .join(format!("{}.sql", sanitize_file_name(&domain.name))),
-            render_domain(&snapshot.dialect, domain),
+            render_domain(&snapshot.dialect, domain)?,
         );
     }
 
@@ -325,7 +325,7 @@ fn render_schema_directory(
             schema_root
                 .join("functions")
                 .join(format!("{}.sql", sanitize_file_name(&function.signature))),
-            render_function(&snapshot.dialect, function),
+            render_function(&snapshot.dialect, function)?,
         );
     }
 
@@ -336,7 +336,7 @@ fn render_schema_directory(
             schema_root
                 .join("procedures")
                 .join(format!("{}.sql", sanitize_file_name(&procedure.signature))),
-            render_procedure(&snapshot.dialect, procedure),
+            render_procedure(&snapshot.dialect, procedure)?,
         );
     }
 
@@ -347,7 +347,7 @@ fn render_schema_directory(
             schema_root
                 .join("aggregates")
                 .join(format!("{}.sql", sanitize_file_name(&aggregate.signature))),
-            render_aggregate(&snapshot.dialect, aggregate),
+            render_aggregate(&snapshot.dialect, aggregate)?,
         );
     }
 
@@ -358,7 +358,7 @@ fn render_schema_directory(
             schema_root
                 .join("triggers")
                 .join(format!("{}.sql", sanitize_file_name(&trigger.name))),
-            render_trigger(&snapshot.dialect, trigger),
+            render_trigger(&snapshot.dialect, trigger)?,
         );
     }
 
@@ -378,7 +378,14 @@ fn push_file(
     includes.push(path);
 }
 
-fn render_composite_type(dialect: &SqlDialect, composite_type: &CompositeType) -> String {
+fn render_composite_type(dialect: &SqlDialect, composite_type: &CompositeType) -> Result<String> {
+    if composite_type.columns.is_empty() {
+        return Err(ShkiError::schema(format!(
+            "Cannot render composite type '{}' without columns",
+            composite_type.name
+        )));
+    }
+
     let columns = composite_type
         .columns
         .iter()
@@ -391,16 +398,18 @@ fn render_composite_type(dialect: &SqlDialect, composite_type: &CompositeType) -
         })
         .collect::<Vec<_>>()
         .join(",\n");
-    format!(
-        "CREATE TYPE {} AS (\n{}\n);",
+    Ok(format!(
+        "{}\nCREATE TYPE {} AS (\n{}\n);",
+        advanced_object_notice("composite type"),
         qualified_name(dialect, &composite_type.name, &composite_type.schema),
         columns
-    )
+    ))
 }
 
-fn render_domain(dialect: &SqlDialect, domain: &Domain) -> String {
+fn render_domain(dialect: &SqlDialect, domain: &Domain) -> Result<String> {
     let mut sql = format!(
-        "CREATE DOMAIN {} AS {}",
+        "{}\nCREATE DOMAIN {} AS {}",
+        advanced_object_notice("domain"),
         qualified_name(dialect, &domain.name, &domain.schema),
         domain.base_type.to_string(dialect)
     );
@@ -418,46 +427,69 @@ fn render_domain(dialect: &SqlDialect, domain: &Domain) -> String {
         ));
     }
     sql.push(';');
-    sql
+    Ok(sql)
 }
 
-fn render_function(dialect: &SqlDialect, function: &Function) -> String {
-    let return_type = function
-        .return_type
-        .as_ref()
-        .map(|data_type| data_type.to_string(dialect))
-        .unwrap_or_else(|| "void".to_string());
-    format!(
-        "CREATE FUNCTION {}({})\nRETURNS {}\nLANGUAGE {}\nAS $$\n{}\n$$;",
+fn render_function(dialect: &SqlDialect, function: &Function) -> Result<String> {
+    let return_type = function.return_type.as_ref().ok_or_else(|| {
+        ShkiError::schema(format!(
+            "Cannot render function '{}' without a return type",
+            function.signature
+        ))
+    })?;
+    let language = required_routine_language(
+        "function",
+        &function.signature,
+        function.language.as_deref(),
+    )?;
+    let body = required_routine_body("function", &function.signature, function.body.as_deref())?;
+    let dollar_tag = dollar_quote_tag(body);
+
+    Ok(format!(
+        "{}\nCREATE FUNCTION {}({})\nRETURNS {}\nLANGUAGE {}\nAS ${}$\n{}\n${}$;",
+        advanced_object_notice("function"),
         qualified_name(dialect, &function.name, &function.schema),
         render_parameters(dialect, &function.parameters),
-        return_type,
-        function.language.as_deref().unwrap_or("sql"),
-        function.body.as_deref().unwrap_or_default().trim()
-    )
+        return_type.to_string(dialect),
+        quote_identifier(dialect, language),
+        dollar_tag,
+        body.trim(),
+        dollar_tag
+    ))
 }
 
-fn render_procedure(dialect: &SqlDialect, procedure: &Procedure) -> String {
-    format!(
-        "CREATE PROCEDURE {}({})\nLANGUAGE {}\nAS $$\n{}\n$$;",
+fn render_procedure(dialect: &SqlDialect, procedure: &Procedure) -> Result<String> {
+    let language = required_routine_language(
+        "procedure",
+        &procedure.signature,
+        procedure.language.as_deref(),
+    )?;
+    let body = required_routine_body("procedure", &procedure.signature, procedure.body.as_deref())?;
+    let dollar_tag = dollar_quote_tag(body);
+
+    Ok(format!(
+        "{}\nCREATE PROCEDURE {}({})\nLANGUAGE {}\nAS ${}$\n{}\n${}$;",
+        advanced_object_notice("procedure"),
         qualified_name(dialect, &procedure.name, &procedure.schema),
         render_parameters(dialect, &procedure.parameters),
-        procedure.language.as_deref().unwrap_or("sql"),
-        procedure.body.as_deref().unwrap_or_default().trim()
-    )
+        quote_identifier(dialect, language),
+        dollar_tag,
+        body.trim(),
+        dollar_tag
+    ))
 }
 
-fn render_aggregate(dialect: &SqlDialect, aggregate: &Aggregate) -> String {
-    let mut options = vec![format!(
-        "STYPE = {}",
-        aggregate.state_type.to_string(dialect)
-    )];
-    if let Some(transition_function) = &aggregate.transition_function {
-        options.push(format!(
-            "SFUNC = {}",
-            qualified_iden(dialect, transition_function)
-        ));
-    }
+fn render_aggregate(dialect: &SqlDialect, aggregate: &Aggregate) -> Result<String> {
+    let transition_function = aggregate.transition_function.as_ref().ok_or_else(|| {
+        ShkiError::schema(format!(
+            "Cannot render aggregate '{}' without a transition function",
+            aggregate.signature
+        ))
+    })?;
+    let mut options = vec![
+        format!("SFUNC = {}", qualified_iden(dialect, transition_function)),
+        format!("STYPE = {}", aggregate.state_type.to_string(dialect)),
+    ];
     if let Some(final_function) = &aggregate.final_function {
         options.push(format!(
             "FINALFUNC = {}",
@@ -466,26 +498,46 @@ fn render_aggregate(dialect: &SqlDialect, aggregate: &Aggregate) -> String {
     }
     if let Some(initial_condition) = &aggregate.initial_condition {
         options.push(format!(
-            "INITCOND = '{}'",
-            initial_condition.replace('\'', "''")
+            "INITCOND = {}",
+            quote_sql_literal(initial_condition)
         ));
     }
 
-    format!(
-        "CREATE AGGREGATE {}({}) (\n    {}\n);",
+    Ok(format!(
+        "{}\nCREATE AGGREGATE {}({}) (\n    {}\n);",
+        advanced_object_notice("aggregate"),
         qualified_name(dialect, &aggregate.name, &aggregate.schema),
         render_parameters(dialect, &aggregate.parameters),
         options.join(",\n    ")
-    )
+    ))
 }
 
-fn render_trigger(dialect: &SqlDialect, trigger: &crate::schema::Trigger) -> String {
-    let timing = match trigger.timing.unwrap_or(TriggerTiming::Before) {
+fn render_trigger(dialect: &SqlDialect, trigger: &crate::schema::Trigger) -> Result<String> {
+    let timing = trigger.timing.ok_or_else(|| {
+        ShkiError::schema(format!(
+            "Cannot render trigger '{}' without timing metadata",
+            trigger.name
+        ))
+    })?;
+    let orientation = trigger.orientation.ok_or_else(|| {
+        ShkiError::schema(format!(
+            "Cannot render trigger '{}' without orientation metadata",
+            trigger.name
+        ))
+    })?;
+    if trigger.events.is_empty() {
+        return Err(ShkiError::schema(format!(
+            "Cannot render trigger '{}' without event metadata",
+            trigger.name
+        )));
+    }
+
+    let timing = match timing {
         TriggerTiming::Before => "BEFORE",
         TriggerTiming::After => "AFTER",
         TriggerTiming::InsteadOf => "INSTEAD OF",
     };
-    let events = trigger
+    let mut events = trigger
         .events
         .iter()
         .map(|event| match event {
@@ -494,22 +546,24 @@ fn render_trigger(dialect: &SqlDialect, trigger: &crate::schema::Trigger) -> Str
             TriggerEvent::Delete => "DELETE",
             TriggerEvent::Truncate => "TRUNCATE",
         })
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let orientation = match trigger.orientation.unwrap_or(TriggerOrientation::Statement) {
+        .collect::<Vec<_>>();
+    events.sort_unstable();
+    events.dedup();
+    let orientation = match orientation {
         TriggerOrientation::Row => "ROW",
         TriggerOrientation::Statement => "STATEMENT",
     };
 
-    format!(
-        "CREATE TRIGGER {}\n{} {} ON {}\nFOR EACH {}\nEXECUTE FUNCTION {}();",
+    Ok(format!(
+        "{}\nCREATE TRIGGER {}\n{} {} ON {}\nFOR EACH {}\nEXECUTE FUNCTION {}();",
+        advanced_object_notice("trigger"),
         quote_identifier(dialect, &trigger.name),
         timing,
-        if events.is_empty() { "INSERT" } else { &events },
+        events.join(" OR "),
         qualified_iden(dialect, &trigger.table),
         orientation,
         qualified_iden(dialect, &trigger.function)
-    )
+    ))
 }
 
 fn render_parameters(
@@ -545,6 +599,56 @@ fn qualified_iden(dialect: &SqlDialect, iden: &Iden) -> String {
     qualified_name(dialect, &iden.name, &iden.schema)
 }
 
+fn advanced_object_notice(object_kind: &str) -> String {
+    format!("-- Rendered from currently represented Catalog fields for this {object_kind}.")
+}
+
+fn required_routine_language<'a>(
+    kind: &str,
+    signature: &str,
+    language: Option<&'a str>,
+) -> Result<&'a str> {
+    language
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ShkiError::schema(format!(
+                "Cannot render {kind} '{signature}' without language metadata"
+            ))
+        })
+}
+
+fn required_routine_body<'a>(
+    kind: &str,
+    signature: &str,
+    body: Option<&'a str>,
+) -> Result<&'a str> {
+    body.filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ShkiError::schema(format!(
+                "Cannot render {kind} '{signature}' without body metadata"
+            ))
+        })
+}
+
+fn dollar_quote_tag(body: &str) -> String {
+    let mut index = 0;
+    loop {
+        let tag = if index == 0 {
+            "shki".to_string()
+        } else {
+            format!("shki_{index}")
+        };
+        if !body.contains(&format!("${tag}$")) {
+            return tag;
+        }
+        index += 1;
+    }
+}
+
+fn quote_sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 fn sanitize_file_name(value: &str) -> String {
     let mut sanitized = String::new();
     let mut last_was_separator = false;
@@ -573,7 +677,7 @@ fn ensure_trailing_newline(mut content: String) -> String {
 mod tests {
     use super::*;
     use crate::models::iden::Iden;
-    use crate::schema::{Column, DataType, SqlDialect, Table};
+    use crate::schema::{Column, DataType, FunctionParameter, SqlDialect, Table, Trigger};
 
     #[test]
     fn directory_schema_preview_prints_file_summary_paths_and_contents() {
@@ -596,6 +700,99 @@ mod tests {
         assert!(preview.contains("\\i public/tables/users.sql"));
         assert!(preview.contains("-- public/tables/users.sql"));
         assert!(preview.contains("CREATE TABLE \"public\".\"users\""));
+    }
+
+    #[test]
+    fn function_renderer_uses_safe_dollar_quote_tag_and_requires_metadata() {
+        let function = Function {
+            name: "normalize_name".to_string(),
+            schema: Some("public".to_string()),
+            signature: "normalize_name(text)".to_string(),
+            parameters: vec![FunctionParameter::new(
+                Some("value".to_string()),
+                DataType::Text,
+            )],
+            return_type: Some(DataType::Text),
+            language: Some("sql".to_string()),
+            body: Some("SELECT '$shki$' || value".to_string()),
+        };
+
+        let sql = render_function(&SqlDialect::Postgres, &function)
+            .expect("function should render with represented metadata");
+
+        assert!(sql.contains("Rendered from currently represented Catalog fields"));
+        assert!(sql.contains("AS $shki_1$"));
+        assert!(sql.contains("LANGUAGE \"sql\""));
+        assert!(sql.contains("RETURNS TEXT"));
+
+        let missing_body = Function {
+            body: None,
+            ..function
+        };
+        let error = render_function(&SqlDialect::Postgres, &missing_body)
+            .expect_err("function without a body should not render");
+        assert!(error.to_string().contains("without body metadata"));
+    }
+
+    #[test]
+    fn aggregate_renderer_requires_transition_function_and_escapes_initial_condition() {
+        let aggregate = Aggregate {
+            name: "first_value".to_string(),
+            schema: Some("public".to_string()),
+            signature: "first_value(text)".to_string(),
+            parameters: vec![FunctionParameter::new(None, DataType::Text)],
+            return_type: DataType::Text,
+            state_type: DataType::Text,
+            transition_function: Some(Iden::new("first_sfunc", Some("public".to_string()))),
+            final_function: None,
+            initial_condition: Some("can't".to_string()),
+        };
+
+        let sql = render_aggregate(&SqlDialect::Postgres, &aggregate)
+            .expect("aggregate should render with required metadata");
+
+        assert!(sql.contains("SFUNC = \"public\".\"first_sfunc\""));
+        assert!(sql.contains("STYPE = TEXT"));
+        assert!(sql.contains("INITCOND = 'can''t'"));
+
+        let missing_transition = Aggregate {
+            transition_function: None,
+            ..aggregate
+        };
+        let error = render_aggregate(&SqlDialect::Postgres, &missing_transition)
+            .expect_err("aggregate without transition function should not render");
+        assert!(error.to_string().contains("without a transition function"));
+    }
+
+    #[test]
+    fn trigger_renderer_orders_events_and_requires_complete_metadata() {
+        let trigger = Trigger {
+            name: "users_touch".to_string(),
+            table: Iden::new("users", Some("public".to_string())),
+            function: Iden::new("touch_user", Some("public".to_string())),
+            events: vec![
+                TriggerEvent::Update,
+                TriggerEvent::Insert,
+                TriggerEvent::Update,
+            ],
+            timing: Some(TriggerTiming::Before),
+            orientation: Some(TriggerOrientation::Row),
+        };
+
+        let sql = render_trigger(&SqlDialect::Postgres, &trigger)
+            .expect("trigger should render with complete metadata");
+
+        assert!(sql.contains("BEFORE INSERT OR UPDATE ON"));
+        assert!(sql.contains("FOR EACH ROW"));
+        assert!(sql.contains("EXECUTE FUNCTION \"public\".\"touch_user\"()"));
+
+        let missing_events = Trigger {
+            events: Vec::new(),
+            ..trigger
+        };
+        let error = render_trigger(&SqlDialect::Postgres, &missing_events)
+            .expect_err("trigger without events should not render");
+        assert!(error.to_string().contains("without event metadata"));
     }
 }
 
