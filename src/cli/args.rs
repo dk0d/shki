@@ -71,6 +71,11 @@ pub struct CommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow_database_url: Option<String>,
 
+    /// PostgreSQL major version for embedded Shadow Database compilation
+    #[arg(long, global = true, env = "SHKI_PG_VERSION")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pg_version: Option<u8>,
+
     /// Directory to output and read migrations
     #[arg(short, long, global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
