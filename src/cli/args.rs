@@ -84,6 +84,10 @@ pub struct CommonArgs {
     #[command(flatten)]
     #[serde(default, skip_serializing_if = "MigrationArgs::is_empty")]
     pub migrations: MigrationArgs,
+
+    #[arg(short, long, global = true, default_value_t = false)]
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
+    pub no_color: bool,
 }
 
 #[derive(Debug, Serialize, Args, Default)]
@@ -245,6 +249,14 @@ pub enum Commands {
         /// Output file (defaults to stdout)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// Emit a Directory Schema with main.sql as the canonical entrypoint
+        #[arg(long, alias = "multi-file")]
+        dirs: bool,
+
+        /// Overwrite generated file collisions in directory mode
+        #[arg(long)]
+        force: bool,
 
         /// Schema to dump (Postgres, defaults to public)
         #[arg(long)]

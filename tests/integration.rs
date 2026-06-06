@@ -401,6 +401,8 @@ async fn scenario_cli_dump_json_introspects_schema<T: TestBackend>(ctx: T) {
         command: Commands::Dump {
             format: SchemaExportFormat::Json,
             output: Some(output_path.clone()),
+            dirs: false,
+            force: false,
             schema: ctx.migration_schema().map(str::to_string),
         },
     })
@@ -460,6 +462,8 @@ async fn scenario_cli_dump_sql_writes_declarative_schema<T: TestBackend>(ctx: T)
         command: Commands::Dump {
             format: SchemaExportFormat::Sql,
             output: Some(output_path.clone()),
+            dirs: false,
+            force: false,
             schema: ctx.migration_schema().map(str::to_string),
         },
     })
@@ -471,6 +475,262 @@ async fn scenario_cli_dump_sql_writes_declarative_schema<T: TestBackend>(ctx: T)
     assert!(schema_sql.contains(&table_name));
     assert!(schema_sql.contains("name"));
     assert!(schema_sql.contains("NOT NULL"));
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_dump_dirs_writes_directory_schema<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("directory_users");
+    let output_dir = ctx.root_dir().join("schema-dir");
+    let migration_path = ctx.write_migration(
+        "0001_create_directory_users.sql",
+        &ctx.create_table_sql(&table_name, &[format!("name {} NOT NULL", ctx.text_type())]),
+    );
+
+    manager
+        .apply_migration(&migration_path)
+        .await
+        .expect("failed to apply migration before directory dump");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Dump {
+            format: SchemaExportFormat::Sql,
+            output: Some(output_dir.clone()),
+            dirs: true,
+            force: false,
+            schema: ctx.migration_schema().map(str::to_string),
+        },
+    })
+    .await
+    .expect("dump dirs should write Directory Schema");
+
+    let main_sql = std::fs::read_to_string(output_dir.join("main.sql"))
+        .expect("Directory Schema main.sql should be written");
+    let table_include = main_sql
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("\\i ")
+                .filter(|path| path.ends_with(&format!("tables/{table_name}.sql")))
+        })
+        .expect("main.sql should include the dumped table file");
+    let table_path = output_dir.join(table_include);
+    let table_sql =
+        std::fs::read_to_string(&table_path).expect("Directory Schema table SQL should be written");
+
+    assert!(table_sql.contains("CREATE TABLE"));
+    assert!(table_sql.contains(&table_name));
+
+    let collision = run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Dump {
+            format: SchemaExportFormat::Sql,
+            output: Some(output_dir.clone()),
+            dirs: true,
+            force: false,
+            schema: ctx.migration_schema().map(str::to_string),
+        },
+    })
+    .await;
+    assert!(collision.is_err());
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Dump {
+            format: SchemaExportFormat::Sql,
+            output: Some(output_dir),
+            dirs: true,
+            force: true,
+            schema: ctx.migration_schema().map(str::to_string),
+        },
+    })
+    .await
+    .expect("dump dirs --force should overwrite generated files");
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_dump_dirs_writes_catalog_object_layout() {
+    let ctx = PgTestContext::setup("dump_dirs_catalog_layout").await;
+    let config_path = ctx.write_config();
+    let enum_name = ctx.unique_name("user_status");
+    let table_name = ctx.unique_name("users");
+    let index_name = ctx.unique_name("users_name_idx");
+    let view_name = ctx.unique_name("active_users");
+    let materialized_view_name = ctx.unique_name("user_stats");
+    let function_name = ctx.unique_name("normalize_name");
+    let trigger_function_name = ctx.unique_name("touch_user");
+    let trigger_name = ctx.unique_name("users_touch");
+    let output_dir = ctx.root_dir().join("catalog-schema-dir");
+
+    ctx.pg_pool
+        .execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        .await
+        .expect("failed to create extension fixture");
+    ctx.pg_pool
+        .execute(
+            format!(
+                r#"
+        CREATE TYPE "{schema}"."{enum_name}" AS ENUM ('active', 'inactive');
+        CREATE TABLE "{schema}"."{table_name}" (
+            id integer primary key,
+            name text not null,
+            status "{schema}"."{enum_name}" not null
+        );
+        CREATE INDEX "{index_name}" ON "{schema}"."{table_name}" (name);
+        CREATE VIEW "{schema}"."{view_name}" AS
+            SELECT id, name FROM "{schema}"."{table_name}" WHERE status = 'active';
+        CREATE MATERIALIZED VIEW "{schema}"."{materialized_view_name}" AS
+            SELECT status, count(*) AS count FROM "{schema}"."{table_name}" GROUP BY status;
+        CREATE FUNCTION "{schema}"."{function_name}"(value text)
+        RETURNS text
+        LANGUAGE sql
+        AS $$ SELECT lower(value) $$;
+        CREATE FUNCTION "{schema}"."{trigger_function_name}"()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$ BEGIN RETURN NEW; END; $$;
+        CREATE TRIGGER "{trigger_name}"
+        BEFORE INSERT ON "{schema}"."{table_name}"
+        FOR EACH ROW
+        EXECUTE FUNCTION "{schema}"."{trigger_function_name}"();
+        "#,
+                schema = ctx.schema_name,
+                enum_name = enum_name,
+                table_name = table_name,
+                index_name = index_name,
+                view_name = view_name,
+                materialized_view_name = materialized_view_name,
+                function_name = function_name,
+                trigger_function_name = trigger_function_name,
+                trigger_name = trigger_name,
+            )
+            .as_str(),
+        )
+        .await
+        .expect("failed to create catalog dump fixture");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Dump {
+            format: SchemaExportFormat::Sql,
+            output: Some(output_dir.clone()),
+            dirs: true,
+            force: false,
+            schema: Some(ctx.schema_name.clone()),
+        },
+    })
+    .await
+    .expect("postgres dump dirs should write catalog object layout");
+
+    let main_sql =
+        std::fs::read_to_string(output_dir.join("main.sql")).expect("main.sql should be written");
+    let schema_root = output_dir.join(&ctx.schema_name);
+
+    assert!(main_sql.contains("\\i extensions/pgcrypto.sql"));
+    assert!(main_sql.contains(&format!("\\i {}/types/{}.sql", ctx.schema_name, enum_name)));
+    assert!(main_sql.contains(&format!(
+        "\\i {}/tables/{}.sql",
+        ctx.schema_name, table_name
+    )));
+    assert!(main_sql.contains(&format!(
+        "\\i {}/indexes/{}.sql",
+        ctx.schema_name, index_name
+    )));
+    assert!(main_sql.contains(&format!("\\i {}/views/{}.sql", ctx.schema_name, view_name)));
+    assert!(main_sql.contains(&format!(
+        "\\i {}/materialized_views/{}.sql",
+        ctx.schema_name, materialized_view_name
+    )));
+    let function_include = main_sql
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("\\i ").filter(|path| {
+                path.starts_with(&format!("{}/functions/{}", ctx.schema_name, function_name))
+                    && path.ends_with(".sql")
+            })
+        })
+        .expect("main.sql should include the dumped function file");
+    assert!(main_sql.contains(&format!(
+        "\\i {}/triggers/{}.sql",
+        ctx.schema_name, trigger_name
+    )));
+
+    assert!(
+        std::fs::read_to_string(output_dir.join("extensions/pgcrypto.sql"))
+            .expect("extension file should be written")
+            .contains("CREATE EXTENSION")
+    );
+    assert!(
+        std::fs::read_to_string(schema_root.join("types").join(format!("{enum_name}.sql")))
+            .expect("enum file should be written")
+            .contains("CREATE TYPE")
+    );
+    assert!(
+        std::fs::read_to_string(schema_root.join("tables").join(format!("{table_name}.sql")))
+            .expect("table file should be written")
+            .contains("CREATE TABLE")
+    );
+    assert!(
+        std::fs::read_to_string(
+            schema_root
+                .join("indexes")
+                .join(format!("{index_name}.sql"))
+        )
+        .expect("index file should be written")
+        .contains("CREATE INDEX")
+    );
+    assert!(
+        std::fs::read_to_string(schema_root.join("views").join(format!("{view_name}.sql")))
+            .expect("view file should be written")
+            .contains("CREATE VIEW")
+    );
+    assert!(
+        std::fs::read_to_string(
+            schema_root
+                .join("materialized_views")
+                .join(format!("{materialized_view_name}.sql"))
+        )
+        .expect("materialized view file should be written")
+        .contains("CREATE MATERIALIZED VIEW")
+    );
+    assert!(
+        std::fs::read_to_string(output_dir.join(function_include))
+            .expect("function file should be written")
+            .contains("CREATE FUNCTION")
+    );
+    assert!(
+        std::fs::read_to_string(
+            schema_root
+                .join("triggers")
+                .join(format!("{trigger_name}.sql"))
+        )
+        .expect("trigger file should be written")
+        .contains("CREATE TRIGGER")
+    );
 
     ctx.cleanup().await;
 }
@@ -570,6 +830,14 @@ macro_rules! backend_suite {
             async fn cli_dump_sql_writes_declarative_schema() {
                 scenario_cli_dump_sql_writes_declarative_schema(
                     <$backend as TestBackend>::setup("cli_dump_sql").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn cli_dump_dirs_writes_directory_schema() {
+                scenario_cli_dump_dirs_writes_directory_schema(
+                    <$backend as TestBackend>::setup("cli_dump_dirs").await,
                 )
                 .await;
             }

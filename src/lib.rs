@@ -68,8 +68,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         Commands::Dump {
             format,
             output,
+            dirs,
+            force,
             schema,
-        } => dump::cmd_dump(&config, &format, output.as_deref(), &schema).await,
+        } => dump::cmd_dump(&config, &format, output.as_deref(), dirs, force, &schema).await,
 
         // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
         //
