@@ -319,17 +319,9 @@ pub enum Commands {
     //     force: bool,
     // },
     //
-    // /// Show the diff between schema and database
-    // Diff {
-    //     /// Path to schema file(s) or directory
-    //     #[arg(short, long)]
-    //     schema: Option<PathBuf>,
-    //
-    //     /// Output as SQL instead of summary
-    //     #[arg(long)]
-    //     sql: bool,
-    // },
-    //
+    /// Preview changes between latest Snapshot and current Declarative Schema
+    Diff,
+
     /// List migrations and their status
     #[command(visible_alias = "s")]
     Status,
