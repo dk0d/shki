@@ -6,12 +6,13 @@ use shki::codegen::OutputMode;
 use shki::codegen::lang::typescript::TypescriptFlavor;
 use shki::compiler::{ExternalShadowDBCompiler, SchemaCompiler};
 use shki::config::Config;
+use shki::dump::SchemaExportFormat;
 use shki::migrate::journal::{Journal, MigrationKind};
 use shki::models::iden::Iden;
 use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
 use shki::snapshots::{Introspectable, Snapshot};
-use shki::{Cli, CodegenLanguage, Commands, CommonArgs, DumpFormat, PullFormat};
+use shki::{Cli, CodegenLanguage, Commands, CommonArgs};
 use sqlx::Executor;
 
 use self::common::*;
@@ -375,7 +376,7 @@ async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx:
     ctx.cleanup().await;
 }
 
-async fn scenario_cli_pull_json_introspects_schema<T: TestBackend>(ctx: T) {
+async fn scenario_cli_dump_json_introspects_schema<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();
     let table_name = ctx.unique_name("introspected_users");
@@ -397,14 +398,14 @@ async fn scenario_cli_pull_json_introspects_schema<T: TestBackend>(ctx: T) {
             database_url: Some(ctx.database_url()),
             ..CommonArgs::default()
         },
-        command: Commands::Pull {
-            format: PullFormat::Json,
+        command: Commands::Dump {
+            format: SchemaExportFormat::Json,
             output: Some(output_path.clone()),
             schema: ctx.migration_schema().map(str::to_string),
         },
     })
     .await
-    .expect("pull json should introspect database");
+    .expect("dump json should introspect database");
 
     let snapshot_json = std::fs::read_to_string(&output_path).expect("snapshot should be written");
     let snapshot: Snapshot = serde_json::from_str(&snapshot_json).expect("snapshot should parse");
@@ -457,7 +458,7 @@ async fn scenario_cli_dump_sql_writes_declarative_schema<T: TestBackend>(ctx: T)
             ..CommonArgs::default()
         },
         command: Commands::Dump {
-            format: DumpFormat::Sql,
+            format: SchemaExportFormat::Sql,
             output: Some(output_path.clone()),
             schema: ctx.migration_schema().map(str::to_string),
         },

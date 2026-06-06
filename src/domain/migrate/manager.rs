@@ -553,13 +553,7 @@ impl MigrationManager {
             None
         };
 
-        self.record_migration_in_journal(
-            &up_path,
-            MigrationKind::Custom,
-            None,
-            None,
-            None,
-        )?;
+        self.record_migration_in_journal(&up_path, MigrationKind::Custom, None, None, None)?;
 
         Ok((up_path, down_path))
     }
@@ -660,13 +654,7 @@ impl MigrationManager {
             None
         };
 
-        self.record_migration_in_journal(
-            &up_path,
-            MigrationKind::Custom,
-            None,
-            None,
-            None,
-        )?;
+        self.record_migration_in_journal(&up_path, MigrationKind::Custom, None, None, None)?;
 
         Ok((up_path, down_path))
     }

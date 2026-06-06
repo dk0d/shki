@@ -104,7 +104,8 @@ impl Journal {
 }
 
 fn path_to_journal_string(path: &Path) -> String {
-    path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
+    path.to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 pub fn journal_path(out_dir: &Path) -> PathBuf {

@@ -123,14 +123,20 @@ fn parse_include_directive(line: &str) -> Result<Option<PathBuf>> {
 
     let rest = strip_sql_line_comment(rest.trim());
     if rest.is_empty() {
-        return Err(ShkiError::schema("Declarative Schema include is missing a path"));
+        return Err(ShkiError::schema(
+            "Declarative Schema include is missing a path",
+        ));
     }
 
     Ok(Some(PathBuf::from(unquote_include_path(rest)?)))
 }
 
 fn strip_sql_line_comment(value: &str) -> &str {
-    value.split_once("--").map(|(value, _)| value).unwrap_or(value).trim()
+    value
+        .split_once("--")
+        .map(|(value, _)| value)
+        .unwrap_or(value)
+        .trim()
 }
 
 fn unquote_include_path(value: &str) -> Result<String> {
@@ -214,8 +220,7 @@ mod tests {
     #[test]
     fn supports_quoted_include_paths() {
         let temp = TempDir::new().expect("temp dir");
-        std::fs::write(temp.path().join("main.sql"), "\\i 'user table.sql'\n")
-            .expect("write main");
+        std::fs::write(temp.path().join("main.sql"), "\\i 'user table.sql'\n").expect("write main");
         std::fs::write(temp.path().join("user table.sql"), "SELECT 1;\n").expect("write file");
 
         let loaded = load_declarative_schema(temp.path()).expect("load schema");
@@ -232,7 +237,11 @@ mod tests {
 
         let error = load_declarative_schema(temp.path()).expect_err("cycle should fail");
 
-        assert!(error.to_string().contains("Cyclic Declarative Schema include"));
+        assert!(
+            error
+                .to_string()
+                .contains("Cyclic Declarative Schema include")
+        );
     }
 
     #[test]
@@ -243,6 +252,10 @@ mod tests {
         let error = load_declarative_schema(temp.path().join("schema.sql"))
             .expect_err("unsupported command should fail");
 
-        assert!(error.to_string().contains("Only `\\i` includes are supported"));
+        assert!(
+            error
+                .to_string()
+                .contains("Only `\\i` includes are supported")
+        );
     }
 }
