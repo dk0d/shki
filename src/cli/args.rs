@@ -21,6 +21,7 @@ pub use CodegenLanguage as LanguageArg;
 use crate::codegen::OutputMode;
 use crate::config::{MigrationPrefix, SchemaMode};
 use crate::domain::codegen::lang::typescript::TypescriptFlavor;
+use crate::dump::SchemaExportFormat;
 use crate::schema::SqlDialect;
 
 pub fn get_styles() -> clap::builder::Styles {
@@ -70,7 +71,7 @@ pub struct CommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow_database_url: Option<String>,
 
-    /// Output directory for migrations
+    /// Directory to output and read migrations
     #[arg(short, long, global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub migrations_dir: Option<PathBuf>,
@@ -166,14 +167,6 @@ pub enum CodegenLanguage {
     Protobuf,
 }
 
-#[derive(Debug, clap::ValueEnum, Default, Clone, Serialize)]
-#[value(rename_all = "lowercase")]
-pub enum PullFormat {
-    Json,
-    #[default]
-    Sql,
-}
-
 /// CLI commands
 #[derive(Subcommand, Debug, Serialize)]
 pub enum Commands {
@@ -243,18 +236,17 @@ pub enum Commands {
         edit: bool,
     },
 
-    /// Pull (introspect) the database schema
-    #[command(visible_alias = "introspect")]
-    Pull {
+    /// Dump the live database shape as a Declarative Schema
+    Dump {
         /// Output format
-        #[arg(short, long, default_value_t = PullFormat::default(), value_enum)]
-        format: PullFormat,
+        #[arg(short, long, default_value_t = SchemaExportFormat::default(), value_enum)]
+        format: SchemaExportFormat,
 
         /// Output file (defaults to stdout)
         #[arg(long)]
         output: Option<PathBuf>,
 
-        /// Schema to introspect (Postgres, defaults to public)
+        /// Schema to dump (Postgres, defaults to public)
         #[arg(long)]
         schema: Option<String>,
     },
