@@ -95,6 +95,13 @@ pub struct Config {
 
     #[serde(default)]
     pub codegen: CodegenConfig,
+
+    #[serde(default = "default_false")]
+    pub no_color: bool,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_timeout() -> u64 {
@@ -235,6 +242,7 @@ impl Default for Config {
             shadow_database_url: None,
             breakpoints: true,
             verbose: false,
+            no_color: false,
             codegen: CodegenConfig::default(),
             migrations: MigrationConfig::default(),
             // introspect: IntrospectConfig::default(),
@@ -269,7 +277,10 @@ impl Config {
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
-        let config = config.infer_dialect();
+        let mut config = config.infer_dialect();
+        if let Some(migrations_dir) = &args.migrations_dir {
+            config.out = migrations_dir.clone();
+        }
         Ok(config)
     }
 
