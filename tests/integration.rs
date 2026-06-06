@@ -348,6 +348,40 @@ async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>
     ctx.cleanup().await;
 }
 
+#[tokio::test]
+async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
+    let ctx = PgTestContext::setup("cli_diff").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("diff_users");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table_name} (id integer primary key, name text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            shadow_database_url: Some(shadow.database_url),
+            ..CommonArgs::default()
+        },
+        command: Commands::Diff,
+    })
+    .await
+    .expect("diff should compile declarative schema and preview changes");
+
+    let migration_files = std::fs::read_dir(ctx.migrations_dir())
+        .expect("migrations dir should be readable")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("sql"))
+        .count();
+    assert_eq!(migration_files, 0, "diff preview must not write migrations");
+
+    ctx.cleanup().await;
+}
+
 async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();

@@ -73,8 +73,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
         } => dump::cmd_dump(&config, &format, output.as_deref(), dirs, force, &schema).await,
 
-        // Commands::Diff { schema, sql } => diff::cmd_diff(&config, schema.as_deref(), sql).await,
-        //
+        Commands::Diff => diff::cmd_diff(&config).await,
+
         // Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
         Commands::Codegen {
             out,
