@@ -359,7 +359,7 @@ generate_down = false
         let args = CommonArgs {
             dialect: Some(SqlDialect::Postgres),
             database_url: Some("postgres://from-cli".to_string()),
-            out: Some(PathBuf::from("cli-migrations")),
+            migrations_dir: Some(PathBuf::from("cli-migrations")),
             migrations: crate::cli::args::MigrationArgs {
                 prefix: Some(MigrationPrefix::Timestamp),
                 generate_down: true,
