@@ -65,12 +65,6 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
 
-        Commands::Pull {
-            format,
-            output,
-            schema,
-        } => introspect::cmd_pull(&config, &format, &output.as_deref(), &schema).await,
-
         Commands::Dump {
             format,
             output,
