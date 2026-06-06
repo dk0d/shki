@@ -141,11 +141,24 @@ pub fn render_directory_schema_preview(config: &Config, snapshot: &Snapshot) -> 
         let (name, content) = if config.no_color {
             (format!("-- {}", file.path.to_string_lossy()), file.content)
         } else {
-            let mut content = String::new();
-            let _ = bat::PrettyPrinter::new()
-                .input_from_bytes(file.content.as_bytes())
-                .language("sql")
-                .print_with_writer(Some(&mut content));
+            let content = {
+                let mut buffer = String::new();
+                let res = bat::PrettyPrinter::new()
+                    .input_from_bytes(file.content.as_bytes())
+                    .language("sql")
+                    .print_with_writer(Some(&mut buffer));
+                match res {
+                    Ok(ok) => {
+                        if ok {
+                            buffer
+                        } else {
+                            file.content
+                        }
+                    }
+                    Err(_) => file.content,
+                }
+            };
+
             (
                 format!("{} {}", "--".dimmed(), file.path.to_string_lossy().dimmed()),
                 content,
