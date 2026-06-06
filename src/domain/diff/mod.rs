@@ -9,7 +9,6 @@ use crate::compiler::compiler_from_config;
 use crate::config::Config;
 use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
-use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
 
 use self::rename::RenameScenario;
@@ -64,7 +63,7 @@ pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
 }
 
 pub fn diff_preview(
-    config: &Config,
+    _config: &Config,
     baseline: &Snapshot,
     desired: &Snapshot,
     diff: &SchemaDiff,
@@ -79,7 +78,7 @@ pub fn diff_preview(
         diff.rename_scenarios.len()
     ));
     lines.push(format!(
-        "Destructive changes: {}",
+        "Possible Destructive changes: {}",
         if diff.has_destructive_changes() {
             "yes"
         } else {
@@ -93,12 +92,88 @@ pub fn diff_preview(
         return Ok(lines.join("\n"));
     }
 
-    lines.push("SQL Preview:".to_string());
-    lines.push(String::new());
-    let generator = SqlGenerator::new(&config.dialect);
-    lines.push(generator.generate_string(&diff.statements)?);
+    append_change_summary(&mut lines, diff);
+    append_rename_candidates(&mut lines, &diff.rename_scenarios);
 
     Ok(lines.join("\n"))
+}
+
+fn append_change_summary(lines: &mut Vec<String>, diff: &SchemaDiff) {
+    let summary = diff.summary();
+    lines.push("Changes:".to_string());
+
+    let mut wrote = false;
+    wrote |= append_summary_group(lines, "Schemas created", &summary.schemas_created);
+    wrote |= append_summary_group(lines, "Schemas dropped", &summary.schemas_dropped);
+    wrote |= append_summary_group(lines, "Schemas renamed", &summary.schemas_renamed);
+    wrote |= append_summary_group(lines, "Extensions created", &summary.extensions_created);
+    wrote |= append_summary_group(lines, "Extensions dropped", &summary.extensions_dropped);
+    wrote |= append_summary_group(lines, "Enums created", &summary.enums_created);
+    wrote |= append_summary_group(lines, "Enums dropped", &summary.enums_dropped);
+    wrote |= append_summary_group(lines, "Enums renamed", &summary.enums_renamed);
+    wrote |= append_summary_group(lines, "Enums altered", &summary.enums_altered);
+    wrote |= append_summary_group(lines, "Enum values added", &summary.enum_values_added);
+    wrote |= append_summary_group(lines, "Sequences created", &summary.sequences_created);
+    wrote |= append_summary_group(lines, "Sequences dropped", &summary.sequences_dropped);
+    wrote |= append_summary_group(lines, "Sequences altered", &summary.sequences_altered);
+    wrote |= append_summary_group(lines, "Tables created", &summary.tables_created);
+    wrote |= append_summary_group(lines, "Tables dropped", &summary.tables_dropped);
+    wrote |= append_summary_group(lines, "Tables renamed", &summary.tables_renamed);
+    wrote |= append_summary_group(lines, "Tables altered", &summary.tables_altered);
+    wrote |= append_summary_group(lines, "Columns added", &summary.columns_added);
+    wrote |= append_summary_group(lines, "Columns dropped", &summary.columns_dropped);
+    wrote |= append_summary_group(lines, "Columns renamed", &summary.columns_renamed);
+    wrote |= append_summary_group(lines, "Columns altered", &summary.columns_altered);
+    wrote |= append_summary_group(lines, "Indexes created", &summary.indexes_created);
+    wrote |= append_summary_group(lines, "Indexes dropped", &summary.indexes_dropped);
+    wrote |= append_summary_group(lines, "Indexes renamed", &summary.indexes_renamed);
+    wrote |= append_summary_group(lines, "Constraints added", &summary.constraints_added);
+    wrote |= append_summary_group(lines, "Constraints dropped", &summary.constraints_dropped);
+    wrote |= append_summary_group(lines, "Constraints renamed", &summary.constraints_renamed);
+    wrote |= append_summary_group(lines, "Views created", &summary.views_created);
+    wrote |= append_summary_group(lines, "Views dropped", &summary.views_dropped);
+    wrote |= append_summary_group(lines, "Views altered", &summary.views_altered);
+
+    if !wrote {
+        lines.push("  (no categorized changes)".to_string());
+    }
+}
+
+fn append_summary_group(lines: &mut Vec<String>, label: &str, values: &[String]) -> bool {
+    if values.is_empty() {
+        return false;
+    }
+
+    lines.push(format!("  {}: {}", label, values.len()));
+    for value in values {
+        lines.push(format!("    - {}", value));
+    }
+    true
+}
+
+fn append_rename_candidates(lines: &mut Vec<String>, scenarios: &[RenameScenario]) {
+    lines.push(String::new());
+    lines.push("Rename Candidates:".to_string());
+
+    if scenarios.is_empty() {
+        lines.push("  (none)".to_string());
+        return;
+    }
+
+    for scenario in scenarios {
+        let scope = scenario
+            .table
+            .as_ref()
+            .map(|table| format!(" on table {}", table.name))
+            .unwrap_or_default();
+        lines.push(format!("  {}{}:", scenario.kind, scope));
+
+        for dropped in scenario.dropped.values() {
+            for created in scenario.created.values() {
+                lines.push(format!("    - {} -> {}", dropped.name, created.name));
+            }
+        }
+    }
 }
 
 fn snapshot_label(snapshot: &Snapshot) -> String {
@@ -218,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_preview_prints_summary_and_sql() {
+    fn diff_preview_prints_change_summary_without_sql() {
         let mut baseline = Snapshot::new(SqlDialect::Postgres);
         baseline.id = "baseline".to_string();
         let mut desired = Snapshot::new(SqlDialect::Postgres);
@@ -235,14 +310,43 @@ mod tests {
         };
 
         let preview =
-            diff_preview(&config, &baseline, &desired, &diff).expect("preview should render SQL");
+            diff_preview(&config, &baseline, &desired, &diff).expect("preview should render");
 
         assert!(preview.contains("Shki Diff Preview"));
         assert!(preview.contains("Baseline Snapshot: baseline"));
         assert!(preview.contains("Desired Snapshot: desired"));
         assert!(preview.contains("Statements: 1"));
         assert!(preview.contains("Destructive changes: no"));
-        assert!(preview.contains("CREATE TABLE"));
+        assert!(preview.contains("Changes:"));
+        assert!(preview.contains("Tables created: 1"));
+        assert!(preview.contains("- users"));
+        assert!(preview.contains("Rename Candidates:"));
+        assert!(preview.contains("(none)"));
+        assert!(!preview.contains("CREATE TABLE"));
+        assert!(!preview.contains("SQL Preview"));
+    }
+
+    #[test]
+    fn diff_preview_prints_rename_candidates() {
+        let mut baseline = Snapshot::new(SqlDialect::Postgres);
+        baseline.id = "baseline".to_string();
+        baseline.insert_table(Iden::new("accounts", None), Table::new("accounts"));
+        let mut desired = Snapshot::new(SqlDialect::Postgres);
+        desired.id = "desired".to_string();
+        desired.insert_table(Iden::new("users", None), Table::new("users"));
+        let diff = diff_snapshots(&baseline, &desired).expect("snapshot diff should succeed");
+        let config = Config {
+            dialect: SqlDialect::Postgres,
+            ..Config::default()
+        };
+
+        let preview =
+            diff_preview(&config, &baseline, &desired, &diff).expect("preview should render");
+
+        assert!(preview.contains("Rename candidates: 1"));
+        assert!(preview.contains("Rename Candidates:"));
+        assert!(preview.contains("table:"));
+        assert!(preview.contains("accounts -> users"));
     }
 
     #[test]
