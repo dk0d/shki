@@ -199,21 +199,21 @@ pub enum Commands {
         #[arg(short, long, value_enum)]
         mode: Option<SchemaMode>,
     },
-    // /// Generate a migration from schema changes
-    // #[command(visible_alias = "gen")]
-    // Generate {
-    //     /// Migration name/suffix
-    //     name: Option<String>,
-    //
-    //     /// Path to schema file(s) or directory
-    //     #[arg(short, long)]
-    //     schema: Option<PathBuf>,
-    //
-    //     /// Don't create migration files, just print SQL
-    //     #[arg(long)]
-    //     dry_run: bool,
-    // },
-    //
+    /// Generate a schema-derived migration from the current Declarative Schema
+    #[command(visible_alias = "gen")]
+    Generate {
+        /// Migration name/suffix
+        name: String,
+
+        /// Create a Custom Migration instead of a schema-derived migration
+        #[arg(long)]
+        custom: bool,
+
+        /// Also generate a Down Migration
+        #[arg(short = 'd', long)]
+        with_down: bool,
+    },
+
     /// Apply pending migrations to the database
     #[command(visible_alias = "up")]
     Migrate {

@@ -382,6 +382,72 @@ async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
     ctx.cleanup().await;
 }
 
+#[tokio::test]
+async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
+    let ctx = PgTestContext::setup("cli_generate").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("generated_users");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table_name} (id integer primary key, name text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            shadow_database_url: Some(shadow.database_url),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            name: "create generated users".to_string(),
+            custom: false,
+            with_down: true,
+        },
+    })
+    .await
+    .expect("generate should write migration artifacts");
+
+    let up_path = ctx.migrations_dir().join("0000_create-generated-users.sql");
+    let down_path = ctx
+        .migrations_dir()
+        .join("0000_create-generated-users.down.sql");
+    let snapshot_path = ctx
+        .migrations_dir()
+        .join("_meta/0000_create-generated-users_snapshot.json");
+    let journal_path = ctx.migrations_dir().join("_meta/_journal.json");
+
+    let up_sql = std::fs::read_to_string(&up_path).expect("up migration should exist");
+    assert!(up_sql.contains("-- Type: schema"));
+    assert!(up_sql.contains("CREATE TABLE"));
+    assert!(up_sql.contains(&table_name));
+    assert!(
+        down_path.exists(),
+        "requested down migration should be written"
+    );
+
+    let snapshot_json = std::fs::read_to_string(&snapshot_path).expect("snapshot should exist");
+    let snapshot: Snapshot = serde_json::from_str(&snapshot_json).expect("snapshot should parse");
+    assert!(snapshot.tables().keys().any(|id| id.name == table_name));
+
+    let journal_json = std::fs::read_to_string(&journal_path).expect("journal should exist");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+    assert_eq!(journal.entries.len(), 1);
+    let entry = &journal.entries[0];
+    assert_eq!(entry.migration, "0000_create-generated-users");
+    assert_eq!(entry.kind, MigrationKind::Schema);
+    assert_eq!(entry.snapshot_id.as_deref(), Some(snapshot.id.as_str()));
+    assert!(entry.prev_snapshot_id.is_some());
+    assert_eq!(
+        entry.snapshot_path.as_deref(),
+        Some(snapshot_path.to_string_lossy().as_ref())
+    );
+
+    ctx.cleanup().await;
+}
+
 async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();

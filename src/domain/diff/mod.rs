@@ -28,7 +28,7 @@ pub async fn cmd_diff(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
+pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
     let manager = MigrationManager::new(
         config.out_dir(),
         crate::engines::Engine::detached(config.dialect, config.migrations.entity()),
@@ -63,7 +63,7 @@ fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
     Ok(serde_json::from_str(&content)?)
 }
 
-fn diff_preview(
+pub fn diff_preview(
     config: &Config,
     baseline: &Snapshot,
     desired: &Snapshot,
