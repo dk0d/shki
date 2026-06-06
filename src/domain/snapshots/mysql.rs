@@ -1,5 +1,6 @@
 use crate::engines::mysql::Mysql;
 use crate::models::iden::Iden;
+use crate::queries::mysql::snapshot as mysql_snapshot_queries;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, ForeignKeyConstraint, GeneratedColumn,
     Index, IndexColumn, PrimaryKeyConstraint, Sequence, SqlDialect, Table, UniqueConstraint, View,
@@ -347,7 +348,7 @@ async fn target_schema(
         return Ok(Some(schema.to_string()));
     }
 
-    sqlx::query_scalar::<_, Option<String>>("SELECT DATABASE()")
+    sqlx::query_scalar::<_, Option<String>>(mysql_snapshot_queries::CURRENT_DATABASE)
         .fetch_one(pool)
         .await
         .map_err(Into::into)

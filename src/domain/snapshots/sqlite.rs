@@ -1,6 +1,7 @@
 use crate::Result;
 use crate::engines::sqlite::Sqlite;
 use crate::models::iden::Iden;
+use crate::queries::sqlite::snapshot as sqlite_snapshot_queries;
 use crate::schema::{
     CheckConstraint, Column, Constraint, DataType, DbEnum, ForeignKeyConstraint, Index,
     IndexColumn, IndexMethod, PrimaryKeyConstraint, Sequence, SqlDialect, Table, UniqueConstraint,
@@ -65,16 +66,9 @@ struct SqliteIndexXinfoRow {
 #[async_trait::async_trait]
 impl SnapshotProvider for Sqlite {
     async fn get_schemas(&self, _schema: &Option<String>) -> Result<Vec<String>> {
-        let rows = sqlx::query_as::<_, SqliteSchemaRow>(
-            r#"
-            SELECT name
-            FROM pragma_database_list
-            WHERE name NOT IN ('temp')
-            ORDER BY seq
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, SqliteSchemaRow>(sqlite_snapshot_queries::SCHEMAS)
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows.into_iter().map(|row| row.name).collect())
     }

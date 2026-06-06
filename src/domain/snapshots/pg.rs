@@ -1,9 +1,14 @@
 use crate::engines::pg::Postgres;
 use crate::models::iden::Iden;
+use crate::queries::postgres::snapshot as pg_snapshot_queries;
 use crate::schema::{
-    CheckConstraint, Column, Constraint, DataType, DbEnum, DefaultValue, ForeignKeyConstraint,
-    GeneratedColumn, IdentitySpec, Index, IndexColumn, NullsOrder, PartitionMethod, PartitionSpec,
-    PrimaryKeyConstraint, Sequence, SequenceOptions, SqlDialect, Table, UniqueConstraint,
+    Aggregate, CheckConstraint, Column, ColumnPrivilege, CompositeType, CompositeTypeColumn,
+    Constraint, DataType, DbEnum, DefaultPrivilege, DefaultValue, Domain, DomainConstraint,
+    ForeignKeyConstraint, Function, FunctionParameter, FunctionParameterMode, GeneratedColumn,
+    IdentitySpec, Index, IndexColumn, NullsOrder, ObjectPrivilege, PartitionAttachment,
+    PartitionMethod, PartitionSpec, PrimaryKeyConstraint, Procedure, RevokedDefaultPrivilege,
+    RowLevelSecurity, RowLevelSecurityPolicy, Sequence, SequenceOptions, SqlDialect, Table,
+    Trigger, TriggerEvent, TriggerOrientation, TriggerTiming, UniqueConstraint,
 };
 use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
@@ -55,6 +60,39 @@ struct PgEnumRow {
     name: String,
     values: Vec<String>,
     description: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgCompositeTypeRow {
+    schema: String,
+    name: String,
+    description: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgCompositeTypeColumnRow {
+    schema: String,
+    type_name: String,
+    column_name: String,
+    data_type: String,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgDomainRow {
+    schema: String,
+    name: String,
+    base_type: String,
+    not_null: bool,
+    default: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgDomainConstraintRow {
+    schema: String,
+    domain_name: String,
+    constraint_name: String,
+    constraint_definition: String,
 }
 
 #[derive(Clone, sqlx::FromRow)]
@@ -125,6 +163,127 @@ struct PgViewRow {
     materialized: bool,
     column_name: Option<String>,
     column_data_type: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgFunctionRow {
+    schema: String,
+    name: String,
+    oid: i64,
+    identity_arguments: String,
+    return_type: Option<String>,
+    language: String,
+    body: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgProcedureRow {
+    schema: String,
+    name: String,
+    oid: i64,
+    identity_arguments: String,
+    language: String,
+    body: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgAggregateRow {
+    schema: String,
+    name: String,
+    oid: i64,
+    identity_arguments: String,
+    return_type: String,
+    state_type: String,
+    transition_function_name: Option<String>,
+    transition_function_schema: Option<String>,
+    final_function_name: Option<String>,
+    final_function_schema: Option<String>,
+    initial_condition: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgFunctionParameterRow {
+    function_oid: i64,
+    mode: Option<String>,
+    name: Option<String>,
+    data_type: String,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgTriggerRow {
+    schema: String,
+    table_name: String,
+    name: String,
+    function_name: String,
+    function_schema: String,
+    trigger_type: i32,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgRowLevelSecurityRow {
+    schema: String,
+    table_name: String,
+    forced: bool,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgRowLevelSecurityPolicyRow {
+    schema: String,
+    table_name: String,
+    name: String,
+    permissive: bool,
+    roles: Vec<String>,
+    command: String,
+    using_expression: Option<String>,
+    check_expression: Option<String>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgPartitionAttachmentRow {
+    parent_schema: String,
+    parent_table: String,
+    child_schema: String,
+    child_table: String,
+    bound: String,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgDefaultPrivilegeRow {
+    schema: String,
+    owner_role: String,
+    object_type: String,
+    grantee: String,
+    privilege_type: String,
+    grantable: bool,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgObjectPrivilegeRow {
+    schema: String,
+    object_type: String,
+    object_name: String,
+    grantee: String,
+    privilege_type: String,
+    grantable: bool,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgColumnPrivilegeRow {
+    schema: String,
+    table_name: String,
+    column_name: String,
+    grantee: String,
+    privilege_type: String,
+    grantable: bool,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+struct PgRevokedDefaultPrivilegeRow {
+    schema: String,
+    owner_role: String,
+    object_type: String,
+    grantee: String,
+    privilege_type: String,
 }
 
 impl From<PgInfoSchemaColumnRow> for IdentitySpec {
@@ -270,86 +429,24 @@ impl From<PgInfoSchemaColumnRow> for Column {
 #[async_trait::async_trait]
 impl SnapshotProvider for Postgres {
     async fn get_schemas(&self, schema: &Option<String>) -> Result<Vec<String>> {
-        let schemas: Vec<String> = if let Some(schema) = schema.as_deref() {
-            // Only include the target schema if it exists
-            let exists: Option<String> = sqlx::query_scalar(
-                r#"
-            SELECT schema_name
-            FROM information_schema.schemata
-            WHERE schema_name = $1
-            "#,
-            )
-            .bind(schema)
-            .fetch_optional(&self.pool)
-            .await?;
-            exists.into_iter().collect()
-        } else {
-            sqlx::query_scalar(
-                r#"
-            SELECT schema_name
-            FROM information_schema.schemata
-            WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-            ORDER BY schema_name
-            "#,
-            )
+        let schemas: Vec<String> = sqlx::query_scalar(pg_snapshot_queries::SCHEMAS)
+            .bind(schema.clone())
             .fetch_all(&self.pool)
-            .await?
-        };
+            .await?;
         Ok(schemas)
     }
     async fn get_extensions(&self, _schema: &Option<String>) -> Result<Vec<String>> {
-        let extensions: Vec<String> = sqlx::query_scalar(
-            r#"
-            SELECT extname
-            FROM pg_extension
-            WHERE extname != 'plpgsql'
-            ORDER BY extname
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let extensions: Vec<String> = sqlx::query_scalar(pg_snapshot_queries::EXTENSIONS)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(extensions)
     }
 
     async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<Iden, DbEnum>> {
-        let enum_rows = if let Some(schema) = schema {
-            sqlx::query_as::<_, PgEnumRow>(
-                r#"
-            SELECT
-                n.nspname AS schema,
-                t.typname AS name,
-                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values,
-                obj_description(t.oid, 'pg_type') AS description
-            FROM pg_type t
-            JOIN pg_enum e ON t.oid = e.enumtypid
-            JOIN pg_namespace n ON n.oid = t.typnamespace
-            WHERE n.nspname = $1
-            GROUP BY n.nspname, t.typname, t.oid
-            ORDER BY n.nspname, t.typname
-            "#,
-            )
-            .bind(schema)
+        let enum_rows = sqlx::query_as::<_, PgEnumRow>(pg_snapshot_queries::ENUMS)
+            .bind(schema.clone())
             .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query_as::<_, PgEnumRow>(
-                r#"
-            SELECT
-                n.nspname AS schema,
-                t.typname AS name,
-                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values,
-                obj_description(t.oid, 'pg_type') AS description
-            FROM pg_type t
-            JOIN pg_enum e ON t.oid = e.enumtypid
-            JOIN pg_namespace n ON n.oid = t.typnamespace
-            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-            GROUP BY n.nspname, t.typname, t.oid
-            ORDER BY n.nspname, t.typname
-            "#,
-            )
-            .fetch_all(&self.pool)
-            .await?
-        };
+            .await?;
 
         let mut map = IndexMap::new();
         enum_rows.into_iter().for_each(|row| {
@@ -367,41 +464,77 @@ impl SnapshotProvider for Postgres {
         Ok(map)
     }
 
-    async fn get_sequences(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Sequence>> {
-        let rows = sqlx::query_as::<_, PgSequenceRow>(
-            r#"
-        SELECT
-            schemaname AS schema,
-            sequencename AS name,
-            increment_by AS increment,
-            min_value,
-            max_value,
-            start_value AS start,
-            cache_size AS cache,
-            cycle,
-            format_type(attr.atttypid, attr.atttypmod) AS owned_column_type
-        FROM pg_sequences seq
-        LEFT JOIN pg_class seq_cls
-            ON seq_cls.relname = seq.sequencename
-        LEFT JOIN pg_namespace seq_ns
-            ON seq_ns.oid = seq_cls.relnamespace
-            AND seq_ns.nspname = seq.schemaname
-        LEFT JOIN pg_depend dep
-            ON dep.objid = seq_cls.oid
-            AND dep.classid = 'pg_class'::regclass
-            AND dep.refclassid = 'pg_class'::regclass
-            AND dep.deptype = 'a'
-        LEFT JOIN pg_class table_cls
-            ON table_cls.oid = dep.refobjid
-        LEFT JOIN pg_attribute attr
-            ON attr.attrelid = table_cls.oid
-            AND attr.attnum = dep.refobjsubid
-        WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-        ORDER BY schemaname, sequencename
-        "#,
+    async fn get_composite_types(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, CompositeType>> {
+        let type_rows =
+            sqlx::query_as::<_, PgCompositeTypeRow>(pg_snapshot_queries::COMPOSITE_TYPES)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+        let column_rows = sqlx::query_as::<_, PgCompositeTypeColumnRow>(
+            pg_snapshot_queries::COMPOSITE_TYPE_COLUMNS,
         )
+        .bind(schema.clone())
         .fetch_all(&self.pool)
         .await?;
+        let columns = composite_type_columns_from_rows(column_rows);
+
+        let mut composite_types = IndexMap::new();
+        for row in type_rows {
+            let id = Iden::new(row.name.clone(), Some(row.schema.clone()));
+            composite_types.insert(
+                id.clone(),
+                CompositeType {
+                    name: row.name,
+                    schema: Some(row.schema),
+                    columns: columns.get(&id).cloned().unwrap_or_default(),
+                    description: row.description,
+                },
+            );
+        }
+
+        Ok(composite_types)
+    }
+
+    async fn get_domains(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Domain>> {
+        let domain_rows = sqlx::query_as::<_, PgDomainRow>(pg_snapshot_queries::DOMAINS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
+        let constraint_rows =
+            sqlx::query_as::<_, PgDomainConstraintRow>(pg_snapshot_queries::DOMAIN_CONSTRAINTS)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+        let constraints = domain_constraints_from_rows(constraint_rows);
+
+        let mut domains = IndexMap::new();
+        for row in domain_rows {
+            let id = Iden::new(row.name.clone(), Some(row.schema.clone()));
+            domains.insert(
+                id.clone(),
+                Domain {
+                    name: row.name,
+                    schema: Some(row.schema),
+                    base_type: DataType::parse(row.base_type, &SqlDialect::Postgres),
+                    not_null: row.not_null,
+                    default: row.default,
+                    constraints: constraints.get(&id).cloned().unwrap_or_default(),
+                    description: row.description,
+                },
+            );
+        }
+
+        Ok(domains)
+    }
+
+    async fn get_sequences(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Sequence>> {
+        let rows = sqlx::query_as::<_, PgSequenceRow>(pg_snapshot_queries::SEQUENCES)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut map = IndexMap::new();
         for row in rows {
@@ -428,60 +561,11 @@ impl SnapshotProvider for Postgres {
     }
 
     async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Table>> {
-        let table_rows = if let Some(schema) = schema {
-            sqlx::query_as::<_, PgTableRow>(
-                r#"
-            SELECT
-                n.nspname AS table_schema,
-                c.relname AS table_name,
-                obj_description(c.oid, 'pg_class') AS table_comment,
-                tblsp.spcname AS tablespace,
-                COALESCE(c.reloptions, ARRAY[]::text[]) AS reloptions,
-                pt.partstrat::text AS partition_strategy,
-                pg_get_partkeydef(c.oid) AS partition_keydef
-            FROM pg_class c
-            JOIN pg_namespace n
-                ON n.oid = c.relnamespace
-            LEFT JOIN pg_tablespace tblsp
-                ON tblsp.oid = c.reltablespace
-            LEFT JOIN pg_partitioned_table pt
-                ON pt.partrelid = c.oid
-            WHERE c.relkind IN ('r', 'p')
-                AND n.nspname = $1
-            ORDER BY n.nspname, c.relname
-            "#,
-            )
-            .bind(schema)
+        let table_rows = sqlx::query_as::<_, PgTableRow>(pg_snapshot_queries::TABLES)
+            .bind(schema.clone())
             .fetch_all(&self.pool)
             .await
-            .map_err(ShkiError::Database)?
-        } else {
-            sqlx::query_as::<_, PgTableRow>(
-                r#"
-            SELECT
-                n.nspname AS table_schema,
-                c.relname AS table_name,
-                obj_description(c.oid, 'pg_class') AS table_comment,
-                tblsp.spcname AS tablespace,
-                COALESCE(c.reloptions, ARRAY[]::text[]) AS reloptions,
-                pt.partstrat::text AS partition_strategy,
-                pg_get_partkeydef(c.oid) AS partition_keydef
-            FROM pg_class c
-            JOIN pg_namespace n
-                ON n.oid = c.relnamespace
-            LEFT JOIN pg_tablespace tblsp
-                ON tblsp.oid = c.reltablespace
-            LEFT JOIN pg_partitioned_table pt
-                ON pt.partrelid = c.oid
-            WHERE c.relkind IN ('r', 'p')
-                AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-            ORDER BY n.nspname, c.relname
-            "#,
-            )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(ShkiError::Database)?
-        };
+            .map_err(ShkiError::Database)?;
 
         let mut map = IndexMap::new();
         table_rows.into_iter().for_each(|row| {
@@ -509,31 +593,10 @@ impl SnapshotProvider for Postgres {
         &self,
         schema: &Option<String>,
     ) -> Result<IndexMap<Iden, crate::schema::View>> {
-        let rows = sqlx::query_as::<_, PgViewRow>(
-            r#"
-        SELECT
-            n.nspname AS schema,
-            c.relname AS name,
-            pg_get_viewdef(c.oid, true) AS definition,
-            c.relkind = 'm' AS materialized,
-            a.attname AS column_name,
-            format_type(a.atttypid, a.atttypmod) AS column_data_type
-        FROM pg_class c
-        JOIN pg_namespace n
-            ON n.oid = c.relnamespace
-        LEFT JOIN pg_attribute a
-            ON a.attrelid = c.oid
-            AND a.attnum > 0
-            AND NOT a.attisdropped
-        WHERE ($1::text IS NULL OR n.nspname = $1)
-            AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-            AND c.relkind IN ('v', 'm')
-        ORDER BY n.nspname, c.relname, a.attnum
-        "#,
-        )
-        .bind(schema.clone())
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, PgViewRow>(pg_snapshot_queries::VIEWS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut views = IndexMap::new();
 
@@ -559,64 +622,270 @@ impl SnapshotProvider for Postgres {
         Ok(views)
     }
 
-    async fn get_columns(
+    async fn get_functions(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Function>> {
+        let function_rows = sqlx::query_as::<_, PgFunctionRow>(pg_snapshot_queries::FUNCTIONS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
+        let parameter_rows =
+            sqlx::query_as::<_, PgFunctionParameterRow>(pg_snapshot_queries::FUNCTION_PARAMETERS)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+        let parameters = function_parameters_from_rows(parameter_rows);
+
+        let mut functions = IndexMap::new();
+        for row in function_rows {
+            let signature = format!("{}({})", row.name, row.identity_arguments);
+            functions.insert(
+                Iden::new(signature.clone(), Some(row.schema.clone())),
+                Function {
+                    name: row.name,
+                    schema: Some(row.schema),
+                    signature,
+                    parameters: parameters.get(&row.oid).cloned().unwrap_or_default(),
+                    return_type: row
+                        .return_type
+                        .map(|return_type| DataType::parse(return_type, &SqlDialect::Postgres)),
+                    language: Some(row.language),
+                    body: row.body,
+                },
+            );
+        }
+
+        Ok(functions)
+    }
+
+    async fn get_procedures(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Procedure>> {
+        let procedure_rows = sqlx::query_as::<_, PgProcedureRow>(pg_snapshot_queries::PROCEDURES)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
+        let parameter_rows =
+            sqlx::query_as::<_, PgFunctionParameterRow>(pg_snapshot_queries::PROCEDURE_PARAMETERS)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+        let parameters = function_parameters_from_rows(parameter_rows);
+
+        let mut procedures = IndexMap::new();
+        for row in procedure_rows {
+            let signature = format!("{}({})", row.name, row.identity_arguments);
+            procedures.insert(
+                Iden::new(signature.clone(), Some(row.schema.clone())),
+                Procedure {
+                    name: row.name,
+                    schema: Some(row.schema),
+                    signature,
+                    parameters: parameters.get(&row.oid).cloned().unwrap_or_default(),
+                    language: Some(row.language),
+                    body: row.body,
+                },
+            );
+        }
+
+        Ok(procedures)
+    }
+
+    async fn get_aggregates(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Aggregate>> {
+        let aggregate_rows = sqlx::query_as::<_, PgAggregateRow>(pg_snapshot_queries::AGGREGATES)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
+        let parameter_rows =
+            sqlx::query_as::<_, PgFunctionParameterRow>(pg_snapshot_queries::AGGREGATE_PARAMETERS)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+        let parameters = function_parameters_from_rows(parameter_rows);
+
+        let mut aggregates = IndexMap::new();
+        for row in aggregate_rows {
+            let signature = format!("{}({})", row.name, row.identity_arguments);
+            aggregates.insert(
+                Iden::new(signature.clone(), Some(row.schema.clone())),
+                Aggregate {
+                    name: row.name,
+                    schema: Some(row.schema),
+                    signature,
+                    parameters: parameters.get(&row.oid).cloned().unwrap_or_default(),
+                    return_type: DataType::parse(row.return_type, &SqlDialect::Postgres),
+                    state_type: DataType::parse(row.state_type, &SqlDialect::Postgres),
+                    transition_function: optional_iden(
+                        row.transition_function_name,
+                        row.transition_function_schema,
+                    ),
+                    final_function: optional_iden(
+                        row.final_function_name,
+                        row.final_function_schema,
+                    ),
+                    initial_condition: row.initial_condition,
+                },
+            );
+        }
+
+        Ok(aggregates)
+    }
+
+    async fn get_triggers(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Trigger>> {
+        let rows = sqlx::query_as::<_, PgTriggerRow>(pg_snapshot_queries::TRIGGERS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(triggers_from_rows(rows))
+    }
+
+    async fn get_row_level_security(
         &self,
         schema: &Option<String>,
-    ) -> Result<IndexMap<Iden, IndexMap<String, crate::schema::Column>>> {
-        let rows = sqlx::query_as::<_, PgInfoSchemaColumnRow>(
-            r#"
-        SELECT 
-            c.table_schema,
-            c.table_name,
-            c.column_name,
-            c.data_type,
-            c.udt_name,
-            c.is_nullable,
-            c.column_default,
-            c.collation_name,
-            c.character_maximum_length,
-            c.numeric_precision,
-            c.numeric_scale,
-            c.is_identity,
-            c.identity_generation,
-            c.identity_start,
-            c.identity_increment,
-            c.identity_maximum,
-            c.identity_minimum,
-            c.identity_cycle,
-            c.is_generated,
-            c.generation_expression,
-            c.is_updatable,
-            seq_ns.nspname AS owned_sequence_schema,
-            seq_cls.relname AS owned_sequence_name,
-            serial_seq.increment_by AS owned_sequence_increment,
-            serial_seq.min_value AS owned_sequence_min_value,
-            serial_seq.max_value AS owned_sequence_max_value,
-            serial_seq.start_value AS owned_sequence_start,
-            serial_seq.cache_size AS owned_sequence_cache,
-            serial_seq.cycle AS owned_sequence_cycle
-        FROM information_schema.columns c
-        LEFT JOIN pg_class table_cls
-            ON table_cls.relname = c.table_name
-        LEFT JOIN pg_namespace table_ns
-            ON table_ns.oid = table_cls.relnamespace
-            AND table_ns.nspname = c.table_schema
-        LEFT JOIN pg_class seq_cls
-            ON seq_cls.oid = to_regclass(pg_get_serial_sequence(format('%I.%I', c.table_schema, c.table_name), c.column_name))
-        LEFT JOIN pg_namespace seq_ns
-            ON seq_ns.oid = seq_cls.relnamespace
-        LEFT JOIN pg_sequences serial_seq
-            ON serial_seq.schemaname = seq_ns.nspname
-            AND serial_seq.sequencename = seq_cls.relname
-        WHERE ($1::text IS NULL OR c.table_schema = $1)
-            AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
-            AND (table_cls.oid IS NULL OR table_ns.oid IS NOT NULL)
-        ORDER BY c.table_schema, c.table_name, c.ordinal_position
-        "#,
+    ) -> Result<IndexMap<Iden, RowLevelSecurity>> {
+        let rows =
+            sqlx::query_as::<_, PgRowLevelSecurityRow>(pg_snapshot_queries::ROW_LEVEL_SECURITY)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let table = Iden::new(row.table_name.clone(), Some(row.schema.clone()));
+                (
+                    table.clone(),
+                    RowLevelSecurity {
+                        table,
+                        forced: row.forced,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn get_row_level_security_policies(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, RowLevelSecurityPolicy>> {
+        let rows = sqlx::query_as::<_, PgRowLevelSecurityPolicyRow>(
+            pg_snapshot_queries::ROW_LEVEL_SECURITY_POLICIES,
         )
         .bind(schema.clone())
         .fetch_all(&self.pool)
         .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let id = Iden::new(
+                    format!("{}.{}", row.table_name, row.name),
+                    Some(row.schema.clone()),
+                );
+                (
+                    id,
+                    RowLevelSecurityPolicy {
+                        name: row.name,
+                        table: Iden::new(row.table_name, Some(row.schema)),
+                        permissive: row.permissive,
+                        roles: row.roles,
+                        command: row.command,
+                        using_expression: row.using_expression,
+                        check_expression: row.check_expression,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn get_partition_attachments(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, PartitionAttachment>> {
+        let rows = sqlx::query_as::<_, PgPartitionAttachmentRow>(
+            pg_snapshot_queries::PARTITION_ATTACHMENTS,
+        )
+        .bind(schema.clone())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let id = Iden::new(
+                    format!("{}.{}", row.parent_table, row.child_table),
+                    Some(row.parent_schema.clone()),
+                );
+                (
+                    id,
+                    PartitionAttachment {
+                        parent: Iden::new(row.parent_table, Some(row.parent_schema)),
+                        child: Iden::new(row.child_table, Some(row.child_schema)),
+                        bound: row.bound,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn get_default_privileges(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<DefaultPrivilege>>> {
+        let rows =
+            sqlx::query_as::<_, PgDefaultPrivilegeRow>(pg_snapshot_queries::DEFAULT_PRIVILEGES)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(default_privileges_from_rows(rows))
+    }
+
+    async fn get_object_privileges(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<ObjectPrivilege>>> {
+        let rows =
+            sqlx::query_as::<_, PgObjectPrivilegeRow>(pg_snapshot_queries::OBJECT_PRIVILEGES)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(object_privileges_from_rows(rows))
+    }
+
+    async fn get_column_privileges(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<ColumnPrivilege>>> {
+        let rows =
+            sqlx::query_as::<_, PgColumnPrivilegeRow>(pg_snapshot_queries::COLUMN_PRIVILEGES)
+                .bind(schema.clone())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(column_privileges_from_rows(rows))
+    }
+
+    async fn get_revoked_default_privileges(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<RevokedDefaultPrivilege>>> {
+        let rows = sqlx::query_as::<_, PgRevokedDefaultPrivilegeRow>(
+            pg_snapshot_queries::REVOKED_DEFAULT_PRIVILEGES,
+        )
+        .bind(schema.clone())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(revoked_default_privileges_from_rows(rows))
+    }
+
+    async fn get_columns(
+        &self,
+        schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, IndexMap<String, crate::schema::Column>>> {
+        let rows = sqlx::query_as::<_, PgInfoSchemaColumnRow>(pg_snapshot_queries::COLUMNS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut columns_by_table: IndexMap<Iden, IndexMap<String, Column>> = IndexMap::new();
 
@@ -636,62 +905,10 @@ impl SnapshotProvider for Postgres {
         &self,
         schema: &Option<String>,
     ) -> Result<IndexMap<Iden, Vec<crate::schema::Constraint>>> {
-        let rows = sqlx::query_as::<_, PgConstraintRow>(
-            r#"
-        SELECT
-            src_ns.nspname AS table_schema,
-            src_tbl.relname AS table_name,
-            con.conname AS constraint_name,
-            CASE con.contype
-                WHEN 'p' THEN 'PRIMARY KEY'
-                WHEN 'u' THEN 'UNIQUE'
-                WHEN 'f' THEN 'FOREIGN KEY'
-                WHEN 'c' THEN 'CHECK'
-                ELSE con.contype::text
-            END AS constraint_type,
-            src_col.attname AS column_name,
-            ref_ns.nspname AS foreign_table_schema,
-            ref_tbl.relname AS foreign_table_name,
-            ref_col.attname AS foreign_column_name,
-            con.confupdtype::text AS update_action,
-            con.confdeltype::text AS delete_action,
-            con.condeferrable AS deferrable,
-            con.condeferred AS initially_deferred,
-            CASE
-                WHEN con.contype = 'c' THEN pg_get_constraintdef(con.oid, true)
-                ELSE NULL
-            END AS constraint_expression
-        FROM pg_constraint con
-        JOIN pg_class src_tbl
-            ON src_tbl.oid = con.conrelid
-        JOIN pg_namespace src_ns
-            ON src_ns.oid = src_tbl.relnamespace
-        LEFT JOIN unnest(con.conkey) WITH ORDINALITY AS pos(attnum, ordinality)
-            ON con.contype IN ('p', 'u', 'f')
-        LEFT JOIN pg_attribute src_col
-            ON src_col.attrelid = con.conrelid
-            AND src_col.attnum = pos.attnum
-            AND NOT src_col.attisdropped
-        LEFT JOIN pg_class ref_tbl
-            ON ref_tbl.oid = con.confrelid
-        LEFT JOIN pg_namespace ref_ns
-            ON ref_ns.oid = ref_tbl.relnamespace
-        LEFT JOIN unnest(con.confkey) WITH ORDINALITY AS ref_pos(attnum, ordinality)
-            ON con.contype = 'f'
-            AND ref_pos.ordinality = pos.ordinality
-        LEFT JOIN pg_attribute ref_col
-            ON ref_col.attrelid = con.confrelid
-            AND ref_col.attnum = ref_pos.attnum
-            AND NOT ref_col.attisdropped
-        WHERE con.contype IN ('p', 'u', 'f', 'c')
-            AND ($1::text IS NULL OR src_ns.nspname = $1)
-            AND src_ns.nspname NOT IN ('pg_catalog', 'information_schema')
-        ORDER BY src_ns.nspname, src_tbl.relname, con.conname, pos.ordinality
-        "#,
-        )
-        .bind(schema.clone())
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, PgConstraintRow>(pg_snapshot_queries::CONSTRAINTS)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut constraints_by_table: IndexMap<Iden, IndexMap<String, Constraint>> =
             IndexMap::new();
@@ -782,68 +999,10 @@ impl SnapshotProvider for Postgres {
         &self,
         schema: &Option<String>,
     ) -> Result<IndexMap<Iden, IndexMap<String, Index>>> {
-        let rows = sqlx::query_as::<_, PgIndexRow>(
-            r#"
-        SELECT
-            tbl_ns.nspname AS table_schema,
-            tbl.relname AS table_name,
-            idx.relname AS index_name,
-            am.amname AS index_method,
-            i.indisunique AS is_unique,
-            (con.oid IS NOT NULL) AS is_constraint,
-            pg_get_expr(i.indpred, i.indrelid) AS where_clause,
-            tblsp.spcname AS tablespace,
-            COALESCE(idx.reloptions, ARRAY[]::text[]) AS reloptions,
-            key_col.ordinality > i.indnkeyatts AS is_include_column,
-            att.attname AS column_name,
-            CASE
-                WHEN key_col.attnum = 0 THEN pg_get_indexdef(i.indexrelid, key_col.ordinality::int, false)
-                ELSE NULL
-            END AS expression,
-            opc.opcname AS opclass,
-            CASE
-                WHEN key_col.ordinality <= i.indnkeyatts AND (i.indoption[key_col.ordinality - 1] & 1) = 1 THEN 'DESC'
-                WHEN key_col.ordinality <= i.indnkeyatts THEN 'ASC'
-                ELSE NULL
-            END AS sort_order,
-            CASE
-                WHEN key_col.ordinality <= i.indnkeyatts AND (i.indoption[key_col.ordinality - 1] & 2) = 2 THEN 'FIRST'
-                WHEN key_col.ordinality <= i.indnkeyatts THEN 'LAST'
-                ELSE NULL
-            END AS nulls_order
-        FROM pg_index i
-        JOIN pg_class idx
-            ON idx.oid = i.indexrelid
-        JOIN pg_class tbl
-            ON tbl.oid = i.indrelid
-        JOIN pg_namespace tbl_ns
-            ON tbl_ns.oid = tbl.relnamespace
-        JOIN pg_am am
-            ON am.oid = idx.relam
-        LEFT JOIN pg_tablespace tblsp
-            ON tblsp.oid = idx.reltablespace
-        LEFT JOIN pg_constraint con
-            ON con.conindid = i.indexrelid
-        LEFT JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS key_col(attnum, ordinality)
-            ON TRUE
-        LEFT JOIN LATERAL unnest(i.indclass::oid[]) WITH ORDINALITY AS key_opclass(opclass_oid, ordinality)
-            ON key_opclass.ordinality = key_col.ordinality
-        LEFT JOIN pg_attribute att
-            ON att.attrelid = i.indrelid
-            AND att.attnum = key_col.attnum
-            AND NOT att.attisdropped
-        LEFT JOIN pg_opclass opc
-            ON opc.oid = key_opclass.opclass_oid
-        WHERE ($1::text IS NULL OR tbl_ns.nspname = $1)
-            AND tbl_ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-            AND NOT i.indisprimary
-            AND con.oid IS NULL
-        ORDER BY tbl_ns.nspname, tbl.relname, idx.relname, key_col.ordinality
-            "#,
-        )
-        .bind(schema.clone())
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, PgIndexRow>(pg_snapshot_queries::INDEXES)
+            .bind(schema.clone())
+            .fetch_all(&self.pool)
+            .await?;
 
         indexes_from_rows(rows)
     }
@@ -912,6 +1071,207 @@ fn indexes_from_rows(rows: Vec<PgIndexRow>) -> Result<IndexMap<Iden, IndexMap<St
     }
 
     Ok(indexes_by_table)
+}
+
+fn composite_type_columns_from_rows(
+    rows: Vec<PgCompositeTypeColumnRow>,
+) -> IndexMap<Iden, Vec<CompositeTypeColumn>> {
+    let mut columns = IndexMap::new();
+
+    for row in rows {
+        columns
+            .entry(Iden::new(row.type_name, Some(row.schema)))
+            .or_insert_with(Vec::new)
+            .push(CompositeTypeColumn {
+                name: row.column_name,
+                data_type: DataType::parse(row.data_type, &SqlDialect::Postgres),
+            });
+    }
+
+    columns
+}
+
+fn domain_constraints_from_rows(
+    rows: Vec<PgDomainConstraintRow>,
+) -> IndexMap<Iden, Vec<DomainConstraint>> {
+    let mut constraints = IndexMap::new();
+
+    for row in rows {
+        constraints
+            .entry(Iden::new(row.domain_name, Some(row.schema)))
+            .or_insert_with(Vec::new)
+            .push(DomainConstraint {
+                name: row.constraint_name,
+                definition: row.constraint_definition,
+            });
+    }
+
+    constraints
+}
+
+fn optional_iden(name: Option<String>, schema: Option<String>) -> Option<Iden> {
+    name.filter(|name| !name.is_empty())
+        .map(|name| Iden::new(name, schema))
+}
+
+fn function_parameters_from_rows(
+    rows: Vec<PgFunctionParameterRow>,
+) -> IndexMap<i64, Vec<FunctionParameter>> {
+    let mut parameters = IndexMap::new();
+
+    for row in rows {
+        parameters
+            .entry(row.function_oid)
+            .or_insert_with(Vec::new)
+            .push(FunctionParameter {
+                name: row.name.filter(|name| !name.is_empty()),
+                data_type: DataType::parse(row.data_type, &SqlDialect::Postgres),
+                mode: row.mode.as_deref().and_then(parse_function_parameter_mode),
+            });
+    }
+
+    parameters
+}
+
+fn default_privileges_from_rows(
+    rows: Vec<PgDefaultPrivilegeRow>,
+) -> IndexMap<String, Vec<DefaultPrivilege>> {
+    let mut privileges = IndexMap::new();
+    for row in rows {
+        privileges
+            .entry(row.schema)
+            .or_insert_with(Vec::new)
+            .push(DefaultPrivilege {
+                owner_role: row.owner_role,
+                object_type: row.object_type,
+                grantee: row.grantee,
+                privilege_type: row.privilege_type,
+                grantable: row.grantable,
+            });
+    }
+    privileges
+}
+
+fn object_privileges_from_rows(
+    rows: Vec<PgObjectPrivilegeRow>,
+) -> IndexMap<String, Vec<ObjectPrivilege>> {
+    let mut privileges = IndexMap::new();
+    for row in rows {
+        let schema = row.schema;
+        privileges
+            .entry(schema.clone())
+            .or_insert_with(Vec::new)
+            .push(ObjectPrivilege {
+                object_type: row.object_type,
+                object: Iden::new(row.object_name, Some(schema)),
+                grantee: row.grantee,
+                privilege_type: row.privilege_type,
+                grantable: row.grantable,
+            });
+    }
+    privileges
+}
+
+fn column_privileges_from_rows(
+    rows: Vec<PgColumnPrivilegeRow>,
+) -> IndexMap<String, Vec<ColumnPrivilege>> {
+    let mut privileges = IndexMap::new();
+    for row in rows {
+        let schema = row.schema;
+        privileges
+            .entry(schema.clone())
+            .or_insert_with(Vec::new)
+            .push(ColumnPrivilege {
+                table: Iden::new(row.table_name, Some(schema)),
+                column: row.column_name,
+                grantee: row.grantee,
+                privilege_type: row.privilege_type,
+                grantable: row.grantable,
+            });
+    }
+    privileges
+}
+
+fn revoked_default_privileges_from_rows(
+    rows: Vec<PgRevokedDefaultPrivilegeRow>,
+) -> IndexMap<String, Vec<RevokedDefaultPrivilege>> {
+    let mut privileges = IndexMap::new();
+    for row in rows {
+        privileges
+            .entry(row.schema)
+            .or_insert_with(Vec::new)
+            .push(RevokedDefaultPrivilege {
+                owner_role: row.owner_role,
+                object_type: row.object_type,
+                grantee: row.grantee,
+                privilege_type: row.privilege_type,
+            });
+    }
+    privileges
+}
+
+fn parse_function_parameter_mode(mode: &str) -> Option<FunctionParameterMode> {
+    match mode {
+        "IN" => Some(FunctionParameterMode::In),
+        "OUT" => Some(FunctionParameterMode::Out),
+        "INOUT" => Some(FunctionParameterMode::InOut),
+        "VARIADIC" => Some(FunctionParameterMode::Variadic),
+        _ => None,
+    }
+}
+
+fn triggers_from_rows(rows: Vec<PgTriggerRow>) -> IndexMap<Iden, Trigger> {
+    rows.into_iter()
+        .map(|row| {
+            let id = Iden::new(row.name.clone(), Some(row.schema.clone()));
+            (
+                id,
+                Trigger {
+                    name: row.name,
+                    table: Iden::new(row.table_name, Some(row.schema)),
+                    function: Iden::new(row.function_name, Some(row.function_schema)),
+                    events: trigger_events(row.trigger_type),
+                    timing: trigger_timing(row.trigger_type),
+                    orientation: trigger_orientation(row.trigger_type),
+                },
+            )
+        })
+        .collect()
+}
+
+fn trigger_events(trigger_type: i32) -> Vec<TriggerEvent> {
+    let mut events = Vec::new();
+    if trigger_type & 4 != 0 {
+        events.push(TriggerEvent::Insert);
+    }
+    if trigger_type & 8 != 0 {
+        events.push(TriggerEvent::Delete);
+    }
+    if trigger_type & 16 != 0 {
+        events.push(TriggerEvent::Update);
+    }
+    if trigger_type & 32 != 0 {
+        events.push(TriggerEvent::Truncate);
+    }
+    events
+}
+
+fn trigger_timing(trigger_type: i32) -> Option<TriggerTiming> {
+    if trigger_type & 2 != 0 {
+        Some(TriggerTiming::Before)
+    } else if trigger_type & 64 != 0 {
+        Some(TriggerTiming::InsteadOf)
+    } else {
+        Some(TriggerTiming::After)
+    }
+}
+
+fn trigger_orientation(trigger_type: i32) -> Option<TriggerOrientation> {
+    if trigger_type & 1 != 0 {
+        Some(TriggerOrientation::Row)
+    } else {
+        Some(TriggerOrientation::Statement)
+    }
 }
 
 fn is_inline_serial_sequence(row: &PgSequenceRow) -> bool {

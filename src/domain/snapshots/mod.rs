@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use super::migrate::manager::MigrationInfo;
 use super::models::iden::Iden;
 use super::schema::{
-    Catalog, Column, Constraint, DbEnum, Extension, Index, Sequence, SqlDialect, Table, View,
+    Aggregate, Catalog, Column, ColumnPrivilege, CompositeType, Constraint, DbEnum,
+    DefaultPrivilege, Domain, Extension, Function, Index, ObjectPrivilege, PartitionAttachment,
+    Procedure, RevokedDefaultPrivilege, RowLevelSecurity, RowLevelSecurityPolicy, Sequence,
+    SqlDialect, Table, Trigger, View,
 };
 
 /// A snapshot of a database schema
@@ -70,6 +73,14 @@ impl Snapshot {
         self.catalog.flat_enums()
     }
 
+    pub fn composite_types(&self) -> IndexMap<Iden, CompositeType> {
+        self.catalog.flat_composite_types()
+    }
+
+    pub fn domains(&self) -> IndexMap<Iden, Domain> {
+        self.catalog.flat_domains()
+    }
+
     pub fn sequences(&self) -> IndexMap<Iden, Sequence> {
         self.catalog.flat_sequences()
     }
@@ -80,6 +91,50 @@ impl Snapshot {
 
     pub fn views(&self) -> IndexMap<Iden, View> {
         self.catalog.flat_views()
+    }
+
+    pub fn functions(&self) -> IndexMap<Iden, Function> {
+        self.catalog.flat_functions()
+    }
+
+    pub fn procedures(&self) -> IndexMap<Iden, Procedure> {
+        self.catalog.flat_procedures()
+    }
+
+    pub fn aggregates(&self) -> IndexMap<Iden, Aggregate> {
+        self.catalog.flat_aggregates()
+    }
+
+    pub fn triggers(&self) -> IndexMap<Iden, Trigger> {
+        self.catalog.flat_triggers()
+    }
+
+    pub fn row_level_security(&self) -> IndexMap<Iden, RowLevelSecurity> {
+        self.catalog.flat_row_level_security()
+    }
+
+    pub fn row_level_security_policies(&self) -> IndexMap<Iden, RowLevelSecurityPolicy> {
+        self.catalog.flat_row_level_security_policies()
+    }
+
+    pub fn partition_attachments(&self) -> IndexMap<Iden, PartitionAttachment> {
+        self.catalog.flat_partition_attachments()
+    }
+
+    pub fn default_privileges(&self) -> Vec<DefaultPrivilege> {
+        self.catalog.default_privileges()
+    }
+
+    pub fn object_privileges(&self) -> Vec<ObjectPrivilege> {
+        self.catalog.object_privileges()
+    }
+
+    pub fn column_privileges(&self) -> Vec<ColumnPrivilege> {
+        self.catalog.column_privileges()
+    }
+
+    pub fn revoked_default_privileges(&self) -> Vec<RevokedDefaultPrivilege> {
+        self.catalog.revoked_default_privileges()
     }
 
     pub fn set_schemas(&mut self, schemas: Vec<String>) {
@@ -105,6 +160,32 @@ impl Snapshot {
                 .ensure_schema(schema_name)
                 .enums
                 .insert(id.name, db_enum);
+        }
+    }
+
+    pub fn set_composite_types(&mut self, composite_types: IndexMap<Iden, CompositeType>) {
+        for (id, mut composite_type) in composite_types {
+            let schema_name = catalog_schema(&id.schema, &composite_type.schema);
+            if id.schema.is_some() || composite_type.schema.is_some() {
+                composite_type.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .composite_types
+                .insert(id.name, composite_type);
+        }
+    }
+
+    pub fn set_domains(&mut self, domains: IndexMap<Iden, Domain>) {
+        for (id, mut domain) in domains {
+            let schema_name = catalog_schema(&id.schema, &domain.schema);
+            if id.schema.is_some() || domain.schema.is_some() {
+                domain.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .domains
+                .insert(id.name, domain);
         }
     }
 
@@ -147,6 +228,125 @@ impl Snapshot {
         }
     }
 
+    pub fn set_functions(&mut self, functions: IndexMap<Iden, Function>) {
+        for (id, mut function) in functions {
+            let schema_name = catalog_schema(&id.schema, &function.schema);
+            if id.schema.is_some() || function.schema.is_some() {
+                function.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .functions
+                .insert(id.name, function);
+        }
+    }
+
+    pub fn set_procedures(&mut self, procedures: IndexMap<Iden, Procedure>) {
+        for (id, mut procedure) in procedures {
+            let schema_name = catalog_schema(&id.schema, &procedure.schema);
+            if id.schema.is_some() || procedure.schema.is_some() {
+                procedure.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .procedures
+                .insert(id.name, procedure);
+        }
+    }
+
+    pub fn set_aggregates(&mut self, aggregates: IndexMap<Iden, Aggregate>) {
+        for (id, mut aggregate) in aggregates {
+            let schema_name = catalog_schema(&id.schema, &aggregate.schema);
+            if id.schema.is_some() || aggregate.schema.is_some() {
+                aggregate.schema = Some(schema_name.clone());
+            }
+            self.catalog
+                .ensure_schema(schema_name)
+                .aggregates
+                .insert(id.name, aggregate);
+        }
+    }
+
+    pub fn set_triggers(&mut self, triggers: IndexMap<Iden, Trigger>) {
+        for (id, trigger) in triggers {
+            let schema_name = id
+                .schema
+                .clone()
+                .or_else(|| trigger.table.schema.clone())
+                .unwrap_or_else(|| "public".to_string());
+            self.catalog
+                .ensure_schema(schema_name)
+                .triggers
+                .insert(id.name, trigger);
+        }
+    }
+
+    pub fn set_row_level_security(&mut self, entries: IndexMap<Iden, RowLevelSecurity>) {
+        for (id, entry) in entries {
+            let schema_name = id.schema.clone().unwrap_or_else(|| "public".to_string());
+            self.catalog
+                .ensure_schema(schema_name)
+                .row_level_security
+                .insert(id.name, entry);
+        }
+    }
+
+    pub fn set_row_level_security_policies(
+        &mut self,
+        policies: IndexMap<Iden, RowLevelSecurityPolicy>,
+    ) {
+        for (id, policy) in policies {
+            let schema_name = id
+                .schema
+                .clone()
+                .or_else(|| policy.table.schema.clone())
+                .unwrap_or_else(|| "public".to_string());
+            self.catalog
+                .ensure_schema(schema_name)
+                .row_level_security_policies
+                .insert(id.name, policy);
+        }
+    }
+
+    pub fn set_partition_attachments(&mut self, attachments: IndexMap<Iden, PartitionAttachment>) {
+        for (id, attachment) in attachments {
+            let schema_name = id.schema.clone().unwrap_or_else(|| "public".to_string());
+            self.catalog
+                .ensure_schema(schema_name)
+                .partition_attachments
+                .insert(id.name, attachment);
+        }
+    }
+
+    pub fn set_default_privileges(&mut self, privileges: IndexMap<String, Vec<DefaultPrivilege>>) {
+        for (schema_name, privileges) in privileges {
+            self.catalog.ensure_schema(schema_name).default_privileges = privileges;
+        }
+    }
+
+    pub fn set_object_privileges(&mut self, privileges: IndexMap<String, Vec<ObjectPrivilege>>) {
+        for (schema_name, privileges) in privileges {
+            self.catalog.ensure_schema(schema_name).object_privileges = privileges;
+        }
+    }
+
+    pub fn set_column_privileges(&mut self, privileges: IndexMap<String, Vec<ColumnPrivilege>>) {
+        for (schema_name, privileges) in privileges {
+            self.catalog.ensure_schema(schema_name).column_privileges = privileges;
+        }
+    }
+
+    pub fn set_revoked_default_privileges(
+        &mut self,
+        privileges: IndexMap<String, Vec<RevokedDefaultPrivilege>>,
+    ) {
+        for (schema_name, privileges) in privileges {
+            self.catalog
+                .ensure_schema(schema_name)
+                .revoked_default_privileges = privileges;
+        }
+    }
+
     pub fn insert_table(&mut self, id: Iden, table: Table) {
         let mut tables = IndexMap::new();
         tables.insert(id, table);
@@ -177,9 +377,72 @@ pub trait SnapshotProvider {
     async fn get_schemas(&self, schema: &Option<String>) -> Result<Vec<String>>;
     async fn get_extensions(&self, schema: &Option<String>) -> Result<Vec<String>>;
     async fn get_enums(&self, schema: &Option<String>) -> Result<IndexMap<Iden, DbEnum>>;
+    async fn get_composite_types(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, CompositeType>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_domains(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Domain>> {
+        Ok(IndexMap::new())
+    }
     async fn get_sequences(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Sequence>>;
     async fn get_tables(&self, schema: &Option<String>) -> Result<IndexMap<Iden, Table>>;
     async fn get_views(&self, schema: &Option<String>) -> Result<IndexMap<Iden, View>>;
+    async fn get_functions(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Function>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_procedures(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Procedure>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_aggregates(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Aggregate>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_triggers(&self, _schema: &Option<String>) -> Result<IndexMap<Iden, Trigger>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_row_level_security(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, RowLevelSecurity>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_row_level_security_policies(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, RowLevelSecurityPolicy>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_partition_attachments(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<Iden, PartitionAttachment>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_default_privileges(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<DefaultPrivilege>>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_object_privileges(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<ObjectPrivilege>>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_column_privileges(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<ColumnPrivilege>>> {
+        Ok(IndexMap::new())
+    }
+    async fn get_revoked_default_privileges(
+        &self,
+        _schema: &Option<String>,
+    ) -> Result<IndexMap<String, Vec<RevokedDefaultPrivilege>>> {
+        Ok(IndexMap::new())
+    }
     async fn get_columns(
         &self,
         schema: &Option<String>,
@@ -209,7 +472,22 @@ where
 
         snapshot.set_schemas(self.get_schemas(&schema).await?);
         snapshot.set_enums(self.get_enums(&schema).await?);
+        snapshot.set_composite_types(self.get_composite_types(&schema).await?);
+        snapshot.set_domains(self.get_domains(&schema).await?);
         snapshot.set_views(self.get_views(&schema).await?);
+        snapshot.set_functions(self.get_functions(&schema).await?);
+        snapshot.set_procedures(self.get_procedures(&schema).await?);
+        snapshot.set_aggregates(self.get_aggregates(&schema).await?);
+        snapshot.set_triggers(self.get_triggers(&schema).await?);
+        snapshot.set_row_level_security(self.get_row_level_security(&schema).await?);
+        snapshot
+            .set_row_level_security_policies(self.get_row_level_security_policies(&schema).await?);
+        snapshot.set_partition_attachments(self.get_partition_attachments(&schema).await?);
+        snapshot.set_default_privileges(self.get_default_privileges(&schema).await?);
+        snapshot.set_object_privileges(self.get_object_privileges(&schema).await?);
+        snapshot.set_column_privileges(self.get_column_privileges(&schema).await?);
+        snapshot
+            .set_revoked_default_privileges(self.get_revoked_default_privileges(&schema).await?);
         snapshot.set_sequences(self.get_sequences(&schema).await?);
         snapshot.set_extensions(self.get_extensions(&schema).await?);
 
