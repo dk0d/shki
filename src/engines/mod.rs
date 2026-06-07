@@ -19,7 +19,7 @@ use crate::config::Config;
 use crate::migrate::manager::MigrationRow;
 use crate::models::iden::Iden;
 use crate::schema::*;
-use crate::snapshots::{Introspectable, Snapshot, SnapshotProvider};
+use crate::snapshots::SnapshotProvider;
 
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 

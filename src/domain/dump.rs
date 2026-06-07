@@ -686,6 +686,18 @@ fn ensure_trailing_newline(mut content: String) -> String {
     content
 }
 
+pub fn render_snapshot(snapshot: &Snapshot, format: &SchemaExportFormat) -> Result<String> {
+    match format {
+        SchemaExportFormat::Json => snapshot.to_json(),
+        SchemaExportFormat::Sql => {
+            let empty = Snapshot::new(snapshot.dialect);
+            let diff = diff_snapshots(&empty, snapshot)?;
+            let generator = SqlGenerator::new(&snapshot.dialect);
+            generator.generate_string(&diff.statements)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -806,17 +818,5 @@ mod tests {
         let error = render_trigger(&SqlDialect::Postgres, &missing_events)
             .expect_err("trigger without events should not render");
         assert!(error.to_string().contains("without event metadata"));
-    }
-}
-
-pub fn render_snapshot(snapshot: &Snapshot, format: &SchemaExportFormat) -> Result<String> {
-    match format {
-        SchemaExportFormat::Json => snapshot.to_json(),
-        SchemaExportFormat::Sql => {
-            let empty = Snapshot::new(snapshot.dialect);
-            let diff = diff_snapshots(&empty, snapshot)?;
-            let generator = SqlGenerator::new(&snapshot.dialect);
-            generator.generate_string(&diff.statements)
-        }
     }
 }

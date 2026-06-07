@@ -1,0 +1,1 @@
+-- Define custom migration SQL here. Declarative Schema diff/generate is PostgreSQL-only for now.

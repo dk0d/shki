@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use indexmap::IndexMap;
 
 use crate::Result;

@@ -347,9 +347,11 @@ impl RustGenerator {
 
 /// Wrap a type in Option if nullable
 fn wrap_nullable(rust_type: &str, nullable: bool) -> String {
-    nullable
-        .then(|| format!("Option<{}>", rust_type))
-        .unwrap_or_else(|| rust_type.to_string())
+    if nullable {
+        format!("Option<{}>", rust_type)
+    } else {
+        rust_type.to_string()
+    }
 }
 
 /// Make a field name safe for Rust (handle reserved keywords)
@@ -368,10 +370,11 @@ pub fn make_safe_field_name(name: &str) -> String {
         "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
     ];
 
-    RESERVED
-        .contains(&snake.as_str())
-        .then(|| format!("r#{}", snake))
-        .unwrap_or(snake)
+    if RESERVED.contains(&snake.as_str()) {
+        format!("r#{}", snake)
+    } else {
+        snake
+    }
 }
 
 impl RustEnum {

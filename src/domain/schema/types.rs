@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::generator::{SqlOutput, SqlStmt, ToSql};
-
 use super::SqlDialect;
 
 /// Enum type definition (PostgreSQL)

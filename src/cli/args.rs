@@ -19,7 +19,7 @@ use std::path::PathBuf;
 pub use CodegenLanguage as LanguageArg;
 
 use crate::codegen::OutputMode;
-use crate::config::{MigrationPrefix, SchemaMode};
+use crate::config::MigrationPrefix;
 use crate::domain::codegen::lang::typescript::TypescriptFlavor;
 use crate::dump::SchemaExportFormat;
 use crate::schema::SqlDialect;
@@ -222,10 +222,6 @@ pub enum Commands {
         /// Database dialect
         #[arg(long, value_enum)]
         dialect: Option<SqlDialect>,
-
-        /// Schema definition language (sql or lua)
-        #[arg(short, long, value_enum)]
-        mode: Option<SchemaMode>,
     },
     /// Generate a schema-derived migration from the current Declarative Schema
     #[command(visible_alias = "gen")]

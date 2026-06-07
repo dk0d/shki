@@ -1,0 +1,6 @@
+-- Define the intended PostgreSQL schema shape here.
+-- Example:
+-- CREATE TABLE users (
+--   id integer PRIMARY KEY,
+--   email text NOT NULL UNIQUE
+-- );
