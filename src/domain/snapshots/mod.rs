@@ -357,11 +357,11 @@ impl Snapshot {
     }
 
     pub fn parse(content: &str) -> crate::Result<Self> {
-        Ok(serde_json::from_str(&content)?)
+        Ok(serde_json::from_str(content)?)
     }
 
     pub fn from_json(snapshot_path: &PathBuf) -> crate::Result<Self> {
-        let content = std::fs::read_to_string(&snapshot_path).map_err(|err| {
+        let content = std::fs::read_to_string(snapshot_path).map_err(|err| {
             ShkiError::schema(format!(
                 "Failed to read baseline Snapshot {}: {}",
                 snapshot_path.display(),
