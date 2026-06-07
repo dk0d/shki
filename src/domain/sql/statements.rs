@@ -456,7 +456,7 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
             }
             write!(&mut sql, ") REFERENCES {} (", ref_table)
                 .expect("writing to String cannot fail");
-            for (idx, col) in c.columns.iter().enumerate() {
+            for (idx, col) in c.references_columns.iter().enumerate() {
                 if idx > 0 {
                     sql.push_str(", ");
                 }
@@ -1235,6 +1235,29 @@ mod tests {
         assert_eq!(
             constraint_definition(&SqlDialect::Mysql, &constraint).to_string(),
             ""
+        );
+    }
+
+    #[test]
+    fn renders_foreign_key_referenced_columns() {
+        let constraint = Constraint::ForeignKey(
+            ForeignKeyConstraint::new(
+                vec!["product_id"],
+                ("product".to_string(), Some("public".to_string())),
+                vec!["id"],
+            )
+            .named("user_product_product_id_fkey"),
+        );
+
+        assert_eq!(
+            add_constraint(
+                &SqlDialect::Postgres,
+                "user_product",
+                &Some("public".to_string()),
+                &constraint,
+            )
+            .to_string(),
+            "ALTER TABLE \"public\".\"user_product\" ADD CONSTRAINT \"user_product_product_id_fkey\" FOREIGN KEY (\"product_id\") REFERENCES \"public\".\"product\" (\"id\");"
         );
     }
 
