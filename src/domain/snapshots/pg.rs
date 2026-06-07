@@ -565,7 +565,7 @@ impl SnapshotProvider for Postgres {
             .bind(schema.clone())
             .fetch_all(&self.pool)
             .await
-            .map_err(ShkiError::Database)?;
+            .map_err(ShkiError::database)?;
 
         let mut map = IndexMap::new();
         table_rows.into_iter().for_each(|row| {
