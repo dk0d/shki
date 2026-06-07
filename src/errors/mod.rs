@@ -1,6 +1,17 @@
+pub mod database_error;
+pub mod diagnostic;
+
 use thiserror::Error;
 
+use self::database_error::DatabaseError;
+
 pub type Result<T> = anyhow::Result<T, ShkiError>;
+
+impl From<sqlx::Error> for ShkiError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::database(error)
+    }
+}
 
 /// Details about a single checksum mismatch between a snapshot and migration file
 #[derive(Debug, Clone)]
@@ -92,7 +103,7 @@ pub enum ShkiError {
     Input(#[from] inquire::InquireError),
 
     #[error("[DB] {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] DatabaseError),
 
     #[error("[IO] {0}")]
     Io(#[from] std::io::Error),
@@ -165,7 +176,16 @@ impl ShkiError {
     }
 
     pub fn database(e: sqlx::Error) -> Self {
-        ShkiError::Database(e)
+        ShkiError::Database(DatabaseError::new(e))
+    }
+
+    pub fn database_with_source(
+        e: sqlx::Error,
+        summary: impl Into<String>,
+        source_name: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
+        ShkiError::Database(DatabaseError::with_source(e, summary, source_name, source))
     }
 
     pub fn schema(msg: impl Into<String>) -> Self {

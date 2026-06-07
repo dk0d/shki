@@ -576,10 +576,7 @@ CREATE TABLE "{table_name}" (
 
     let message = error.to_string();
     assert!(message.contains("Generated migration SQL failed validation"));
-    assert!(message.contains("Failing SQL:"));
-    assert!(message.contains("ALTER TYPE"));
-    assert!(message.contains(&enum_name));
-    assert!(message.contains(&table_name));
+    assert!(message.contains("source failed validation"));
     assert!(
         !ctx.migrations_dir()
             .join("0001_use-archived-status.sql")

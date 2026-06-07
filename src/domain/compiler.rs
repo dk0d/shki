@@ -233,7 +233,7 @@ async fn apply_declarative_schema_sql(
         .map_err(|err| {
             ShkiError::schema(format!(
                 "Failed to apply Declarative Schema to Shadow Database: {}",
-                err
+                err,
             ))
         })?;
 
@@ -265,10 +265,12 @@ async fn validate_generated_diff_sql_with_pool(
         .execute(&pool)
         .await
         .map_err(|err| {
-            ShkiError::migration(format!(
-                "Generated migration SQL failed validation in Shadow Database: {}\nFailing SQL:\n{}",
-                err, generated_sql
-            ))
+            ShkiError::database_with_source(
+                err,
+                "Generated migration SQL failed validation in Shadow Database",
+                "generated migration SQL",
+                generated_sql,
+            )
         })?;
 
     Ok(())
