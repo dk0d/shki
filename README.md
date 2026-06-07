@@ -91,10 +91,10 @@ shki migrate
 
 Declarative Schema compilation requires PostgreSQL execution in a Shadow Database.
 
-By default, `shki` uses managed embedded PostgreSQL. You can pin the embedded PostgreSQL major version:
+By default, `shki` uses managed embedded PostgreSQL. You can pin the embedded PostgreSQL major version on commands that compile a Declarative Schema:
 
 ```bash
-shki generate create_users --shadow-database-postgres-version 16
+shki generate create_users --pg-version 16
 ```
 
 Supported embedded major versions are `14`, `15`, `16`, `17`, and `18`.
@@ -132,14 +132,15 @@ Global options:
 - `-c, --config <PATH>`: config file, default `shki.toml`
 - `-l, --dialect <postgres|mysql|sqlite>`: database dialect
 - `-u, --database-url <URL>`: live database URL, env fallback `DATABASE_URL`
-- `--shadow-database-url <URL>`: external Shadow Database URL
-- `--shadow-database-postgres-version <14|15|16|17|18>`: embedded PostgreSQL major version
-- `--migrations-dir <PATH>`: migration output/read directory
+- `-d, --dir <PATH>`: migration output/read directory
 - `-v, --verbose`: verbose output
-- `--table <NAME>`: migrations table name
-- `--schema <SCHEMA>`: migrations table schema for PostgreSQL
-- `--prefix <index|timestamp|unix>`: migration file name prefix style
-- `--generate-down`: generate Down Migrations by default
+- `--no-color`: disable color output
+
+Command-scoped options:
+
+- `diff`, `generate`, and `codegen` accept `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
+- `create`, `generate`, `migrate`, `status`, and `down` accept migration options such as `--table <NAME>`, `--prefix <index|timestamp|unix>`, and `--generate-down` where applicable.
+- `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, `--serde`, `--sqlx`, and `--no-sqlx`.
 
 | Command                    | Alias  | Purpose                                                      |
 | -------------------------- | ------ | ------------------------------------------------------------ |
@@ -154,6 +155,7 @@ Global options:
 | `status`                   | `s`    | Show migration status and checksum issues                    |
 | `down [count]`             | -      | Apply Down Migrations for local rollback                     |
 | `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape |
+| `drop [migration]`         | -      | Remove a local migration, Down Migration, Snapshot, and Journal entry |
 
 ## Usage Patterns
 
@@ -231,6 +233,14 @@ shki down 1
 
 Down Migrations are optional and intended for local iteration. They are not a recommended production rollback strategy.
 
+### Drop A Local Migration
+
+```bash
+shki drop 0003_add_users
+```
+
+`drop` removes the selected local migration file, matching Down Migration, generated Snapshot, and Journal entry. Pending named drops are non-interactive; dropping an already-applied migration requires confirmation.
+
 ### Dump A Live Database
 
 Export the live database shape as SQL:
@@ -264,17 +274,17 @@ Directory mode writes `main.sql`, top-level `extensions/`, and schema-scoped obj
 By default, `codegen` compiles the current Declarative Schema through the Shadow Database and generates code from that current schema shape:
 
 ```bash
-shki codegen rust --out src/schema
-shki codegen typescript --out src/schema
-shki codegen protobuf --out proto
+shki codegen --output src/schema rust
+shki codegen --output src/schema typescript
+shki codegen --output proto protobuf
 ```
 
-Use `--schema` to generate from a specific Snapshot JSON file, SQL Declarative Schema file, or Directory Schema:
+Use `--source` to generate from a specific Snapshot JSON file, SQL Declarative Schema file, or Directory Schema:
 
 ```bash
-shki codegen rust --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
-shki codegen typescript --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
-shki codegen protobuf --schema migrations/_meta/0000_create_users.snapshot.json --out proto
+shki codegen --source migrations/_meta/0000_create_users.snapshot.json --output src/schema rust
+shki codegen --source migrations/_meta/0000_create_users.snapshot.json --output src/schema typescript
+shki codegen --source migrations/_meta/0000_create_users.snapshot.json --output proto protobuf
 ```
 
 Codegen supports three output modes:
@@ -288,7 +298,7 @@ Configure codegen in `[codegen]`:
 ```toml
 [codegen]
 output = "src/schema"
-mode = "singlemodule"
+format = "singlemodule"
 serde = true
 sqlx = true
 struct_pattern = "{}Row"
@@ -317,8 +327,8 @@ Codegen options:
 
 | Option | Purpose |
 | ------ | ------- |
-| `output` | Default output path when `--out` is not provided. Relative paths resolve from `root`. |
-| `mode` | Output layout: `single`, `singlemodule`, or `modules`. |
+| `output` | Default output path when `--output` is not provided. Relative paths resolve from `root`. |
+| `format` | Output layout: `single`, `singlemodule`, or `modules`. |
 | `struct_derives` | Replaces the default derives attached to generated structs. |
 | `struct_attributes` | Extra raw attributes added above generated structs. |
 | `enum_derives` | Replaces the default derives attached to generated enums. |
@@ -339,7 +349,7 @@ Name resolution order is: explicit rename, default casing, then pattern. Struct 
 
 ## Configuration
 
-Set config in `shki.toml`, environment variables, or CLI flags.
+Set config in `shki.toml`, environment variables, or CLI flags. If `root` is omitted, relative paths resolve from the directory containing the config file. If `root` is set, relative paths such as `schema`, `out`, dump outputs, and codegen outputs resolve from `root`.
 
 Example PostgreSQL Declarative Schema config:
 
@@ -355,7 +365,7 @@ timeout_seconds = 2
 shadow_database_url = "postgres://user:pass@localhost:5432/shki_shadow"
 
 # Optional. Supported: 14, 15, 16, 17, 18.
-shadow_database_postgres_version = 16
+pg_version = 16
 
 [migrations]
 table = "__shki_migrations"
@@ -381,7 +391,7 @@ Environment variables:
 ```bash
 DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
 SHKI_SHADOW_DATABASE_URL='postgres://user:pass@localhost:5432/shki_shadow'
-SHKI_SHADOW_DATABASE_POSTGRES_VERSION=16
+SHKI_PG_VERSION=16
 SHKI_MIGRATIONS__TABLE='__shki_migrations'
 SHKI_MIGRATIONS__PREFIX='timestamp'
 SHKI_MIGRATIONS__GENERATE_DOWN=true
@@ -400,8 +410,9 @@ Implemented or active:
 - `generate` for schema-derived migrations.
 - Custom Migrations via `create` or `generate --custom`.
 - `dump` for SQL, JSON, and Directory Schema export.
+- `drop` for removing local migration artifacts and Journal entries.
 - Migration runner, status, checksum validation, and Down Migrations.
-- Code generation from Snapshot JSON for Rust, TypeScript, and Protobuf.
+- Code generation from current Declarative Schema or Snapshot JSON for Rust, TypeScript, and Protobuf.
 
 Still in progress:
 
