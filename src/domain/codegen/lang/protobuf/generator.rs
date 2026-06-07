@@ -452,7 +452,7 @@ mod tests {
         let enums = IndexMap::new();
         let config = CodegenConfig::default();
 
-        let generator = ProtobufGenerator::default();
+        let generator = ProtobufGenerator;
 
         let (t, r) = generator.sql_type_to_proto(&DataType::Integer, &enums, &config);
         assert_eq!(t, "int32");
@@ -496,7 +496,8 @@ mod tests {
             DbEnum::with_values("user_status", vec!["active", "inactive"]),
         );
         let config = CodegenConfig::default().type_override("jsonb", "JsonValue");
-        let generator = ProtobufGenerator::default();
+
+        let generator = ProtobufGenerator;
 
         let (proto_type, repeated) = generator.sql_type_to_proto(&DataType::JsonB, &enums, &config);
         assert_eq!(proto_type, "JsonValue");
@@ -529,7 +530,8 @@ mod tests {
         let mut snapshot = Snapshot::new(crate::schema::SqlDialect::Postgres);
         snapshot.insert_table(Iden::new("events", None), table);
 
-        let generator = ProtobufGenerator::default();
+        let generator = ProtobufGenerator;
+
         let output = generator.generate(&snapshot, &CodegenConfig::default());
 
         assert_eq!(

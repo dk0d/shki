@@ -1,0 +1,10 @@
+dialect = "{dialect}"
+schema = "schema"
+migrations_dir = "migrations"
+timeout_seconds = 2
+
+[migrations]
+schema = "shki"
+table = "__shki_migrations"
+prefix = "index"
+generate_down = false

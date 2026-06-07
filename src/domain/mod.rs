@@ -17,6 +17,6 @@ pub mod schema;
 pub mod snapshots;
 pub mod sql;
 pub mod status;
-pub mod templates;
+
 pub mod tui;
 pub mod utils;

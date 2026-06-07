@@ -3,19 +3,14 @@ use colored::Colorize;
 use std::path::Path;
 
 use crate::Result;
-use crate::config::{Config, SchemaMode};
 use crate::schema::SqlDialect;
-use crate::templates::{
-    ts_schema_template, ts_schema_types_template, ts_schema_virtual_module_template,
-};
-use crate::utils::resolve_path;
+
+const CONFIG_TEMPLATE: &str = include_str!("templates/shki.toml");
+const POSTGRES_SCHEMA_TEMPLATE: &str = include_str!("templates/postgres_main.sql");
+const CUSTOM_MIGRATION_SCHEMA_TEMPLATE: &str = include_str!("templates/custom_migration_main.sql");
 
 /// Initialize a new shki project
-pub async fn cmd_init(
-    target_dir: &Path,
-    dialect: Option<SqlDialect>,
-    mode: Option<SchemaMode>,
-) -> Result<()> {
+pub async fn cmd_init(target_dir: &Path, dialect: Option<SqlDialect>) -> Result<()> {
     // Create target directory if it doesn't exist
     if !target_dir.exists() {
         std::fs::create_dir_all(target_dir)?;
@@ -31,118 +26,80 @@ pub async fn cmd_init(
         );
         return Ok(());
     }
-    let dialect = dialect.unwrap_or(SqlDialect::Postgres);
-    let config = Config {
-        dialect,
-        ..Config::default()
-    };
-
-    config.save(&config_path)?;
-
-    match mode.unwrap_or_default() {
-        SchemaMode::Typescript => {
-            init_ts_project(target_dir, &config).await?;
-        }
-        SchemaMode::Sql => {
-            // only init the default config and exit
-            init_sql_project(target_dir, &config).await?;
-        }
-    }
+    init_sql_project(target_dir, dialect.unwrap_or(SqlDialect::Postgres)).await?;
 
     Ok(())
 }
 
-async fn init_sql_project(target_dir: &Path, _config: &Config) -> Result<()> {
-    println!("{}", "Initialized shki project (SQL)".green());
+async fn init_sql_project(target_dir: &Path, dialect: SqlDialect) -> Result<()> {
+    let migrations_dir = target_dir.join("migrations");
+    let schema_dir = target_dir.join("schema");
+
+    std::fs::create_dir_all(migrations_dir.join("_meta"))?;
+    std::fs::create_dir_all(&schema_dir)?;
+
+    let config_path = target_dir.join("shki.toml");
+    std::fs::write(&config_path, config_template(dialect))?;
+
+    let schema_path = schema_dir.join("main.sql");
+    if !schema_path.exists() {
+        std::fs::write(&schema_path, schema_template(dialect))?;
+    }
+
+    println!("{}", "Initialized shki Declarative Schema project".green());
     println!();
     println!("  {}: {}", "Directory".cyan(), target_dir.display());
     println!();
     println!("  {}", "Created files:".cyan());
     println!(
-        "    shki.toml        - {}",
+        "    shki.toml             - {}",
         "project configuration".dimmed()
     );
+    println!(
+        "    schema/main.sql       - {}",
+        "Declarative Schema entrypoint".dimmed()
+    );
+    println!(
+        "    migrations/_meta/     - {}",
+        "Snapshot and Journal metadata".dimmed()
+    );
     println!();
     println!("  {}", "Next steps:".cyan());
-    println!("    1. Edit shki.toml to configure your project");
-    println!("    2. Create a SQL schema file (e.g. schema.sql)");
+    println!("    1. Edit shki.toml to set database_url or export DATABASE_URL");
+    println!("    2. Edit schema/main.sql to describe the intended database shape");
+    println!("    3. Run {} to preview changes", "shki diff".yellow());
     println!(
-        "    3. Run {} to create migrations",
-        "shki generate --schema schema.sql".yellow()
+        "    4. Run {} to create migration artifacts",
+        "shki generate <name>".yellow()
     );
+
     Ok(())
 }
 
-/// Initialize a Typescript-based shki project
-async fn init_ts_project(target_dir: &Path, config: &Config) -> Result<()> {
-    let dialect = &config.dialect;
-    let migrations_dir = resolve_path(
-        Some(target_dir.to_path_buf()),
-        config.migrations_dir.clone(),
-    );
-    let schema_dir = resolve_path(Some(target_dir.to_path_buf()), config.schema.clone());
-    let shki_dir = schema_dir.join(".shki");
-    let schema_file = schema_dir.join("index.ts");
+fn config_template(dialect: SqlDialect) -> String {
+    CONFIG_TEMPLATE.replace("{dialect}", config_dialect(dialect))
+}
 
-    // Create directories
-    std::fs::create_dir_all(&migrations_dir)?;
-    std::fs::create_dir_all(migrations_dir.join("_meta"))?;
-    std::fs::create_dir_all(&shki_dir)?;
-
-    // Create schema.lua with starter template
-    if !schema_file.exists() {
-        std::fs::write(&schema_file, ts_schema_template(dialect))?;
+fn config_dialect(dialect: SqlDialect) -> &'static str {
+    match dialect {
+        SqlDialect::Postgres => "postgres",
+        SqlDialect::Mysql => "mysql",
+        SqlDialect::Sqlite => "sqlite",
     }
+}
 
-    // Create Typescript type definitions
-    let shki_types_path = shki_dir.join("schema.d.ts");
-    if !shki_types_path.exists() {
-        std::fs::write(&shki_types_path, ts_schema_types_template(dialect))?;
+fn schema_template(dialect: SqlDialect) -> &'static str {
+    match dialect {
+        SqlDialect::Postgres => POSTGRES_SCHEMA_TEMPLATE,
+        SqlDialect::Mysql | SqlDialect::Sqlite => CUSTOM_MIGRATION_SCHEMA_TEMPLATE,
     }
-    let shki_virtual_module_path = shki_dir.join("schema.ts");
-    if !shki_virtual_module_path.exists() {
-        std::fs::write(
-            &shki_virtual_module_path,
-            ts_schema_virtual_module_template(dialect),
-        )?;
-    }
-
-    println!("{}", "Initialized shki project (TS)".green());
-    println!();
-    println!("  {}: {}", "Directory".cyan(), target_dir.display());
-    println!();
-    println!("  {}", "Created files:".cyan());
-    println!(".");
-    #[rustfmt::skip]
-    println!("├── {}", target_dir.display());
-    #[rustfmt::skip]
-    println!("│   ├── migrations/    - {}", "Migrations directory".dimmed());
-    #[rustfmt::skip]
-    println!("│   ├── schema/           - {}", "Supporting lua files".dimmed());
-    #[rustfmt::skip]
-    println!("│   │   ├── .shki/schema.ts    - {}", "Main entrypoint for schema".dimmed());
-    #[rustfmt::skip]
-    println!("│   │   ├── .shki/schema.d.ts    - {}", "Main entrypoint for schema".dimmed());
-    #[rustfmt::skip]
-    println!("│   │   ├── index.ts    - {}", "Main entrypoint for schema".dimmed());
-    #[rustfmt::skip]
-    println!("│   │   └── tsconfig.ts    - {}", "Main entrypoint for schema".dimmed());
-    #[rustfmt::skip]
-    println!("│   └── shki.toml          - {}", "project configuration".dimmed());
-    println!("  {}", "Next steps:".cyan());
-    println!("    1. Edit schema/index.ts to define your schema");
-
-    #[rustfmt::skip]
-    println!("    2. Run {} to create migrations",
-             "shki generate --schema schema/init.lua".yellow()
-    );
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CommonArgs;
+    use crate::config::Config;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -150,11 +107,32 @@ mod tests {
         let temp_dir = TempDir::new().expect("failed to create temp dir");
         let target_dir = temp_dir.path().join("project");
 
-        cmd_init(&target_dir, Some(SqlDialect::Sqlite), Some(SchemaMode::Sql))
+        cmd_init(&target_dir, Some(SqlDialect::Sqlite))
             .await
             .expect("init should succeed");
 
         assert!(target_dir.join("shki.toml").exists());
         assert!(!temp_dir.path().join("shki.toml").exists());
+    }
+
+    #[tokio::test]
+    async fn init_creates_declarative_schema_project_layout() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let target_dir = temp_dir.path().join("project");
+
+        cmd_init(&target_dir, Some(SqlDialect::Postgres))
+            .await
+            .expect("init should succeed");
+
+        assert!(target_dir.join("shki.toml").exists());
+        assert!(target_dir.join("schema/main.sql").exists());
+        assert!(target_dir.join("migrations/_meta").is_dir());
+        assert!(!target_dir.join("schema/index.ts").exists());
+        assert!(!target_dir.join("schema/.shki/schema.ts").exists());
+
+        let config = Config::load(&target_dir.join("shki.toml"), &CommonArgs::default())
+            .expect("generated config should load");
+        assert_eq!(config.schema_path(), target_dir.join("schema"));
+        assert_eq!(config.out_dir(), target_dir.join("migrations"));
     }
 }

@@ -25,12 +25,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
 
-        Commands::Init {
-            path,
-            dialect,
-            // language,
-            mode,
-        } => init::cmd_init(&path, dialect, mode).await,
+        Commands::Init { path, dialect } => init::cmd_init(&path, dialect).await,
 
         Commands::Create {
             migrations,

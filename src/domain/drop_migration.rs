@@ -38,7 +38,7 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
         return Ok(());
     }
 
-    drop_migration(&manager, &to_drop)?;
+    drop_migration(&manager, to_drop)?;
     Ok(())
 }
 
