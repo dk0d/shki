@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::{
-    CommonArgs, ShkiError, codegen::CodegenConfig, models::iden::Iden, schema::SqlDialect,
-    utils::resolve_path,
+    CodegenArgs, CommonArgs, MigrationArgs, ShadowArgs, ShkiError, codegen::CodegenConfig,
+    models::iden::Iden, schema::SqlDialect, utils::resolve_path,
 };
 use clap::ValueEnum;
 
@@ -59,8 +59,8 @@ pub struct Config {
     #[serde(default)]
     pub dialect: SqlDialect,
 
-    /// Path to schema dir/file (unused when mode is `sql)
-    #[serde(default)]
+    /// Path to schema dir/file entrypoint
+    #[serde(default = "default_schema_dir")]
     pub schema: PathBuf,
 
     /// Output directory for migrations
@@ -103,6 +103,10 @@ pub struct Config {
 
     #[serde(default = "default_false")]
     pub no_color: bool,
+}
+
+fn default_schema_dir() -> PathBuf {
+    default_root().join("schema")
 }
 
 fn default_false() -> bool {
@@ -257,6 +261,51 @@ impl Default for Config {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct MigrationOverride {
+    #[serde(skip_serializing_if = "MigrationArgs::is_empty")]
+    migrations: MigrationArgs,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CodegenOverride {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codegen: Option<CodegenConfigOverride>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct CodegenConfigOverride {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<crate::codegen::OutputMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    serde: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sqlx: Option<bool>,
+}
+
+impl From<&CodegenArgs> for CodegenOverride {
+    fn from(args: &CodegenArgs) -> Self {
+        if args.is_empty() {
+            return Self { codegen: None };
+        }
+
+        Self {
+            codegen: Some(CodegenConfigOverride {
+                output: args.output.clone(),
+                format: args.format,
+                serde: args.serde.then_some(true),
+                sqlx: if args.no_sqlx {
+                    Some(false)
+                } else {
+                    args.sqlx.then_some(true)
+                },
+            }),
+        }
+    }
+}
+
 fn default_schema_path() -> PathBuf {
     PathBuf::from("schema")
 }
@@ -275,16 +324,67 @@ impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
-        let config: Config = Figment::new()
-            .merge(Toml::file(path))
-            .merge(Env::raw())
-            .merge(Env::prefixed("SHKI_").split("__"))
+        let config: Config = Self::base_figment(path)
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         let mut config = config.infer_dialect();
         if let Some(migrations_dir) = &args.migrations_dir {
             config.migrations_dir = migrations_dir.clone();
+        }
+        Ok(config)
+    }
+
+    fn base_figment(path: &std::path::Path) -> Figment {
+        Figment::new()
+            .merge(Toml::file(path))
+            .merge(Env::raw())
+            .merge(Env::prefixed("SHKI_").split("__"))
+    }
+
+    pub fn with_shadow_args(mut self, args: &ShadowArgs) -> crate::Result<Self> {
+        self = Figment::from(Serialized::defaults(self))
+            .merge(Serialized::defaults(args))
+            .extract()
+            .map_err(|e| {
+                ShkiError::config(format!("Failed to apply Shadow Database args: {}", e))
+            })?;
+        Ok(self.infer_dialect())
+    }
+
+    pub fn with_migration_args(mut self, args: &MigrationArgs) -> crate::Result<Self> {
+        self = Figment::from(Serialized::defaults(self))
+            .merge(Serialized::defaults(MigrationOverride {
+                migrations: args.clone(),
+            }))
+            .extract()
+            .map_err(|e| ShkiError::config(format!("Failed to apply migration args: {}", e)))?;
+        Ok(self.infer_dialect())
+    }
+
+    pub fn with_codegen_args(mut self, args: &CodegenArgs) -> crate::Result<Self> {
+        self = Figment::from(Serialized::defaults(self))
+            .merge(Serialized::defaults(CodegenOverride::from(args)))
+            .extract()
+            .map_err(|e| ShkiError::config(format!("Failed to apply codegen args: {}", e)))?;
+        Ok(self.infer_dialect())
+    }
+
+    pub fn with_command_args(
+        self,
+        shadow: Option<&ShadowArgs>,
+        migrations: Option<&MigrationArgs>,
+        codegen: Option<&CodegenArgs>,
+    ) -> crate::Result<Self> {
+        let mut config = self;
+        if let Some(shadow) = shadow {
+            config = config.with_shadow_args(shadow)?;
+        }
+        if let Some(migrations) = migrations {
+            config = config.with_migration_args(migrations)?;
+        }
+        if let Some(codegen) = codegen {
+            config = config.with_codegen_args(codegen)?;
         }
         Ok(config)
     }
@@ -373,21 +473,26 @@ generate_down = false
             std::env::set_var("SHKI_MIGRATIONS__TABLE", "env_migrations");
         }
 
-        let args = CommonArgs {
+        let common = CommonArgs {
             dialect: Some(SqlDialect::Postgres),
             database_url: Some("postgres://from-cli".to_string()),
-            pg_version: Some(17),
             migrations_dir: Some(PathBuf::from("cli-migrations")),
-            migrations: crate::cli::args::MigrationArgs {
-                prefix: Some(MigrationPrefix::Timestamp),
-                generate_down: true,
-                table: None,
-                schema: None,
-            },
             ..CommonArgs::default()
         };
 
-        let config = Config::load(&config_path, &args).expect("config should load");
+        let config = Config::load(&config_path, &common)
+            .expect("config should load")
+            .with_shadow_args(&ShadowArgs {
+                pg_version: Some(17),
+                shadow_database_url: None,
+            })
+            .expect("shadow args should apply")
+            .with_migration_args(&MigrationArgs {
+                prefix: Some(MigrationPrefix::Timestamp),
+                generate_down: true,
+                table: None,
+            })
+            .expect("migration args should apply");
 
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
@@ -403,6 +508,78 @@ generate_down = false
             std::env::remove_var("SHKI_SHADOW_DATABASE_POSTGRES_VERSION");
             std::env::remove_var("SHKI_MIGRATIONS__TABLE");
         }
+    }
+
+    #[test]
+    fn load_does_not_apply_command_scoped_default_overrides() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("shki.toml");
+
+        std::fs::write(
+            &config_path,
+            r#"
+dialect = "postgres"
+
+[codegen]
+sqlx = false
+
+[migrations]
+generate_down = false
+"#,
+        )
+        .expect("failed to write config");
+
+        let config =
+            Config::load(&config_path, &CommonArgs::default()).expect("config should load");
+
+        assert!(!config.codegen.sqlx);
+        assert!(!config.migrations.generate_down);
+    }
+
+    #[test]
+    fn command_scoped_overrides_apply_through_figment() {
+        let config = Config {
+            codegen: CodegenConfig {
+                sqlx: false,
+                ..CodegenConfig::default()
+            },
+            migrations: MigrationConfig {
+                generate_down: false,
+                ..MigrationConfig::default()
+            },
+            ..Config::default()
+        }
+        .with_codegen_args(&CodegenArgs {
+            sqlx: true,
+            ..CodegenArgs::default()
+        })
+        .expect("codegen args should apply")
+        .with_migration_args(&MigrationArgs {
+            generate_down: true,
+            ..MigrationArgs::default()
+        })
+        .expect("migration args should apply");
+
+        assert!(config.codegen.sqlx);
+        assert!(config.migrations.generate_down);
+    }
+
+    #[test]
+    fn codegen_no_sqlx_override_sets_false() {
+        let config = Config {
+            codegen: CodegenConfig {
+                sqlx: true,
+                ..CodegenConfig::default()
+            },
+            ..Config::default()
+        }
+        .with_codegen_args(&CodegenArgs {
+            no_sqlx: true,
+            ..CodegenArgs::default()
+        })
+        .expect("codegen args should apply");
+
+        assert!(!config.codegen.sqlx);
     }
 
     #[test]

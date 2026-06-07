@@ -17,18 +17,7 @@ use self::domain::display::tables::display_config;
 pub const MIGRATION_SPLIT_MARKER: &str = "--> +statement";
 
 pub async fn run(cli: Cli) -> Result<()> {
-    // Load config
-    let mut config = Config::load(&cli.config, &cli.common)?;
-
-    // // Override with CLI args
-    // if let Some(url) = cli.database_url {
-    //     config.database_url = Some(url);
-    // }
-    // if let Some(out) = cli.out {
-    //     config.out = out;
-    // }
-
-    config.verbose = cli.common.verbose;
+    let config = Config::load(&cli.config, &cli.common)?;
 
     match cli.command {
         Commands::Config => {
@@ -44,12 +33,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => init::cmd_init(&path, dialect, mode).await,
 
         Commands::Create {
+            migrations,
             name,
             sql,
             sql_file,
             with_down,
             edit,
         } => {
+            let config = config.with_migration_args(&migrations)?;
             create::cmd_create(
                 &config,
                 &name,
@@ -62,14 +53,28 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Generate {
+            shadow,
+            migrations,
             name,
             custom,
             with_down,
-        } => generate::cmd_generate(&config, &name, custom, with_down).await,
+        } => {
+            let config = config.with_command_args(Some(&shadow), Some(&migrations), None)?;
+            generate::cmd_generate(&config, &name, custom, with_down).await
+        }
 
-        Commands::Status => status::cmd_status(&config).await,
+        Commands::Status { migrations } => {
+            let config = config.with_migration_args(&migrations)?;
+            status::cmd_status(&config).await
+        }
 
-        Commands::Migrate { dry_run } => migrate::cmd_migrate(&config, dry_run).await,
+        Commands::Migrate {
+            migrations,
+            dry_run,
+        } => {
+            let config = config.with_migration_args(&migrations)?;
+            migrate::cmd_migrate(&config, dry_run).await
+        }
 
         Commands::Dump {
             format,
@@ -79,17 +84,29 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
         } => dump::cmd_dump(&config, &format, output.as_deref(), dirs, force, &schema).await,
 
-        Commands::Diff => diff::cmd_diff(&config).await,
+        Commands::Diff { shadow } => {
+            let config = config.with_shadow_args(&shadow)?;
+            diff::cmd_diff(&config).await
+        }
 
         // Commands::Drop { migration } => drop::cmd_drop(&config, &migration).await,
         Commands::Codegen {
-            out,
-            mode,
-            schema,
+            shadow,
+            codegen: codegen_args,
+            source: schema,
             language,
-            verbose,
-        } => codegen::cmd_codegen(&config, schema, mode, out, Some(verbose), language).await,
+        } => {
+            let config = config.with_command_args(Some(&shadow), None, Some(&codegen_args))?;
+            codegen::cmd_codegen(&config, schema, language).await
+        }
 
-        Commands::Down { count, dry_run } => down::cmd_down(&config, count, dry_run).await,
+        Commands::Down {
+            migrations,
+            count,
+            dry_run,
+        } => {
+            let config = config.with_migration_args(&migrations)?;
+            down::cmd_down(&config, count, dry_run).await
+        }
     }
 }

@@ -23,6 +23,7 @@ fn run_codegen<G, W>(
     writer: W,
     snapshot: &Snapshot,
     config: &CodegenConfig,
+    verbose: bool,
 ) -> Result<()>
 where
     G: CodeGenerator,
@@ -30,7 +31,7 @@ where
 {
     let generated = generator.generate(snapshot, config);
 
-    if config.verbose {
+    if verbose {
         println!("{}", writer.format_preview(&generated));
     }
 
@@ -45,47 +46,48 @@ where
 
 pub async fn cmd_codegen(
     config: &Config,
-    schema: Option<PathBuf>,
-    mode: Option<OutputMode>,
-    out: Option<PathBuf>,
-    verbose: Option<bool>,
+    source: Option<PathBuf>,
     language: CodegenLanguage,
 ) -> Result<()> {
-    let snapshot = load_codegen_snapshot(config, schema).await?;
+    let snapshot = load_codegen_snapshot(config, source).await?;
 
-    let output = out
-        .or_else(|| config.codegen.output.clone())
+    let output = config
+        .codegen
+        .output
+        .clone()
         .map(|output| resolve_path(Some(config.root.clone()), output));
 
-    let gen_config = &config
-        .codegen
-        .clone()
-        .mode(mode)
-        .verbose(verbose)
-        .output_dir(output);
+    let gen_config = &config.codegen.clone().output_dir(output);
 
     match language {
-        CodegenLanguage::Rust => {
-            run_codegen(RustGenerator::new(), RustWriter, &snapshot, gen_config)
-        }
+        CodegenLanguage::Rust => run_codegen(
+            RustGenerator::new(),
+            RustWriter,
+            &snapshot,
+            gen_config,
+            config.verbose,
+        ),
         CodegenLanguage::Protobuf => run_codegen(
             ProtobufGenerator::new(),
             ProtobufWriter,
             &snapshot,
             gen_config,
+            config.verbose,
         ),
         CodegenLanguage::Typescript { flavor } => run_codegen(
             TypeScriptGenerator::new(flavor),
             TypeScriptWriter,
             &snapshot,
             gen_config,
+            config.verbose,
         ),
     }
 }
 
-async fn load_codegen_snapshot(config: &Config, schema: Option<PathBuf>) -> Result<Snapshot> {
-    if let Some(schema) = schema {
-        let schema_path = resolve_path(Some(config.root.clone()), schema);
+async fn load_codegen_snapshot(config: &Config, source: Option<PathBuf>) -> Result<Snapshot> {
+    if let Some(source) = source {
+        // let source = source.unwrap_or(config.schema.clone());
+        let schema_path = resolve_path(Some(config.root.clone()), source);
         if schema_path.is_file() {
             let content = std::fs::read_to_string(&schema_path)?;
             if let Ok(snapshot) = serde_json::from_str::<Snapshot>(&content) {

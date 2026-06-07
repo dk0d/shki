@@ -13,7 +13,7 @@ pub struct CodegenConfig {
 
     /// Output mode: single file or module directory
     #[serde(default)]
-    pub mode: OutputMode,
+    pub format: OutputMode,
 
     /// Derives to add to generated structs
     #[serde(default = "default_struct_derives")]
@@ -65,11 +65,6 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub exclude_tables: Vec<String>,
 
-    /// Enable verbose output
-    /// Will print the generated code to stdout as well as writing to files
-    #[serde(default)]
-    pub verbose: bool,
-
     /// The name to use for the `impl_[model].rs` file in module output mode
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub impl_file_name: Option<String>,
@@ -88,9 +83,7 @@ pub enum OutputMode {
     /// This is the default mode and always overwrites any existing
     /// files in the output directory.
     #[default]
-    #[value(name = "single")]
-    #[serde(rename = "single")]
-    SingleFile,
+    File,
 
     /// Generate a single module with separate files for each struct/enum
     ///
@@ -102,7 +95,7 @@ pub enum OutputMode {
     ///
     /// This is the default mode and always overwrites any existing
     /// files in the output directory.
-    SingleModule,
+    Module,
 
     /// Generate a module directory for each struct/enum with
     /// separate files for the struct/enum if not already present,
@@ -154,7 +147,7 @@ impl Default for CodegenConfig {
     fn default() -> Self {
         Self {
             output: None,
-            mode: OutputMode::SingleFile,
+            format: OutputMode::File,
             struct_derives: default_struct_derives(),
             struct_attributes: Vec::new(),
             enum_derives: default_enum_derives(),
@@ -166,7 +159,6 @@ impl Default for CodegenConfig {
             type_overrides: IndexMap::new(),
             serde: false,
             sqlx: true,
-            verbose: false,
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
             impl_file_name: None,
@@ -188,24 +180,24 @@ impl CodegenConfig {
 
     /// Set single file output mode
     pub fn single_file(mut self) -> Self {
-        self.mode = OutputMode::SingleFile;
+        self.format = OutputMode::File;
         self
     }
 
     /// Set single module output mode
     pub fn single_module(mut self) -> Self {
-        self.mode = OutputMode::SingleModule;
+        self.format = OutputMode::Module;
         self
     }
 
     /// Set module output mode
     pub fn modules(mut self) -> Self {
-        self.mode = OutputMode::Modules;
+        self.format = OutputMode::Modules;
         self
     }
 
     pub fn mode(mut self, mode: Option<OutputMode>) -> Self {
-        self.mode = mode.unwrap_or(self.mode);
+        self.format = mode.unwrap_or(self.format);
         self
     }
 
@@ -254,11 +246,6 @@ impl CodegenConfig {
     /// Add an enum attribute
     pub fn enum_attribute(mut self, attr: impl Into<String>) -> Self {
         self.enum_attributes.push(attr.into());
-        self
-    }
-
-    pub fn verbose(mut self, verbose: Option<bool>) -> Self {
-        self.verbose = verbose.unwrap_or(self.verbose);
         self
     }
 

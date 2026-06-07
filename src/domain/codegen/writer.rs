@@ -25,9 +25,9 @@ pub trait CodeWriter {
             .as_ref()
             .ok_or_else(|| ShkiError::Config("No output directory specified".to_string()))?;
 
-        match config.mode {
-            OutputMode::SingleFile => self.write_single_file(code, output_dir, config),
-            OutputMode::SingleModule => self.write_single_module(code, output_dir, config),
+        match config.format {
+            OutputMode::File => self.write_single_file(code, output_dir, config),
+            OutputMode::Module => self.write_single_module(code, output_dir, config),
             OutputMode::Modules => self.write_modules(code, output_dir, config),
         }
     }

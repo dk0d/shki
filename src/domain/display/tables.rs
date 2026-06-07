@@ -284,7 +284,7 @@ mod tests {
             ..Config::default()
         };
         config.migrations.table = "schema_migrations".to_string();
-        config.codegen.mode = OutputMode::SingleModule;
+        config.codegen.format = OutputMode::Module;
         config
             .codegen
             .type_overrides
@@ -305,7 +305,7 @@ mod tests {
         assert!(keys.contains(&"migrations"));
         assert!(keys.contains(&"migrations.table"));
         assert!(keys.contains(&"codegen"));
-        assert!(keys.contains(&"codegen.mode"));
+        assert!(keys.contains(&"codegen.format"));
         assert!(keys.contains(&"codegen.type_overrides.jsonb"));
         assert!(!rows.iter().any(|row| row.value == "<complex>"));
     }
