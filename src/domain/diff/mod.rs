@@ -358,7 +358,7 @@ mod tests {
 
         let mut first = Snapshot::new(SqlDialect::Postgres);
         first.id = "first".to_string();
-        let first_path = meta_dir.join("first_snapshot.json");
+        let first_path = meta_dir.join("first.snapshot.json");
         std::fs::write(
             &first_path,
             serde_json::to_string_pretty(&first).expect("failed to serialize snapshot"),
@@ -367,7 +367,7 @@ mod tests {
 
         let mut second = Snapshot::new(SqlDialect::Postgres);
         second.id = "second".to_string();
-        let second_path = meta_dir.join("second_snapshot.json");
+        let second_path = meta_dir.join("second.snapshot.json");
         std::fs::write(
             &second_path,
             serde_json::to_string_pretty(&second).expect("failed to serialize snapshot"),

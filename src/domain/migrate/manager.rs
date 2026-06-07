@@ -786,7 +786,7 @@ mod tests {
             .record_migration_in_journal(
                 &up_path,
                 MigrationKind::Schema,
-                Some(&manager.meta_dir().join("0000_custom_snapshot.json")),
+                Some(&manager.meta_dir().join("0000_custom.snapshot.json")),
                 Some("snapshot-1".to_string()),
                 Some("snapshot-0".to_string()),
             )
@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(entry.migration, "0000_custom");
         assert_eq!(entry.kind, MigrationKind::Schema);
         let expected_snapshot_path = format!(
-            "{}/_meta/0000_custom_snapshot.json",
+            "{}/_meta/0000_custom.snapshot.json",
             manager.out_dir.to_string_lossy()
         );
         assert_eq!(
