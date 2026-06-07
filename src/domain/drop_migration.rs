@@ -5,7 +5,6 @@ use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, FuzzySelect};
 
-use crate::migrate::journal::JournalEntry;
 use crate::{Config, Result, ShkiError};
 
 use super::migrate::manager::MigrationManager;
@@ -16,7 +15,6 @@ struct LocalMigration {
     up_path: PathBuf,
     down_path: PathBuf,
     applied: bool,
-    journal_entry: Option<JournalEntry>,
 }
 
 /// Drop a migration file
@@ -49,7 +47,6 @@ async fn local_migrations(manager: &MigrationManager) -> Result<Vec<LocalMigrati
         .into_iter()
         .map(|row| row.name)
         .collect::<HashSet<_>>();
-    let journal = manager.load_journal()?;
 
     let mut migrations = manager
         .list_up_migrations()?
@@ -62,11 +59,6 @@ async fn local_migrations(manager: &MigrationManager) -> Result<Vec<LocalMigrati
             Some(LocalMigration {
                 down_path: manager.get_down_migration_path(&name),
                 applied: applied.contains(&name),
-                journal_entry: journal
-                    .entries
-                    .iter()
-                    .find(|entry| entry.migration == name)
-                    .cloned(),
                 name,
                 up_path,
             })
@@ -148,19 +140,7 @@ fn drop_migration(manager: &MigrationManager, migration: &LocalMigration) -> Res
         std::fs::remove_file(&migration.down_path)?;
     }
 
-    let mut removed_snapshots = 0usize;
-    if let Some(snapshot_path) = migration
-        .journal_entry
-        .as_ref()
-        .and_then(|entry| entry.snapshot_path.as_deref())
-    {
-        let path = manager.out_dir.join(snapshot_path);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-            removed_snapshots += 1;
-        }
-    }
-    removed_snapshots += manager.remove_snapshots_for_migration(&migration.name)?;
+    let removed_snapshots = manager.remove_snapshots_for_migration(&migration.name)?;
 
     let mut journal = manager.load_journal()?;
     journal
