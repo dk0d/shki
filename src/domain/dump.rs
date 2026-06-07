@@ -68,7 +68,7 @@ pub async fn export_live_schema(
         }
 
         if let Some(output) = output {
-            let output = resolve_path(None, output);
+            let output = resolve_path(Some(config.root.clone()), output);
             write_directory_schema(&snapshot, &output, force)?;
             println!("{} {}", "Schema written to:".green(), output.display());
         } else {
@@ -81,7 +81,7 @@ pub async fn export_live_schema(
 
     match output {
         Some(path) => {
-            let resolved_path = resolve_path(None, path);
+            let resolved_path = resolve_path(Some(config.root.clone()), path);
             std::fs::write(&resolved_path, &content)?;
             println!(
                 "{} {}",
