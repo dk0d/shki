@@ -240,7 +240,7 @@ pub enum Commands {
         custom: bool,
 
         /// Also generate a Down Migration
-        #[arg(short = 'd', long)]
+        #[arg(long, long = "down")]
         with_down: bool,
     },
 
