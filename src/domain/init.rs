@@ -76,7 +76,10 @@ async fn init_sql_project(target_dir: &Path, _config: &Config) -> Result<()> {
 /// Initialize a Typescript-based shki project
 async fn init_ts_project(target_dir: &Path, config: &Config) -> Result<()> {
     let dialect = &config.dialect;
-    let migrations_dir = resolve_path(Some(target_dir.to_path_buf()), config.out.clone());
+    let migrations_dir = resolve_path(
+        Some(target_dir.to_path_buf()),
+        config.migrations_dir.clone(),
+    );
     let schema_dir = resolve_path(Some(target_dir.to_path_buf()), config.schema.clone());
     let shki_dir = schema_dir.join(".shki");
     let schema_file = schema_dir.join("index.ts");

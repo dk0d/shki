@@ -124,7 +124,7 @@ pub fn display_config(config: &Config) {
         }
     };
 
-    value.iter().for_each(|(k, v)| {
+    for (k, v) in value.iter() {
         let k = match k {
             serde_yaml::Value::String(s) => s.clone().dimmed().to_string(),
             _ => "<complex>".dimmed().to_string(),
@@ -139,7 +139,7 @@ pub fn display_config(config: &Config) {
             }
         };
         builder.push_record([k, v]);
-    });
+    }
 
     let mut table = builder.build();
     let table = table

@@ -64,7 +64,7 @@ pub struct Config {
 
     /// Output directory for migrations
     #[serde(default = "default_out")]
-    pub out: PathBuf,
+    pub migrations_dir: PathBuf,
 
     /// Database connection URL
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,11 +113,11 @@ fn default_timeout() -> u64 {
 }
 
 fn default_root() -> PathBuf {
-    PathBuf::from("./")
+    std::env::current_dir().unwrap_or(PathBuf::from("./"))
 }
 
 fn default_out() -> PathBuf {
-    PathBuf::from("./migrations")
+    default_root().join("migrations")
 }
 
 fn default_true() -> bool {
@@ -241,7 +241,7 @@ impl Default for Config {
             dialect: SqlDialect::default(),
             mode: SchemaMode::default(),
             schema: default_schema_path(),
-            out: default_out(),
+            migrations_dir: default_out(),
             database_url: None,
             shadow_database_url: None,
             pg_version: None,
@@ -284,7 +284,7 @@ impl Config {
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         let mut config = config.infer_dialect();
         if let Some(migrations_dir) = &args.migrations_dir {
-            config.out = migrations_dir.clone();
+            config.migrations_dir = migrations_dir.clone();
         }
         Ok(config)
     }
@@ -320,7 +320,7 @@ impl Config {
 
     /// Get the resolved output directory for migrations
     pub fn out_dir(&self) -> PathBuf {
-        resolve_path(Some(self.root.clone()), &self.out)
+        resolve_path(Some(self.root.clone()), &self.migrations_dir)
     }
 
     /// Get the resolved schema path
@@ -392,7 +392,7 @@ generate_down = false
         assert_eq!(config.dialect, SqlDialect::Postgres);
         assert_eq!(config.database_url.as_deref(), Some("postgres://from-cli"));
         assert_eq!(config.pg_version, Some(17));
-        assert_eq!(config.out, PathBuf::from("cli-migrations"));
+        assert_eq!(config.migrations_dir, PathBuf::from("cli-migrations"));
         assert_eq!(config.migrations.entity().name, "env_migrations");
         assert_eq!(config.migrations.prefix, MigrationPrefix::Timestamp);
         assert!(config.migrations.generate_down);

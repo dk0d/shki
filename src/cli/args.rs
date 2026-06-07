@@ -337,7 +337,7 @@ pub enum Commands {
         #[arg(short, long)]
         out: Option<PathBuf>,
 
-        /// Path to schema file(s) or directory
+        /// Path to schema file(s), schema directory, or snapshot json to use for generation
         #[arg(short, long)]
         schema: Option<PathBuf>,
 
