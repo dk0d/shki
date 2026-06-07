@@ -37,13 +37,12 @@ pub async fn cmd_create(
     let (up_path, down_path) = if let Some(sql_content) = initial_sql.as_deref() {
         if create_down {
             // Create with down migration (empty down template)
-            let (up, _) = migration_manager.create_blank_migration_with_content_and_down(
+            let (up, down) = migration_manager.create_blank_migration_with_content_and_down(
                 name,
                 Some(sql_content),
                 Some("-- Add rollback SQL here\n"),
             )?;
-            let down = migration_manager.get_down_migration_path(&up);
-            (up, Some(down))
+            (up, down)
         } else {
             (
                 migration_manager.create_blank_migration_with_content(name, Some(sql_content))?,

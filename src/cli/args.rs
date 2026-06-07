@@ -390,14 +390,14 @@ pub enum Commands {
         source: Option<PathBuf>,
     },
 
-    // /// Drop a migration file
-    // #[command()]
-    // Drop {
-    //     /// Migration name or index to drop
-    //     #[arg(default_value=None)]
-    //     migration: Option<String>,
-    // },
-    //
+    /// Drop a migration & snapshot (destructive)
+    #[command()]
+    Drop {
+        /// Migration name or index to drop
+        #[arg(default_value=None)]
+        migration: Option<String>,
+    },
+
     /// Rollback (undo) applied migrations using down migration files
     Down {
         #[command(flatten)]

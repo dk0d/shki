@@ -11,6 +11,7 @@ use super::utils::{generate_blank_migration_template, sanitize_migration_name};
 use crate::config::MigrationPrefix;
 use crate::engines::{Engine, EngineDriver};
 use crate::models::iden::Iden;
+use crate::snapshots::Snapshot;
 use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
 use chrono::{DateTime, Utc};
 use petname::Generator;
@@ -270,18 +271,19 @@ impl MigrationManager {
         Ok(migrations)
     }
 
+    /// Get down migration path
+    pub fn get_up_migration_path(&self, up_migration_name: &str) -> PathBuf {
+        self.out_dir.join(format!("{}.sql", up_migration_name))
+    }
+
     /// Get the down migration path for a given up migration
-    pub fn get_down_migration_path(&self, up_migration: &Path) -> PathBuf {
-        let stem = up_migration
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("migration");
-        self.out_dir.join(format!("{}.down.sql", stem))
+    pub fn get_down_migration_path(&self, up_migration_name: &str) -> PathBuf {
+        self.out_dir.join(format!("{}.down.sql", up_migration_name))
     }
 
     /// Check if a down migration exists for a given up migration
-    pub fn has_down_migration(&self, up_migration: &Path) -> bool {
-        self.get_down_migration_path(up_migration).exists()
+    pub fn has_down_migration(&self, up_migration_name: &str) -> bool {
+        self.get_down_migration_path(up_migration_name).exists()
     }
 
     /// Create the migrations table if it doesn't exist
@@ -657,6 +659,44 @@ impl MigrationManager {
         self.record_migration_in_journal(&up_path, MigrationKind::Custom, None, None, None)?;
 
         Ok((up_path, down_path))
+    }
+
+    /// Remove all snapshots linked to a migration name.
+    ///
+    /// Returns the number of snapshot files removed.
+    pub fn remove_snapshots_for_migration(&self, migration_name: &str) -> Result<usize> {
+        let meta_dir = self.out_dir.join("_meta");
+        if !meta_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut removed = 0usize;
+
+        for entry in std::fs::read_dir(&meta_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.file_name().and_then(|name| name.to_str()) == Some("_journal.json") {
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let parsed = Snapshot::from_json(&path)?;
+
+            let is_match = parsed
+                .migration
+                .as_ref()
+                .map(|m| m.name == migration_name)
+                .unwrap_or(false);
+
+            if is_match {
+                std::fs::remove_file(path)?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
     }
 }
 

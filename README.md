@@ -153,7 +153,7 @@ Global options:
 | `migrate`                  | `up`   | Apply pending migrations                                     |
 | `status`                   | `s`    | Show migration status and checksum issues                    |
 | `down [count]`             | -      | Apply Down Migrations for local rollback                     |
-| `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from a Snapshot  |
+| `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape |
 
 ## Usage Patterns
 
@@ -259,13 +259,83 @@ shki dump --dirs
 
 Directory mode writes `main.sql`, top-level `extensions/`, and schema-scoped object directories where supported.
 
-### Generate Code From A Snapshot
+### Generate Code
+
+By default, `codegen` compiles the current Declarative Schema through the Shadow Database and generates code from that current schema shape:
+
+```bash
+shki codegen rust --out src/schema
+shki codegen typescript --out src/schema
+shki codegen protobuf --out proto
+```
+
+Use `--schema` to generate from a specific Snapshot JSON file, SQL Declarative Schema file, or Directory Schema:
 
 ```bash
 shki codegen rust --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
 shki codegen typescript --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
 shki codegen protobuf --schema migrations/_meta/0000_create_users.snapshot.json --out proto
 ```
+
+Codegen supports three output modes:
+
+- `single`: one generated file containing all generated types.
+- `singlemodule`: one module directory with one generated file per type and a generated `mod.rs`.
+- `modules`: one module directory per generated type, intended for projects that keep hand-written impl files next to generated definitions.
+
+Configure codegen in `[codegen]`:
+
+```toml
+[codegen]
+output = "src/schema"
+mode = "singlemodule"
+serde = true
+sqlx = true
+struct_pattern = "{}Row"
+enum_pattern = "Db{}"
+include_tables = ["users", "orders"]
+exclude_tables = ["audit_log"]
+impl_file_name = "impl"
+
+struct_derives = ["Debug", "Clone", "sqlx::FromRow"]
+struct_attributes = ["#[allow(dead_code)]"]
+enum_derives = ["Debug", "Clone", "PartialEq", "sqlx::Type"]
+enum_attributes = ['#[serde(rename_all = "snake_case")]']
+
+[codegen.struct_renames]
+users = "Account"
+
+[codegen.enum_renames]
+user_status = "AccountStatus"
+
+[codegen.type_overrides]
+jsonb = "serde_json::Value"
+"public.money" = "rust_decimal::Decimal"
+```
+
+Codegen options:
+
+| Option | Purpose |
+| ------ | ------- |
+| `output` | Default output path when `--out` is not provided. Relative paths resolve from `root`. |
+| `mode` | Output layout: `single`, `singlemodule`, or `modules`. |
+| `struct_derives` | Replaces the default derives attached to generated structs. |
+| `struct_attributes` | Extra raw attributes added above generated structs. |
+| `enum_derives` | Replaces the default derives attached to generated enums. |
+| `enum_attributes` | Extra raw attributes added above generated enums. |
+| `struct_renames` | Exact table-name to generated struct-name overrides. These apply before `struct_pattern`. |
+| `struct_pattern` | Pattern for generated struct names. `{}` is replaced with the resolved base name. For table `users`, the base is `User`; pattern `{}Row` produces `UserRow`. |
+| `enum_renames` | Exact enum-name to generated enum-name overrides. These apply before `enum_pattern`. |
+| `enum_pattern` | Pattern for generated enum names. `{}` is replaced with the resolved base name. For enum `user_status`, the base is `UserStatus`; pattern `Db{}` produces `DbUserStatus`. |
+| `type_overrides` | SQL type to generated type overrides. Built-in types use lowercase keys like `jsonb`; custom PostgreSQL types may use schema-qualified keys like `public.money`. |
+| `serde` | Adds serde support to generated Rust structs/enums. |
+| `sqlx` | Controls sqlx derives in generated Rust output. Defaults to `true`. |
+| `include_tables` | If non-empty, only listed table names are generated. |
+| `exclude_tables` | Listed table names are skipped. Applied after `include_tables`. |
+| `verbose` | Prints generated code to stdout as well as writing files. |
+| `impl_file_name` | File name stem for hand-written impl files in `modules` mode. |
+
+Name resolution order is: explicit rename, default casing, then pattern. Struct defaults singularize table names and use PascalCase, so `users` becomes `User`. Enum defaults use PascalCase, so `user_status` becomes `UserStatus`.
 
 ## Configuration
 

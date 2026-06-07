@@ -4,8 +4,11 @@ pub mod pg;
 pub mod sqlite;
 mod utils;
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 
+use crate::ShkiError;
 use crate::{Result, config::Config};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -351,6 +354,21 @@ impl Snapshot {
         let mut tables = IndexMap::new();
         tables.insert(id, table);
         self.set_tables(tables);
+    }
+
+    pub fn parse(content: &str) -> crate::Result<Self> {
+        Ok(serde_json::from_str(&content)?)
+    }
+
+    pub fn from_json(snapshot_path: &PathBuf) -> crate::Result<Self> {
+        let content = std::fs::read_to_string(&snapshot_path).map_err(|err| {
+            ShkiError::schema(format!(
+                "Failed to read baseline Snapshot {}: {}",
+                snapshot_path.display(),
+                err
+            ))
+        })?;
+        Self::parse(&content)
     }
 
     /// Save snapshot to JSON
