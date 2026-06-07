@@ -5,6 +5,7 @@ pub mod declarative;
 pub mod diff;
 pub mod display;
 pub mod down;
+pub mod drop_migration;
 pub mod dump;
 pub mod generate;
 pub mod init;

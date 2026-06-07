@@ -67,7 +67,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
             let checksum = "-".dimmed().to_string(); // Placeholder for checksum
 
             // Check if down migration exists
-            let has_down = manager.has_down_migration(path);
+            let has_down = manager.has_down_migration(name);
 
             MigrationState {
                 status: status.to_string(),

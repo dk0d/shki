@@ -349,6 +349,57 @@ async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>
     ctx.cleanup().await;
 }
 
+async fn scenario_cli_drop_removes_pending_custom_migration<T: TestBackend>(ctx: T) {
+    let config_path = ctx.write_config();
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Create {
+            migrations: Default::default(),
+            name: "Add audit table".to_string(),
+            sql: Some(ctx.create_table_sql(&ctx.unique_name("audit"), &[])),
+            sql_file: None,
+            with_down: true,
+            edit: false,
+        },
+    })
+    .await
+    .expect("cli create should succeed");
+
+    let up_path = ctx.migrations_dir().join("0000_add-audit-table.sql");
+    let down_path = ctx.migrations_dir().join("0000_add-audit-table.down.sql");
+    let journal_path = ctx.migrations_dir().join("_meta/_journal.json");
+    assert!(up_path.exists());
+    assert!(down_path.exists());
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Drop {
+            migration: Some("add-audit-table".to_string()),
+        },
+    })
+    .await
+    .expect("cli drop should remove pending migration");
+
+    assert!(!up_path.exists());
+    assert!(!down_path.exists());
+    let journal_json = std::fs::read_to_string(&journal_path).expect("journal should remain");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+    assert!(journal.entries.is_empty());
+
+    ctx.cleanup().await;
+}
+
 #[tokio::test]
 async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
     let ctx = PgTestContext::setup("cli_diff").await;
@@ -915,6 +966,14 @@ macro_rules! backend_suite {
             async fn cli_create_records_custom_migration_in_journal() {
                 scenario_cli_create_records_custom_migration_in_journal(
                     <$backend as TestBackend>::setup("cli_create_journal").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn cli_drop_removes_pending_custom_migration() {
+                scenario_cli_drop_removes_pending_custom_migration(
+                    <$backend as TestBackend>::setup("cli_drop_pending").await,
                 )
                 .await;
             }
@@ -1552,6 +1611,73 @@ DROP ROLE IF EXISTS "{role}""#,
         )
         .await
         .expect("failed to drop test role");
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn cli_drop_removes_pending_schema_migration_snapshot_and_journal_entry() {
+    let ctx = PgTestContext::setup("cli_drop_schema").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("drop_generated_users");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table_name} (id integer primary key, name text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+            migrations: Default::default(),
+            name: "create generated users".to_string(),
+            custom: false,
+            with_down: true,
+        },
+    })
+    .await
+    .expect("generate should write migration artifacts");
+
+    let up_path = ctx.migrations_dir().join("0000_create-generated-users.sql");
+    let down_path = ctx
+        .migrations_dir()
+        .join("0000_create-generated-users.down.sql");
+    let snapshot_path = ctx
+        .migrations_dir()
+        .join("_meta/0000_create-generated-users.snapshot.json");
+    let journal_path = ctx.migrations_dir().join("_meta/_journal.json");
+    assert!(up_path.exists());
+    assert!(down_path.exists());
+    assert!(snapshot_path.exists());
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Drop {
+            migration: Some("create-generated-users".to_string()),
+        },
+    })
+    .await
+    .expect("drop should remove pending schema migration artifacts");
+
+    assert!(!up_path.exists());
+    assert!(!down_path.exists());
+    assert!(!snapshot_path.exists());
+    let journal_json = std::fs::read_to_string(&journal_path).expect("journal should remain");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+    assert!(journal.entries.is_empty());
+
     ctx.cleanup().await;
 }
 
