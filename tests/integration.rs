@@ -502,6 +502,99 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
     ctx.cleanup().await;
 }
 
+#[tokio::test]
+async fn cli_generate_validates_generated_sql_in_shadow_database() {
+    let ctx = PgTestContext::setup("cli_generate_validates_sql").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let enum_name = ctx.unique_name("status");
+    let table_name = ctx.unique_name("status_events");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!(
+            r#"CREATE TYPE "{enum_name}" AS ENUM ('active');
+"#,
+            enum_name = enum_name,
+        ),
+    )
+    .expect("failed to write initial declarative schema");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url.clone()),
+                ..Default::default()
+            },
+            migrations: Default::default(),
+            name: "create status".to_string(),
+            custom: false,
+            with_down: false,
+        },
+    })
+    .await
+    .expect("initial generate should succeed");
+
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!(
+            r#"CREATE TYPE "{enum_name}" AS ENUM ('active', 'archived');
+CREATE TABLE "{table_name}" (
+    id integer primary key,
+    status "{enum_name}" not null default 'archived'
+);
+"#,
+            enum_name = enum_name,
+            table_name = table_name,
+        ),
+    )
+    .expect("failed to write changed declarative schema");
+
+    let error = run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+            migrations: Default::default(),
+            name: "use archived status".to_string(),
+            custom: false,
+            with_down: false,
+        },
+    })
+    .await
+    .expect_err("generate should fail when generated SQL fails validation");
+
+    let message = error.to_string();
+    assert!(message.contains("Generated migration SQL failed validation"));
+    assert!(message.contains("Failing SQL:"));
+    assert!(message.contains("ALTER TYPE"));
+    assert!(message.contains(&enum_name));
+    assert!(message.contains(&table_name));
+    assert!(
+        !ctx.migrations_dir()
+            .join("0001_use-archived-status.sql")
+            .exists(),
+        "failed validation must not write the migration"
+    );
+
+    let journal_json = std::fs::read_to_string(ctx.migrations_dir().join("_meta/_journal.json"))
+        .expect("journal should exist");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+    assert_eq!(journal.entries.len(), 1);
+
+    ctx.cleanup().await;
+}
+
 async fn scenario_cli_down_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
     let config_path = ctx.write_config();

@@ -1,19 +1,29 @@
+use std::future::Future;
+
 use async_trait::async_trait;
-use postgresql_embedded::{PostgreSQL as EmbeddedPostgres, SettingsBuilder, VersionReq};
+use postgresql_embedded::{PostgreSQL as EmbeddedPostgres, Settings, SettingsBuilder, VersionReq};
 use sqlx::Executor;
 use uuid::Uuid;
 
 use crate::config::Config;
 use crate::declarative::load_declarative_schema;
+use crate::diff::diff_snapshots;
 use crate::engines::pg::Postgres;
 use crate::schema::SqlDialect;
 use crate::snapshots::{Introspectable, Snapshot};
+use crate::sql::generator::SqlGenerator;
 
 use crate::{Result, ShkiError};
 
 #[async_trait]
 pub trait SchemaCompiler {
     async fn compile(&self, config: &Config) -> Result<Snapshot>;
+    async fn validate_generated_diff_sql(
+        &self,
+        config: &Config,
+        baseline: &Snapshot,
+        generated_sql: &str,
+    ) -> Result<()>;
 }
 
 pub fn compiler_from_config(config: &Config) -> Result<Box<dyn SchemaCompiler + Send + Sync>> {
@@ -24,16 +34,69 @@ pub fn compiler_from_config(config: &Config) -> Result<Box<dyn SchemaCompiler + 
     }
 }
 
+async fn with_embedded_shadow_pool<T, F, Fut>(config: &Config, operation: F) -> Result<T>
+where
+    F: FnOnce(sqlx::Pool<sqlx::Postgres>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let mut server = EmbeddedPostgres::new(embedded_shadow_settings(config)?);
+    server.setup().await.map_err(|err| {
+        ShkiError::schema(format!(
+            "Failed to set up embedded Shadow Database: {}",
+            err
+        ))
+    })?;
+    server.start().await.map_err(|err| {
+        ShkiError::schema(format!("Failed to start embedded Shadow Database: {}", err))
+    })?;
+
+    let database_name = format!("shki_shadow_{}", Uuid::new_v4().simple());
+    server
+        .create_database(&database_name)
+        .await
+        .map_err(|err| {
+            ShkiError::schema(format!(
+                "Failed to create embedded Shadow Database: {}",
+                err
+            ))
+        })?;
+    let database_url = server.settings().url(&database_name);
+    let pool = connect_postgres(config, &database_url).await?;
+    let result = operation(pool).await;
+    let stop_result = server.stop().await.map_err(|err| {
+        ShkiError::schema(format!("Failed to stop embedded Shadow Database: {}", err))
+    });
+
+    match (result, stop_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+fn embedded_shadow_settings(config: &Config) -> Result<Settings> {
+    let mut settings = SettingsBuilder::new()
+        .timeout(Some(std::time::Duration::from_secs(config.timeout_seconds)));
+    settings = settings.version(postgres_major_version_req(config.pg_version.unwrap_or(18))?);
+    Ok(settings.build())
+}
+
+fn ensure_postgres_compiler_config(config: &Config) -> Result<()> {
+    if config.dialect != SqlDialect::Postgres {
+        return Err(ShkiError::unsupported_dialect(
+            "Declarative Schema compilation currently requires PostgreSQL",
+        ));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 pub struct EmbeddedShadowDBCompiler;
 
 impl EmbeddedShadowDBCompiler {
     pub fn from_config(config: &Config) -> Result<Self> {
-        if config.dialect != SqlDialect::Postgres {
-            return Err(ShkiError::unsupported_dialect(
-                "Declarative Schema compilation currently requires PostgreSQL",
-            ));
-        }
+        ensure_postgres_compiler_config(config)?;
         if let Some(version) = config.pg_version {
             postgres_major_version_req(version)?;
         }
@@ -46,42 +109,26 @@ impl EmbeddedShadowDBCompiler {
 impl SchemaCompiler for EmbeddedShadowDBCompiler {
     async fn compile(&self, config: &Config) -> Result<Snapshot> {
         let schema = load_declarative_schema(config.schema_path())?;
-        let mut settings = SettingsBuilder::new()
-            .timeout(Some(std::time::Duration::from_secs(config.timeout_seconds)));
-        settings = settings.version(postgres_major_version_req(config.pg_version.unwrap_or(18))?);
-        let mut server = EmbeddedPostgres::new(settings.build());
-        server.setup().await.map_err(|err| {
-            ShkiError::schema(format!(
-                "Failed to set up embedded Shadow Database: {}",
-                err
-            ))
-        })?;
-        server.start().await.map_err(|err| {
-            ShkiError::schema(format!("Failed to start embedded Shadow Database: {}", err))
-        })?;
+        with_embedded_shadow_pool(config, |pool| async move {
+            compile_with_pool(config, &schema.sql, pool).await
+        })
+        .await
+    }
 
-        let database_name = format!("shki_shadow_{}", Uuid::new_v4().simple());
-        server
-            .create_database(&database_name)
-            .await
-            .map_err(|err| {
-                ShkiError::schema(format!(
-                    "Failed to create embedded Shadow Database: {}",
-                    err
-                ))
-            })?;
-        let database_url = server.settings().url(&database_name);
-        let pool = connect_postgres(config, &database_url).await?;
-        let result = compile_with_pool(config, &schema.sql, pool).await;
-        let stop_result = server.stop().await.map_err(|err| {
-            ShkiError::schema(format!("Failed to stop embedded Shadow Database: {}", err))
-        });
-
-        match (result, stop_result) {
-            (Ok(snapshot), Ok(())) => Ok(snapshot),
-            (Err(error), _) => Err(error),
-            (Ok(_), Err(error)) => Err(error),
+    async fn validate_generated_diff_sql(
+        &self,
+        config: &Config,
+        baseline: &Snapshot,
+        generated_sql: &str,
+    ) -> Result<()> {
+        if generated_diff_sql_is_empty(generated_sql) {
+            return Ok(());
         }
+
+        with_embedded_shadow_pool(config, |pool| async move {
+            validate_generated_diff_sql_with_pool(config, baseline, generated_sql, pool).await
+        })
+        .await
     }
 }
 
@@ -92,11 +139,7 @@ pub struct ExternalShadowDBCompiler {
 
 impl ExternalShadowDBCompiler {
     pub fn from_config(config: &Config) -> Result<Self> {
-        if config.dialect != SqlDialect::Postgres {
-            return Err(ShkiError::unsupported_dialect(
-                "Declarative Schema compilation currently requires PostgreSQL",
-            ));
-        }
+        ensure_postgres_compiler_config(config)?;
 
         let shadow_database_url = config.shadow_database_url.clone().ok_or_else(|| {
             ShkiError::config("shadow_database_url is required to compile a Declarative Schema")
@@ -125,6 +168,20 @@ impl SchemaCompiler for ExternalShadowDBCompiler {
         let pool = self.connect(config).await?;
 
         compile_with_pool(config, &schema.sql, pool).await
+    }
+
+    async fn validate_generated_diff_sql(
+        &self,
+        config: &Config,
+        baseline: &Snapshot,
+        generated_sql: &str,
+    ) -> Result<()> {
+        if generated_diff_sql_is_empty(generated_sql) {
+            return Ok(());
+        }
+
+        let pool = self.connect(config).await?;
+        validate_generated_diff_sql_with_pool(config, baseline, generated_sql, pool).await
     }
 }
 
@@ -160,8 +217,18 @@ async fn compile_with_pool(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Snapshot> {
     reset_shadow_database(&pool).await?;
+    apply_declarative_schema_sql(&pool, schema_sql).await?;
+
+    let engine = Postgres::new(pool, config.migrations.entity());
+    introspect_all_schemas(config, &engine).await
+}
+
+async fn apply_declarative_schema_sql(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    schema_sql: &str,
+) -> Result<()> {
     sqlx::raw_sql(schema_sql)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|err| {
             ShkiError::schema(format!(
@@ -170,8 +237,51 @@ async fn compile_with_pool(
             ))
         })?;
 
-    let engine = Postgres::new(pool, config.migrations.entity());
-    introspect_all_schemas(config, &engine).await
+    Ok(())
+}
+
+async fn validate_generated_diff_sql_with_pool(
+    config: &Config,
+    baseline: &Snapshot,
+    generated_sql: &str,
+    pool: sqlx::Pool<sqlx::Postgres>,
+) -> Result<()> {
+    reset_shadow_database(&pool).await?;
+
+    let baseline_sql = render_baseline_sql(config, baseline)?;
+    if !baseline_sql.trim().is_empty() {
+        sqlx::raw_sql(&baseline_sql)
+            .execute(&pool)
+            .await
+            .map_err(|err| {
+                ShkiError::schema(format!(
+                    "Failed to seed baseline Snapshot in Shadow Database before generated SQL validation: {}",
+                    err
+                ))
+            })?;
+    }
+
+    sqlx::raw_sql(generated_sql)
+        .execute(&pool)
+        .await
+        .map_err(|err| {
+            ShkiError::migration(format!(
+                "Generated migration SQL failed validation in Shadow Database: {}\nFailing SQL:\n{}",
+                err, generated_sql
+            ))
+        })?;
+
+    Ok(())
+}
+
+fn render_baseline_sql(config: &Config, baseline: &Snapshot) -> Result<String> {
+    let empty = Snapshot::new(config.dialect);
+    let baseline_diff = diff_snapshots(&empty, baseline)?;
+    SqlGenerator::new(&config.dialect).generate_string(&baseline_diff.statements)
+}
+
+fn generated_diff_sql_is_empty(generated_sql: &str) -> bool {
+    generated_sql.trim().is_empty()
 }
 
 async fn reset_shadow_database(pool: &sqlx::Pool<sqlx::Postgres>) -> Result<()> {

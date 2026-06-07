@@ -35,7 +35,8 @@ pub async fn cmd_generate(
     manager.ensure_dir()?;
 
     let baseline = load_latest_snapshot(config)?;
-    let mut desired = compiler_from_config(config)?.compile(config).await?;
+    let compiler = compiler_from_config(config)?;
+    let mut desired = compiler.compile(config).await?;
     desired.prev_id = Some(baseline.id.clone());
 
     let mut diff = diff_snapshots(&baseline, &desired)?;
@@ -57,6 +58,9 @@ pub async fn cmd_generate(
 
     let generator = SqlGenerator::new(&config.dialect);
     let up_sql = generator.generate_string(&diff.statements)?;
+    compiler
+        .validate_generated_diff_sql(config, &baseline, &up_sql)
+        .await?;
     let down_sql = if with_down || config.migrations.generate_down {
         let (down_diff, irreversible) = diff.get_down_diff();
         let mut sql = generator.generate_string(&down_diff.statements)?;
