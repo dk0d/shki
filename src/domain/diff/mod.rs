@@ -411,7 +411,7 @@ mod tests {
 
         let config = Config {
             root: temp_dir.path().to_path_buf(),
-            out: out_dir,
+            migrations_dir: out_dir,
             dialect: SqlDialect::Postgres,
             ..Config::default()
         };

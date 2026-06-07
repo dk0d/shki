@@ -6,16 +6,17 @@ pub mod writer;
 
 use std::path::PathBuf;
 
+use crate::Result;
 use crate::cli::CodegenLanguage;
 use crate::codegen::generator::CodeGenerator;
 use crate::codegen::lang::protobuf::{ProtobufGenerator, ProtobufWriter};
 use crate::codegen::lang::rust::{RustGenerator, RustWriter};
 use crate::codegen::lang::typescript::{TypeScriptGenerator, TypeScriptWriter};
 use crate::codegen::writer::CodeWriter;
+use crate::compiler::compiler_from_config;
 use crate::config::Config;
 use crate::snapshots::Snapshot;
 use crate::utils::resolve_path;
-use crate::{Result, ShkiError};
 
 fn run_codegen<G, W>(
     generator: G,
@@ -42,7 +43,7 @@ where
     Ok(())
 }
 
-pub fn cmd_codegen(
+pub async fn cmd_codegen(
     config: &Config,
     schema: Option<PathBuf>,
     mode: Option<OutputMode>,
@@ -50,13 +51,7 @@ pub fn cmd_codegen(
     verbose: Option<bool>,
     language: CodegenLanguage,
 ) -> Result<()> {
-    let schema_path = resolve_path(
-        Some(config.root.clone()),
-        schema.unwrap_or(config.schema.clone()),
-    );
-    let content = std::fs::read_to_string(&schema_path)?;
-    let snapshot: Snapshot = serde_json::from_str(&content)
-        .map_err(|e| ShkiError::config(format!("Failed to parse schema JSON: {}", e)))?;
+    let snapshot = load_codegen_snapshot(config, schema).await?;
 
     let output = out
         .or_else(|| config.codegen.output.clone())
@@ -86,4 +81,24 @@ pub fn cmd_codegen(
             gen_config,
         ),
     }
+}
+
+async fn load_codegen_snapshot(config: &Config, schema: Option<PathBuf>) -> Result<Snapshot> {
+    if let Some(schema) = schema {
+        let schema_path = resolve_path(Some(config.root.clone()), schema);
+        if schema_path.is_file() {
+            let content = std::fs::read_to_string(&schema_path)?;
+            if let Ok(snapshot) = serde_json::from_str::<Snapshot>(&content) {
+                return Ok(snapshot);
+            }
+        }
+
+        let mut compile_config = config.clone();
+        compile_config.schema = schema_path;
+        return compiler_from_config(&compile_config)?
+            .compile(&compile_config)
+            .await;
+    }
+
+    compiler_from_config(config)?.compile(config).await
 }

@@ -1015,7 +1015,7 @@ async fn codegen_writes_typescript_module_from_snapshot() {
                 flavor: TypescriptFlavor::Interface,
             },
             out: Some(output_dir.clone()),
-            schema: None,
+            schema: Some(snapshot_path),
             mode: Some(OutputMode::SingleModule),
             verbose: false,
         },
@@ -1049,7 +1049,7 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
         command: Commands::Codegen {
             language: CodegenLanguage::Rust,
             out: Some(output_dir.clone()),
-            schema: None,
+            schema: Some(snapshot_path),
             mode: Some(OutputMode::Modules),
             verbose: false,
         },
@@ -1083,7 +1083,7 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
         command: Commands::Codegen {
             language: CodegenLanguage::Protobuf,
             out: Some(output_dir.clone()),
-            schema: None,
+            schema: Some(snapshot_path),
             mode: Some(OutputMode::SingleModule),
             verbose: false,
         },
@@ -1099,6 +1099,52 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
     assert!(user.contains("message User"));
     assert!(user.contains("import \"user_status.proto\";"));
     assert!(status.contains("enum UserStatus"));
+}
+
+#[tokio::test]
+async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
+    let ctx = PgTestContext::setup("codegen_shadow").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let output_dir = ctx.root_dir().join("generated-shadow-ts");
+    let table_name = ctx.unique_name("codegen_users");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table_name} (id integer primary key, email text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            shadow_database_url: Some(shadow.database_url),
+            ..CommonArgs::default()
+        },
+        command: Commands::Codegen {
+            language: CodegenLanguage::Typescript {
+                flavor: TypescriptFlavor::Interface,
+            },
+            out: Some(output_dir.clone()),
+            schema: None,
+            mode: Some(OutputMode::SingleModule),
+            verbose: false,
+        },
+    })
+    .await
+    .expect("typescript codegen should compile current declarative schema");
+
+    let user = std::fs::read_dir(&output_dir)
+        .expect("generated output dir should exist")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("ts"))
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .find(|content| content.contains("email"))
+        .expect("generated interface should be written");
+    assert!(user.contains("interface"));
+    assert!(user.contains("email"));
+
+    ctx.cleanup().await;
 }
 
 #[tokio::test]
