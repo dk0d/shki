@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, migrate::checksum::sql_checksum};
@@ -20,17 +19,6 @@ pub struct JournalEntry {
     pub migration: String,
     pub kind: MigrationKind,
     pub checksum: String,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot_path: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot_id: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prev_snapshot_id: Option<String>,
-
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,14 +62,7 @@ impl Journal {
         self.entries.push(entry);
     }
 
-    pub fn record_migration(
-        &mut self,
-        migration_path: &Path,
-        kind: MigrationKind,
-        snapshot_path: Option<&Path>,
-        snapshot_id: Option<String>,
-        prev_snapshot_id: Option<String>,
-    ) -> Result<()> {
+    pub fn record_migration(&mut self, migration_path: &Path, kind: MigrationKind) -> Result<()> {
         let migration = migration_path
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -93,19 +74,10 @@ impl Journal {
             migration,
             kind,
             checksum: sql_checksum(&sql),
-            snapshot_path: snapshot_path.map(path_to_journal_string),
-            snapshot_id,
-            prev_snapshot_id,
-            created_at: Utc::now(),
         });
 
         Ok(())
     }
-}
-
-fn path_to_journal_string(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 pub fn journal_path(out_dir: &Path) -> PathBuf {

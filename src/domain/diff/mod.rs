@@ -3,8 +3,6 @@ pub mod statements;
 pub use statements::*;
 mod helpers;
 
-use std::path::PathBuf;
-
 use crate::compiler::compiler_from_config;
 use crate::config::Config;
 use crate::migrate::journal::MigrationKind;
@@ -37,21 +35,14 @@ pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
         .entries
         .iter()
         .rev()
-        .find(|entry| entry.kind == MigrationKind::Schema && entry.snapshot_path.is_some())
+        .find(|entry| entry.kind == MigrationKind::Schema)
     else {
         return Ok(Snapshot::new(config.dialect));
     };
 
-    let snapshot_path = entry
-        .snapshot_path
-        .as_deref()
-        .map(PathBuf::from)
-        .expect("snapshot_path is present because journal entry was filtered");
-    let snapshot_path = if snapshot_path.is_absolute() {
-        snapshot_path
-    } else {
-        config.root.join(snapshot_path)
-    };
+    let snapshot_path = manager
+        .meta_dir()
+        .join(format!("{}.snapshot.json", entry.migration));
     let content = std::fs::read_to_string(&snapshot_path).map_err(|err| {
         ShkiError::schema(format!(
             "Failed to read baseline Snapshot {}: {}",
@@ -258,7 +249,6 @@ mod tests {
     use crate::schema::DataType;
     use crate::schema::{Column, Constraint, Index, PrimaryKeyConstraint, SqlDialect, Table};
     use crate::snapshots::Snapshot;
-    use chrono::Utc;
     use tempfile::TempDir;
 
     #[test]
@@ -358,7 +348,7 @@ mod tests {
 
         let mut first = Snapshot::new(SqlDialect::Postgres);
         first.id = "first".to_string();
-        let first_path = meta_dir.join("first.snapshot.json");
+        let first_path = meta_dir.join("0001_schema.snapshot.json");
         std::fs::write(
             &first_path,
             serde_json::to_string_pretty(&first).expect("failed to serialize snapshot"),
@@ -367,7 +357,7 @@ mod tests {
 
         let mut second = Snapshot::new(SqlDialect::Postgres);
         second.id = "second".to_string();
-        let second_path = meta_dir.join("second.snapshot.json");
+        let second_path = meta_dir.join("0002_schema.snapshot.json");
         std::fs::write(
             &second_path,
             serde_json::to_string_pretty(&second).expect("failed to serialize snapshot"),
@@ -381,28 +371,16 @@ mod tests {
                     migration: "0000_custom".to_string(),
                     kind: MigrationKind::Custom,
                     checksum: "custom".to_string(),
-                    snapshot_path: None,
-                    snapshot_id: None,
-                    prev_snapshot_id: None,
-                    created_at: Utc::now(),
                 },
                 JournalEntry {
                     migration: "0001_schema".to_string(),
                     kind: MigrationKind::Schema,
                     checksum: "schema-1".to_string(),
-                    snapshot_path: Some(first_path.to_string_lossy().to_string()),
-                    snapshot_id: Some("first".to_string()),
-                    prev_snapshot_id: None,
-                    created_at: Utc::now(),
                 },
                 JournalEntry {
                     migration: "0002_schema".to_string(),
                     kind: MigrationKind::Schema,
                     checksum: "schema-2".to_string(),
-                    snapshot_path: Some(second_path.to_string_lossy().to_string()),
-                    snapshot_id: Some("second".to_string()),
-                    prev_snapshot_id: Some("first".to_string()),
-                    created_at: Utc::now(),
                 },
             ],
         }

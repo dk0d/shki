@@ -90,13 +90,7 @@ pub async fn cmd_generate(
         write_schema_migration(path, &migration_name, sql, true)?;
     }
     std::fs::write(&snapshot_path, desired.to_json()?)?;
-    manager.record_migration_in_journal(
-        &up_path,
-        MigrationKind::Schema,
-        Some(&snapshot_path),
-        Some(desired.id.clone()),
-        Some(baseline.id.clone()),
-    )?;
+    manager.record_migration_in_journal(&up_path, MigrationKind::Schema)?;
 
     println!("{} {}", "Generated migration:".green(), migration_name);
     println!("  Up:       {}", up_path.display());

@@ -341,7 +341,6 @@ async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>
     assert_eq!(journal.entries.len(), 1);
     assert_eq!(journal.entries[0].migration, "0000_add-audit-table");
     assert_eq!(journal.entries[0].kind, MigrationKind::Custom);
-    assert!(journal.entries[0].snapshot_id.is_none());
 
     let migration_path = ctx.migrations_dir().join("0000_add-audit-table.sql");
     assert!(migration_path.exists());
@@ -498,12 +497,7 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
     let entry = &journal.entries[0];
     assert_eq!(entry.migration, "0000_create-generated-users");
     assert_eq!(entry.kind, MigrationKind::Schema);
-    assert_eq!(entry.snapshot_id.as_deref(), Some(snapshot.id.as_str()));
-    assert!(entry.prev_snapshot_id.is_some());
-    assert_eq!(
-        entry.snapshot_path.as_deref(),
-        Some(snapshot_path.to_string_lossy().as_ref())
-    );
+    assert!(!entry.checksum.is_empty());
 
     ctx.cleanup().await;
 }

@@ -177,18 +177,9 @@ impl MigrationManager {
         &self,
         migration_path: &Path,
         kind: MigrationKind,
-        snapshot_path: Option<&Path>,
-        snapshot_id: Option<String>,
-        prev_snapshot_id: Option<String>,
     ) -> Result<()> {
         let mut journal = self.load_journal()?;
-        journal.record_migration(
-            migration_path,
-            kind,
-            snapshot_path,
-            snapshot_id,
-            prev_snapshot_id,
-        )?;
+        journal.record_migration(migration_path, kind)?;
         self.save_journal(&journal)
     }
 
@@ -555,7 +546,7 @@ impl MigrationManager {
             None
         };
 
-        self.record_migration_in_journal(&up_path, MigrationKind::Custom, None, None, None)?;
+        self.record_migration_in_journal(&up_path, MigrationKind::Custom)?;
 
         Ok((up_path, down_path))
     }
@@ -656,7 +647,7 @@ impl MigrationManager {
             None
         };
 
-        self.record_migration_in_journal(&up_path, MigrationKind::Custom, None, None, None)?;
+        self.record_migration_in_journal(&up_path, MigrationKind::Custom)?;
 
         Ok((up_path, down_path))
     }
@@ -672,9 +663,18 @@ impl MigrationManager {
 
         let mut removed = 0usize;
 
+        let derived_path = meta_dir.join(format!("{}.snapshot.json", migration_name));
+        if derived_path.exists() {
+            std::fs::remove_file(&derived_path)?;
+            removed += 1;
+        }
+
         for entry in std::fs::read_dir(&meta_dir)? {
             let entry = entry?;
             let path = entry.path();
+            if path == derived_path {
+                continue;
+            }
             if path.file_name().and_then(|name| name.to_str()) == Some("_journal.json") {
                 continue;
             }
@@ -809,9 +809,6 @@ mod tests {
         let entry = &journal.entries[0];
         assert_eq!(entry.migration, "0000_add-users-table");
         assert_eq!(entry.kind, MigrationKind::Custom);
-        assert_eq!(entry.snapshot_path, None);
-        assert_eq!(entry.snapshot_id, None);
-        assert_eq!(entry.prev_snapshot_id, None);
         assert_eq!(entry.checksum, sql_checksum(&up));
     }
 
@@ -823,13 +820,7 @@ mod tests {
             .expect("failed to create migration");
 
         manager
-            .record_migration_in_journal(
-                &up_path,
-                MigrationKind::Schema,
-                Some(&manager.meta_dir().join("0000_custom.snapshot.json")),
-                Some("snapshot-1".to_string()),
-                Some("snapshot-0".to_string()),
-            )
+            .record_migration_in_journal(&up_path, MigrationKind::Schema)
             .expect("failed to record schema entry");
 
         let journal = manager.load_journal().expect("journal should load");
@@ -837,16 +828,6 @@ mod tests {
         let entry = &journal.entries[0];
         assert_eq!(entry.migration, "0000_custom");
         assert_eq!(entry.kind, MigrationKind::Schema);
-        let expected_snapshot_path = format!(
-            "{}/_meta/0000_custom.snapshot.json",
-            manager.out_dir.to_string_lossy()
-        );
-        assert_eq!(
-            entry.snapshot_path.as_deref(),
-            Some(expected_snapshot_path.as_str())
-        );
-        assert_eq!(entry.snapshot_id.as_deref(), Some("snapshot-1"));
-        assert_eq!(entry.prev_snapshot_id.as_deref(), Some("snapshot-0"));
     }
 
     #[tokio::test]
