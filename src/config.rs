@@ -56,6 +56,7 @@ pub struct Config {
     pub root: PathBuf,
 
     /// Database dialect
+    #[serde(default)]
     pub dialect: SqlDialect,
 
     /// Path to schema dir/file (unused when mode is `sql)
@@ -63,7 +64,7 @@ pub struct Config {
     pub schema: PathBuf,
 
     /// Output directory for migrations
-    #[serde(default = "default_out")]
+    #[serde(default = "default_out", alias = "out")]
     pub migrations_dir: PathBuf,
 
     /// Database connection URL
@@ -117,7 +118,7 @@ fn default_root() -> PathBuf {
 }
 
 fn default_out() -> PathBuf {
-    default_root().join("migrations")
+    PathBuf::from("migrations")
 }
 
 fn default_true() -> bool {
@@ -275,7 +276,6 @@ impl Config {
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
         let config: Config = Figment::new()
-            .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
             .merge(Env::raw())
             .merge(Env::prefixed("SHKI_").split("__"))
@@ -403,5 +403,42 @@ generate_down = false
             std::env::remove_var("SHKI_SHADOW_DATABASE_POSTGRES_VERSION");
             std::env::remove_var("SHKI_MIGRATIONS__TABLE");
         }
+    }
+
+    #[test]
+    fn load_accepts_out_alias_for_migrations_dir() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("shki.toml");
+
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+root = "{}"
+dialect = "sqlite"
+out = "db/migrations"
+"#,
+                temp_dir.path().display()
+            ),
+        )
+        .expect("failed to write config");
+
+        let config =
+            Config::load(&config_path, &CommonArgs::default()).expect("config should load");
+
+        assert_eq!(config.migrations_dir, PathBuf::from("db/migrations"));
+        assert_eq!(config.out_dir(), temp_dir.path().join("db/migrations"));
+    }
+
+    #[test]
+    fn default_migrations_dir_is_resolved_from_root() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let config = Config {
+            root: temp_dir.path().to_path_buf(),
+            ..Config::default()
+        };
+
+        assert_eq!(config.migrations_dir, PathBuf::from("migrations"));
+        assert_eq!(config.out_dir(), temp_dir.path().join("migrations"));
     }
 }
