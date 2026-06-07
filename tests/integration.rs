@@ -323,6 +323,7 @@ async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>
             ..CommonArgs::default()
         },
         command: Commands::Create {
+            migrations: Default::default(),
             name: "Add audit table".to_string(),
             sql: Some(ctx.create_table_sql(&ctx.unique_name("audit"), &[])),
             sql_file: None,
@@ -364,10 +365,14 @@ async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
         config: config_path,
         common: CommonArgs {
             dialect: Some(shki::schema::SqlDialect::Postgres),
-            shadow_database_url: Some(shadow.database_url),
             ..CommonArgs::default()
         },
-        command: Commands::Diff,
+        command: Commands::Diff {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+        },
     })
     .await
     .expect("diff should compile declarative schema and preview changes");
@@ -398,10 +403,14 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
         config: config_path,
         common: CommonArgs {
             dialect: Some(shki::schema::SqlDialect::Postgres),
-            shadow_database_url: Some(shadow.database_url),
             ..CommonArgs::default()
         },
         command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+            migrations: Default::default(),
             name: "create generated users".to_string(),
             custom: false,
             with_down: true,
@@ -1011,13 +1020,16 @@ async fn codegen_writes_typescript_module_from_snapshot() {
         config: config_path,
         common: CommonArgs::default(),
         command: Commands::Codegen {
+            shadow: Default::default(),
+            codegen: shki::CodegenArgs {
+                output: Some(output_dir.clone()),
+                format: Some(OutputMode::Module),
+                ..Default::default()
+            },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
             },
-            out: Some(output_dir.clone()),
-            schema: Some(snapshot_path),
-            mode: Some(OutputMode::SingleModule),
-            verbose: false,
+            source: Some(snapshot_path),
         },
     })
     .await
@@ -1047,11 +1059,14 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
         config: config_path,
         common: CommonArgs::default(),
         command: Commands::Codegen {
+            shadow: Default::default(),
+            codegen: shki::CodegenArgs {
+                output: Some(output_dir.clone()),
+                format: Some(OutputMode::Modules),
+                ..Default::default()
+            },
             language: CodegenLanguage::Rust,
-            out: Some(output_dir.clone()),
-            schema: Some(snapshot_path),
-            mode: Some(OutputMode::Modules),
-            verbose: false,
+            source: Some(snapshot_path),
         },
     })
     .await
@@ -1081,11 +1096,14 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
         config: config_path,
         common: CommonArgs::default(),
         command: Commands::Codegen {
+            shadow: Default::default(),
+            codegen: shki::CodegenArgs {
+                output: Some(output_dir.clone()),
+                format: Some(OutputMode::Module),
+                ..Default::default()
+            },
             language: CodegenLanguage::Protobuf,
-            out: Some(output_dir.clone()),
-            schema: Some(snapshot_path),
-            mode: Some(OutputMode::SingleModule),
-            verbose: false,
+            source: Some(snapshot_path),
         },
     })
     .await
@@ -1118,17 +1136,22 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
         config: config_path,
         common: CommonArgs {
             dialect: Some(shki::schema::SqlDialect::Postgres),
-            shadow_database_url: Some(shadow.database_url),
             ..CommonArgs::default()
         },
         command: Commands::Codegen {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+            codegen: shki::CodegenArgs {
+                output: Some(output_dir.clone()),
+                format: Some(OutputMode::Module),
+                ..Default::default()
+            },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
             },
-            out: Some(output_dir.clone()),
-            schema: None,
-            mode: Some(OutputMode::SingleModule),
-            verbose: false,
+            source: None,
         },
     })
     .await

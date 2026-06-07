@@ -8,7 +8,7 @@ use clap::builder::styling::{AnsiColor, Color, Style};
 // pub mod constants;
 // pub mod templates;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -61,23 +61,18 @@ pub struct CommonArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dialect: Option<SqlDialect>,
 
+    /// Schema for the migrations table (PostgreSQL)
+    #[arg(short='S', long,  default_value = None)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+
     /// Database connection URL
     #[arg(long, short = 'u', global = true, env = "DATABASE_URL")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database_url: Option<String>,
 
-    /// Shadow Database connection URL used to compile Declarative Schemas
-    #[arg(long, global = true, env = "SHKI_SHADOW_DATABASE_URL")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shadow_database_url: Option<String>,
-
-    /// PostgreSQL major version for embedded Shadow Database compilation
-    #[arg(long, global = true, env = "SHKI_PG_VERSION")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pg_version: Option<u8>,
-
     /// Directory to output and read migrations
-    #[arg(short, long, global = true)]
+    #[arg(short = 'd', long = "dir", long, global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub migrations_dir: Option<PathBuf>,
 
@@ -86,26 +81,62 @@ pub struct CommonArgs {
     #[serde(skip_serializing_if = "crate::config::is_false")]
     pub verbose: bool,
 
-    #[command(flatten)]
-    #[serde(default, skip_serializing_if = "MigrationArgs::is_empty")]
-    pub migrations: MigrationArgs,
-
     #[arg(short, long, global = true, default_value_t = false)]
     #[serde(default, skip_serializing_if = "crate::config::is_false")]
     pub no_color: bool,
 }
 
-#[derive(Debug, Serialize, Args, Default)]
+#[derive(Debug, Clone, Serialize, Args, Default)]
+pub struct ShadowArgs {
+    /// Shadow Database connection URL used to compile Declarative Schemas
+    #[arg(long, env = "SHKI_SHADOW_DATABASE_URL")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_database_url: Option<String>,
+
+    /// PostgreSQL major version for embedded Shadow Database compilation
+    #[arg(long, env = "SHKI_PG_VERSION")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pg_version: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Args, Default)]
+pub struct CodegenArgs {
+    /// Output directory for generated code
+    #[arg(short, long)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<PathBuf>,
+
+    /// Output mode: single file or module directory
+    #[arg(long, short)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<OutputMode>,
+
+    /// Whether to add serde derives and rename attributes
+    #[arg(long, action = ArgAction::SetTrue)]
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
+    pub serde: bool,
+
+    /// Whether to generate sqlx::FromRow derive
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_sqlx")]
+    pub sqlx: bool,
+
+    /// Disable sqlx derives
+    #[arg(long = "no-sqlx", action = ArgAction::SetTrue)]
+    pub no_sqlx: bool,
+}
+
+impl CodegenArgs {
+    pub fn is_empty(&self) -> bool {
+        self.output.is_none() && self.format.is_none() && !self.serde && !self.sqlx && !self.no_sqlx
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Args, Default)]
 pub struct MigrationArgs {
     /// Name of the migrations table
     #[arg(short='T',long,  default_value = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table: Option<String>,
-
-    /// Schema for the migrations table (PostgreSQL)
-    #[arg(short='S', long,  default_value = None)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub schema: Option<String>,
 
     /// Migration file name prefix style
     #[arg(
@@ -124,10 +155,7 @@ pub struct MigrationArgs {
 
 impl MigrationArgs {
     pub fn is_empty(&self) -> bool {
-        self.table.is_none()
-            && self.schema.is_none()
-            && self.prefix.is_none()
-            && !self.generate_down
+        self.table.is_none() && self.prefix.is_none() && !self.generate_down
     }
 }
 
@@ -202,6 +230,12 @@ pub enum Commands {
     /// Generate a schema-derived migration from the current Declarative Schema
     #[command(visible_alias = "gen")]
     Generate {
+        #[command(flatten)]
+        shadow: ShadowArgs,
+
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
         /// Migration name/suffix
         name: String,
 
@@ -217,14 +251,20 @@ pub enum Commands {
     /// Apply pending migrations to the database
     #[command(visible_alias = "up")]
     Migrate {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
         /// Only show what would be applied
-        #[arg(long, short)]
+        #[arg(long, long = "dry")]
         dry_run: bool,
     },
 
     /// Create a blank migration file for manual SQL editing
     #[command(visible_alias = "new")]
     Create {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
         /// Migration name (e.g., "add_user_index", "create_audit_table")
         name: String,
 
@@ -320,35 +360,34 @@ pub enum Commands {
     // },
     //
     /// Preview changes between latest Snapshot and current Declarative Schema
-    Diff,
+    Diff {
+        #[command(flatten)]
+        shadow: ShadowArgs,
+    },
 
     /// List migrations and their status
     #[command(visible_alias = "s")]
-    Status,
+    Status {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+    },
 
-    /// Generate Rust structs/enums from database schema
+    /// Generate types from database schema (Rust/Typescript/Protobuf)
     #[command(visible_alias = "code")]
     Codegen {
+        #[command(flatten)]
+        shadow: ShadowArgs,
+
+        #[command(flatten)]
+        codegen: CodegenArgs,
+
         /// Output language (rust, protobuf, ts)
         #[command(subcommand)]
         language: CodegenLanguage,
 
-        /// Path to output directory
+        /// Override path to schema file(s), schema directory, or snapshot json to use for generation
         #[arg(short, long)]
-        out: Option<PathBuf>,
-
-        /// Path to schema file(s), schema directory, or snapshot json to use for generation
-        #[arg(short, long)]
-        schema: Option<PathBuf>,
-
-        /// Output mode (module or single file)
-        #[arg(long, short)]
-        mode: Option<OutputMode>,
-
-        /// Enable verbose output
-        /// Will print the generated code to stdout as well as writing to files
-        #[arg(short, long, default_value_t = false)]
-        verbose: bool,
+        source: Option<PathBuf>,
     },
 
     // /// Drop a migration file
@@ -361,6 +400,9 @@ pub enum Commands {
     //
     /// Rollback (undo) applied migrations using down migration files
     Down {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
         /// Number of migrations to rollback (default: 1)
         count: Option<usize>,
 

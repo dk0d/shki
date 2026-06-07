@@ -114,7 +114,10 @@ database_url = "{}"
                 database_url: Some(self.database_url()),
                 ..CommonArgs::default()
             },
-            command: Commands::Migrate { dry_run: false },
+            command: Commands::Migrate {
+                migrations: Default::default(),
+                dry_run: false,
+            },
         }
     }
 
@@ -126,7 +129,11 @@ database_url = "{}"
                 database_url: Some(self.database_url()),
                 ..CommonArgs::default()
             },
-            command: Commands::Down { count, dry_run },
+            command: Commands::Down {
+                migrations: Default::default(),
+                count,
+                dry_run,
+            },
         }
     }
 
