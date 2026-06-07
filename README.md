@@ -174,7 +174,7 @@ shki generate add_users_table
 `generate` writes:
 
 - `migrations/<migration>.sql`
-- `migrations/_meta/<migration>_snapshot.json`
+- `migrations/_meta/<migration>.snapshot.json`
 - `migrations/_meta/_journal.json`
 
 Use `--with-down` or `migrations.generate_down = true` to write a Down Migration:
@@ -262,9 +262,9 @@ Directory mode writes `main.sql`, top-level `extensions/`, and schema-scoped obj
 ### Generate Code From A Snapshot
 
 ```bash
-shki codegen rust --schema migrations/_meta/0000_create_users_snapshot.json --out src/schema
-shki codegen typescript --schema migrations/_meta/0000_create_users_snapshot.json --out src/schema
-shki codegen protobuf --schema migrations/_meta/0000_create_users_snapshot.json --out proto
+shki codegen rust --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
+shki codegen typescript --schema migrations/_meta/0000_create_users.snapshot.json --out src/schema
+shki codegen protobuf --schema migrations/_meta/0000_create_users.snapshot.json --out proto
 ```
 
 ## Configuration

@@ -83,7 +83,7 @@ pub async fn cmd_generate(
         .map(|_| manager.out_dir.join(format!("{}.down.sql", migration_name)));
     let snapshot_path = manager
         .meta_dir()
-        .join(format!("{}_snapshot.json", migration_name));
+        .join(format!("{}.snapshot.json", migration_name));
 
     write_schema_migration(&up_path, &migration_name, &up_sql, false)?;
     if let (Some(path), Some(sql)) = (&down_path, down_sql.as_deref()) {

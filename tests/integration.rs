@@ -416,7 +416,7 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
         .join("0000_create-generated-users.down.sql");
     let snapshot_path = ctx
         .migrations_dir()
-        .join("_meta/0000_create-generated-users_snapshot.json");
+        .join("_meta/0000_create-generated-users.snapshot.json");
     let journal_path = ctx.migrations_dir().join("_meta/_journal.json");
 
     let up_sql = std::fs::read_to_string(&up_path).expect("up migration should exist");
