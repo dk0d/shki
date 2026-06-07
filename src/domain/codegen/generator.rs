@@ -20,7 +20,7 @@ pub fn singularize(name: &str) -> String {
 /// Trait for code generators that convert database schemas to language-specific code.
 ///
 /// This trait provides default implementations for common naming transformations
-/// (struct/enum renames, prefixes, suffixes) that are shared across generators.
+/// (struct/enum renames and name patterns) that are shared across generators.
 pub trait CodeGenerator: Default {
     /// The output type produced by this generator
     type Output;
@@ -116,8 +116,7 @@ pub trait CodeGenerator: Default {
     /// This applies the following transformations in order:
     /// 1. Check for explicit rename in config
     /// 2. Otherwise, singularize and convert to PascalCase
-    /// 3. Apply prefix if configured
-    /// 4. Apply suffix if configured
+    /// 3. Apply pattern if configured, replacing "{}" with the base name
     fn transform_struct_name(&self, name: &str, config: &CodegenConfig) -> String {
         let base_name = config
             .struct_renames
@@ -125,17 +124,7 @@ pub trait CodeGenerator: Default {
             .cloned()
             .unwrap_or_else(|| singularize(name).to_upper_camel_case());
 
-        let with_prefix = config
-            .struct_prefix
-            .as_ref()
-            .map(|p| singularize(&format!("{}_{}", p, base_name)).to_upper_camel_case())
-            .unwrap_or(base_name);
-
-        config
-            .struct_suffix
-            .as_ref()
-            .map(|s| singularize(&format!("{}_{}", with_prefix, s)).to_upper_camel_case())
-            .unwrap_or(with_prefix)
+        apply_name_pattern(&base_name, config.struct_pattern.as_deref())
     }
 
     /// Transform a database enum name into a language enum name.
@@ -143,8 +132,7 @@ pub trait CodeGenerator: Default {
     /// This applies the following transformations in order:
     /// 1. Check for explicit rename in config
     /// 2. Otherwise, convert to PascalCase
-    /// 3. Apply prefix if configured
-    /// 4. Apply suffix if configured
+    /// 3. Apply pattern if configured, replacing "{}" with the base name
     fn transform_enum_name(&self, name: &str, config: &CodegenConfig) -> String {
         let base_name = config
             .enum_renames
@@ -152,18 +140,14 @@ pub trait CodeGenerator: Default {
             .cloned()
             .unwrap_or_else(|| name.to_upper_camel_case());
 
-        let with_prefix = config
-            .enum_prefix
-            .as_ref()
-            .map(|p| singularize(&format!("{}_{}", p, base_name)).to_upper_camel_case())
-            .unwrap_or(base_name);
-
-        config
-            .enum_suffix
-            .as_ref()
-            .map(|s| singularize(&format!("{}_{}", with_prefix, s)).to_upper_camel_case())
-            .unwrap_or(with_prefix)
+        apply_name_pattern(&base_name, config.enum_pattern.as_deref())
     }
+}
+
+fn apply_name_pattern(base_name: &str, pattern: Option<&str>) -> String {
+    pattern
+        .map(|pattern| pattern.replace("{}", base_name))
+        .unwrap_or_else(|| base_name.to_string())
 }
 
 #[cfg(test)]
@@ -235,35 +219,38 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_struct_name_with_prefix() {
-        let config = CodegenConfig::default().struct_prefix(Some("Db".to_string()));
+    fn test_transform_struct_name_with_pattern_suffix() {
+        let config = CodegenConfig::default().struct_pattern(Some("{}Row".to_string()));
 
         let generator = TestGenerator::new();
+        assert_eq!(generator.transform_struct_name("users", &config), "UserRow");
+    }
+
+    #[test]
+    fn test_transform_struct_name_with_pattern_prefix() {
+        let config = CodegenConfig::default().struct_pattern(Some("Db{}".to_string()));
+        let generator = TestGenerator::new();
+
         assert_eq!(generator.transform_struct_name("users", &config), "DbUser");
     }
 
     #[test]
-    fn test_transform_struct_name_with_suffix() {
-        let config = CodegenConfig::default().struct_suffix(Some("Entity".to_string()));
-        let generator = TestGenerator::new();
-
-        assert_eq!(
-            generator.transform_struct_name("users", &config),
-            "UserEntity"
-        );
-    }
-
-    #[test]
-    fn test_transform_struct_name_with_prefix_and_suffix() {
-        let config = CodegenConfig::default()
-            .struct_prefix(Some("Db".to_string()))
-            .struct_suffix(Some("Entity".to_string()));
+    fn test_transform_struct_name_with_pattern_surrounding_text() {
+        let config = CodegenConfig::default().struct_pattern(Some("Db{}Entity".to_string()));
         let generator = TestGenerator::new();
 
         assert_eq!(
             generator.transform_struct_name("users", &config),
             "DbUserEntity"
         );
+    }
+
+    #[test]
+    fn test_transform_struct_name_with_pattern_without_placeholder() {
+        let config = CodegenConfig::default().struct_pattern(Some("Record".to_string()));
+        let generator = TestGenerator::new();
+
+        assert_eq!(generator.transform_struct_name("users", &config), "Record");
     }
 
     #[test]
@@ -296,10 +283,8 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_enum_name_with_prefix_and_suffix() {
-        let config = CodegenConfig::default()
-            .enum_prefix(Some("Db".to_string()))
-            .enum_suffix(Some("Type".to_string()));
+    fn test_transform_enum_name_with_pattern() {
+        let config = CodegenConfig::default().enum_pattern(Some("Db{}Type".to_string()));
         let generator = TestGenerator::new();
 
         assert_eq!(

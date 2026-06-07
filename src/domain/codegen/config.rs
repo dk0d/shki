@@ -35,21 +35,15 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub struct_renames: IndexMap<String, String>,
 
-    /// A suffix to add to all structs
-    pub struct_suffix: Option<String>,
-
-    /// A prefix to add to all structs
-    pub struct_prefix: Option<String>,
+    /// Pattern for generated struct names, using "{}" as the base name placeholder
+    pub struct_pattern: Option<String>,
 
     /// Custom enum name overrides (enum_name -> RustEnumName)
     #[serde(default)]
     pub enum_renames: IndexMap<String, String>,
 
-    /// A suffix to add to all enums
-    pub enum_suffix: Option<String>,
-
-    /// A prefix to add to all enums
-    pub enum_prefix: Option<String>,
+    /// Pattern for generated enum names, using "{}" as the base name placeholder
+    pub enum_pattern: Option<String>,
 
     /// SQL type to Rust type overrides
     #[serde(default)]
@@ -166,11 +160,9 @@ impl Default for CodegenConfig {
             enum_derives: default_enum_derives(),
             enum_attributes: Vec::new(),
             struct_renames: IndexMap::new(),
-            struct_prefix: None,
-            struct_suffix: None,
+            struct_pattern: None,
             enum_renames: IndexMap::new(),
-            enum_prefix: None,
-            enum_suffix: None,
+            enum_pattern: None,
             type_overrides: IndexMap::new(),
             serde: false,
             sqlx: true,
@@ -229,27 +221,15 @@ impl CodegenConfig {
         self
     }
 
-    /// Set struct prefix
-    pub fn struct_prefix(mut self, prefix: Option<String>) -> Self {
-        self.struct_prefix = prefix;
+    /// Set struct name pattern, using "{}" as the base name placeholder
+    pub fn struct_pattern(mut self, pattern: Option<String>) -> Self {
+        self.struct_pattern = pattern;
         self
     }
 
-    /// Set enum prefix
-    pub fn enum_prefix(mut self, prefix: Option<String>) -> Self {
-        self.enum_prefix = prefix;
-        self
-    }
-
-    /// Set struct suffix
-    pub fn struct_suffix(mut self, suffix: Option<String>) -> Self {
-        self.struct_suffix = suffix;
-        self
-    }
-
-    /// Set enum suffix
-    pub fn enum_suffix(mut self, suffix: Option<String>) -> Self {
-        self.enum_suffix = suffix;
+    /// Set enum name pattern, using "{}" as the base name placeholder
+    pub fn enum_pattern(mut self, pattern: Option<String>) -> Self {
+        self.enum_pattern = pattern;
         self
     }
 
