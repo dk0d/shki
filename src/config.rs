@@ -22,6 +22,7 @@ pub(crate) fn is_false(value: &bool) -> bool {
 #[derive(Debug, Default, Deserialize)]
 struct ExplicitConfigProbe {
     dialect: Option<SqlDialect>,
+    root: Option<PathBuf>,
 }
 
 /// Schema definition language
@@ -106,7 +107,7 @@ pub struct Config {
 }
 
 fn default_schema_dir() -> PathBuf {
-    default_root().join("schema")
+    PathBuf::from("schema")
 }
 
 fn default_false() -> bool {
@@ -324,15 +325,28 @@ impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
+        let explicit = Self::explicit_config(path)?;
         let config: Config = Self::base_figment(path)
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         let mut config = config.infer_dialect();
+        if explicit.root.is_none()
+            && let Some(parent) = path.parent()
+        {
+            config.root = parent.to_path_buf();
+        }
         if let Some(migrations_dir) = &args.migrations_dir {
             config.migrations_dir = migrations_dir.clone();
         }
         Ok(config)
+    }
+
+    fn explicit_config(path: &std::path::Path) -> crate::Result<ExplicitConfigProbe> {
+        Figment::new()
+            .merge(Toml::file(path))
+            .extract()
+            .map_err(|e| ShkiError::config(format!("Failed to inspect config: {}", e)))
     }
 
     fn base_figment(path: &std::path::Path) -> Figment {
@@ -605,6 +619,28 @@ out = "db/migrations"
 
         assert_eq!(config.migrations_dir, PathBuf::from("db/migrations"));
         assert_eq!(config.out_dir(), temp_dir.path().join("db/migrations"));
+    }
+
+    #[test]
+    fn load_defaults_root_to_config_file_parent() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("shki.toml");
+
+        std::fs::write(
+            &config_path,
+            r#"
+dialect = "sqlite"
+database_url = "sqlite://test.db"
+"#,
+        )
+        .expect("failed to write config");
+
+        let config =
+            Config::load(&config_path, &CommonArgs::default()).expect("config should load");
+
+        assert_eq!(config.root, temp_dir.path());
+        assert_eq!(config.schema_path(), temp_dir.path().join("schema"));
+        assert_eq!(config.out_dir(), temp_dir.path().join("migrations"));
     }
 
     #[test]
