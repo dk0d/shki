@@ -1,7 +1,5 @@
 use sqlx::{Pool, SqliteExecutor};
 
-use super::EngineDriver;
-use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
@@ -41,7 +39,7 @@ impl Sqlite {
         Ok(())
     }
 
-    async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
+    pub(crate) async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
     where
         E: SqliteExecutor<'e>,
     {
@@ -84,7 +82,7 @@ impl Sqlite {
             })
     }
 
-    async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
+    pub(crate) async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
     where
         E: SqliteExecutor<'e>,
     {
@@ -115,7 +113,7 @@ impl Sqlite {
             })
     }
 
-    async fn rollback_migration_in(
+    pub(crate) async fn rollback_migration_in(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         path: &Path,
@@ -142,16 +140,8 @@ impl Sqlite {
         let _ = self.delete_migration_in(&mut **tx, name).await?;
         Ok(())
     }
-}
 
-impl EngineDriver for Sqlite {
-    async fn ensure_migrations(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await
-        })
-    }
-
-    async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
@@ -164,7 +154,7 @@ impl EngineDriver for Sqlite {
         Ok(rows)
     }
 
-    async fn migrations_table_exists(&self) -> Result<bool> {
+    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
         let exists = sqlx::query_scalar::<_, i64>(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
         )
@@ -174,53 +164,40 @@ impl EngineDriver for Sqlite {
         Ok(exists != 0)
     }
 
-    async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await?;
+    pub(crate) async fn apply_migration_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
+        let sql = std::fs::read_to_string(path)?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
+        let checksum = sql_checksum(&sql);
 
-            let sql = std::fs::read_to_string(path)?;
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-            let checksum = sql_checksum(&sql);
+        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                name,
+                e,
+                truncate_sql(&sql, 200)
+            ))
+        })?;
 
-            sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                    name,
-                    e,
-                    truncate_sql(&sql, 200)
-                ))
-            })?;
-
-            self.insert_migration_in(&mut *tx, name, &checksum).await
-        })
+        self.insert_migration_in(&mut **tx, name, &checksum).await
     }
 
-    async fn rollback_migration(&self, path: &Path) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.rollback_migration_in(&mut tx, path).await
-        })
-    }
-
-    async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await?;
-            self.mark_applied_in(&mut *tx, path).await
-        })
-    }
-
-    async fn delete_table(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            let table_name =
-                SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-            let query = format!("DROP TABLE {}", table_name);
-            sqlx::query(&query)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
-            Ok(())
-        })
+    pub(crate) async fn delete_table_in<'e, E>(&self, exec: E) -> Result<()>
+    where
+        E: SqliteExecutor<'e>,
+    {
+        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let query = format!("DROP TABLE {}", table_name);
+        sqlx::query(&query)
+            .execute(exec)
+            .await
+            .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
+        Ok(())
     }
 }

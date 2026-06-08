@@ -1,7 +1,5 @@
 use sqlx::{MySqlExecutor, Pool};
 
-use super::EngineDriver;
-use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
@@ -30,7 +28,7 @@ impl Mysql {
         &self.table
     }
 
-    async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
+    pub(crate) async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
     where
         E: MySqlExecutor<'e>,
     {
@@ -83,7 +81,7 @@ impl Mysql {
             })
     }
 
-    async fn mark_applied_in(
+    pub(crate) async fn mark_applied_in(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
         path: &Path,
@@ -126,7 +124,7 @@ impl Mysql {
         Ok(row)
     }
 
-    async fn rollback_migration_in(
+    pub(crate) async fn rollback_migration_in(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
         path: &Path,
@@ -153,40 +151,32 @@ impl Mysql {
         let _ = self.delete_migration_in(&mut **tx, name).await?;
         Ok(())
     }
-}
 
-impl EngineDriver for Mysql {
-    async fn ensure_migrations(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await
-        })
+    pub(crate) async fn apply_migration_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
+        let sql = std::fs::read_to_string(path)?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
+        let checksum = sql_checksum(&sql);
+
+        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                name,
+                e,
+                truncate_sql(&sql, 200)
+            ))
+        })?;
+
+        self.insert_migration_in(tx, name, &checksum).await
     }
 
-    async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await?;
-
-            let sql = std::fs::read_to_string(path)?;
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-            let checksum = sql_checksum(&sql);
-
-            sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                    name,
-                    e,
-                    truncate_sql(&sql, 200)
-                ))
-            })?;
-
-            self.insert_migration_in(&mut tx, name, &checksum).await
-        })
-    }
-
-    async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!(
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
@@ -198,20 +188,7 @@ impl EngineDriver for Mysql {
         Ok(rows)
     }
 
-    async fn rollback_migration(&self, path: &Path) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.rollback_migration_in(&mut tx, path).await
-        })
-    }
-
-    async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut *tx).await?;
-            self.mark_applied_in(&mut tx, path).await
-        })
-    }
-
-    async fn migrations_table_exists(&self) -> Result<bool> {
+    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
         let table_schema = match self.table.schema.as_deref() {
             Some(schema) => schema.to_string(),
             None => sqlx::query_scalar::<_, Option<String>>("SELECT DATABASE()")
@@ -229,17 +206,17 @@ impl EngineDriver for Mysql {
         Ok(exists != 0)
     }
 
-    async fn delete_table(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            let table_name =
-                SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-            let query = format!("DROP TABLE {}", table_name);
-            sqlx::query(&query)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
-            Ok(())
-        })
+    pub(crate) async fn delete_table_in<'e, E>(&self, exec: E) -> Result<()>
+    where
+        E: MySqlExecutor<'e>,
+    {
+        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let query = format!("DROP TABLE {}", table_name);
+        sqlx::query(&query)
+            .execute(exec)
+            .await
+            .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
+        Ok(())
     }
 }
 
