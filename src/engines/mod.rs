@@ -122,7 +122,4 @@ pub(crate) trait EngineDriver {
 
     /// Delete all records from the migrations table
     async fn delete_table(&self) -> Result<()>;
-
-    // /// Delete a single migration
-    // async fn delete_migration(&self, name: &str) -> Result<MigrationRow>;
 }

@@ -242,12 +242,6 @@ impl EngineDriver for Mysql {
             Ok(())
         })
     }
-
-    // async fn delete_migration(&self, name: &str) -> Result<MigrationRow> {
-    //     with_tx!(self.pool, |tx| {
-    //         self.delete_migration_in(&mut *tx, name).await
-    //     })
-    // }
 }
 
 #[cfg(test)]
