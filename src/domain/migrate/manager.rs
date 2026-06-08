@@ -1,6 +1,4 @@
-//! Migration file mb.rsanagement
-//!
-//! This module handles reading, writing, and applying migration files.
+//! Reading, writing, and applying migration files.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -13,7 +11,7 @@ use crate::engines::{Engine, EngineDriver};
 use crate::models::iden::Iden;
 use crate::snapshots::Snapshot;
 use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use petname::Generator;
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
@@ -32,27 +30,6 @@ impl std::fmt::Display for MigrationDirection {
         }
     }
 }
-/// A migration file
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Migration {
-    /// Migration version/name
-    pub name: String,
-
-    /// SQL statements for the up migration
-    pub sql: String,
-
-    /// Timestamp when the migration was created
-    pub created_at: DateTime<Utc>,
-
-    /// Snapshot ID this migration was generated from
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub from_snapshot: Option<String>,
-
-    /// Snapshot ID this migration produces
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to_snapshot: Option<String>,
-}
-
 pub fn option_truncate<T>(value: &Option<T>, default: &str, limit: usize) -> String
 where
     T: ToString,
@@ -232,7 +209,6 @@ impl MigrationManager {
             .filter(|e| {
                 let path = e.path();
                 let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                // Include .sql files but exclude .down.sql files
                 filename.ends_with(".sql") && !filename.ends_with(".down.sql")
             })
             .map(|e| e.path())
@@ -345,24 +321,18 @@ impl MigrationManager {
         let applied = self.get_applied_migrations().await?;
 
         for migration in applied {
-            // Skip migrations without checksums (applied before checksum tracking)
             let Some(stored_checksum) = migration.checksum else {
                 continue;
             };
 
-            // Find the migration file
             let migration_path = self.out_dir.join(format!("{}.sql", migration.name));
             if !migration_path.exists() {
-                // Migration file not found - could be intentionally removed
-                // We don't error here since the migration was already applied
                 continue;
             }
 
-            // Calculate current checksum
             let sql = std::fs::read_to_string(&migration_path)?;
             let current_checksum = sql_checksum(&sql);
 
-            // Compare checksums
             if stored_checksum != current_checksum {
                 return Err(ShkiError::checksum_mismatch(
                     &migration.name,
@@ -383,7 +353,6 @@ impl MigrationManager {
     /// Note: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
     /// run inside a transaction. For such cases, use separate migration files.
     pub async fn apply_migration(&self, migration_path: &Path) -> Result<MigrationRow> {
-        self.ensure_migrations_table().await?;
         self.engine.apply_migration(migration_path).await
     }
 
@@ -392,21 +361,11 @@ impl MigrationManager {
     /// This is useful for bootstrap/adoption workflows where the database already
     /// matches the migration state and only tracking metadata should be inserted.
     pub async fn mark_migration_applied(&self, migration_path: &Path) -> Result<()> {
-        self.ensure_migrations_table().await?;
         self.engine.mark_applied(migration_path).await?;
         Ok(())
     }
 
-    /// Apply all pending migrations
-    ///
-    /// Validates both snapshots and applied migration checksums before applying
-    /// new ones. If any checksum mismatch is detected, the operation fails before
-    /// any new migrations are applied.
     pub async fn apply_all(&self) -> Result<Vec<String>> {
-        // Validate snapshots against migration files first
-        // self.validate_snapshots()?;
-
-        // Validate checksums of already-applied migrations
         self.validate_checksums().await?;
 
         let pending = self.get_pending_migrations().await?;
@@ -416,7 +375,7 @@ impl MigrationManager {
             let name = migration_path
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
+                .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?
                 .to_string();
 
             self.apply_migration(&migration_path).await?;
@@ -433,11 +392,9 @@ impl MigrationManager {
     pub async fn get_rollback_migrations(&self) -> Result<Vec<PathBuf>> {
         let applied = self.get_applied_migrations().await?;
 
-        // Get down migrations that exist and match applied migrations
-        // Return in reverse order (most recent first)
         let rollback_migrations: Vec<PathBuf> = applied
             .into_iter()
-            .rev() // Most recent first
+            .rev()
             .filter_map(|m| {
                 let down_path = self.out_dir.join(format!("{}.down.sql", m.name));
                 if down_path.exists() {
@@ -448,7 +405,6 @@ impl MigrationManager {
             })
             .collect();
 
-        // Keep in reverse chronological order
         Ok(rollback_migrations)
     }
 
@@ -476,7 +432,7 @@ impl MigrationManager {
                 .file_name()
                 .and_then(|s| s.to_str())
                 .and_then(|s| s.strip_suffix(".down.sql"))
-                .unwrap_or("unknown")
+                .ok_or_else(|| ShkiError::migration("Invalid down migration filename"))?
                 .to_string();
 
             self.rollback_migration(&down_path).await?;
@@ -499,7 +455,7 @@ impl MigrationManager {
                 .file_name()
                 .and_then(|s| s.to_str())
                 .and_then(|s| s.strip_suffix(".down.sql"))
-                .unwrap_or("unknown")
+                .ok_or_else(|| ShkiError::migration("Invalid down migration filename"))?
                 .to_string();
 
             self.rollback_migration(&down_path).await?;
@@ -539,18 +495,13 @@ impl MigrationManager {
     ) -> Result<(PathBuf, Option<PathBuf>)> {
         self.ensure_dir()?;
 
-        // Sanitize the name (replace spaces with underscores, remove special chars)
         let sanitized_name = sanitize_migration_name(name);
-
-        // Generate migration name with prefix
         let migration_name = self.next_migration_name(Some(&sanitized_name))?;
         let up_path = self.out_dir.join(format!("{}.sql", migration_name));
 
-        // Create up migration template content
         let up_content = generate_blank_migration_template(&migration_name, false);
         std::fs::write(&up_path, up_content)?;
 
-        // Create down migration if requested
         let down_path = if with_down {
             let path = self.out_dir.join(format!("{}.down.sql", migration_name));
             let down_content = generate_blank_migration_template(&migration_name, true);
@@ -644,12 +595,10 @@ impl MigrationManager {
         let migration_name = self.next_migration_name(Some(&sanitized_name))?;
         let up_path = self.out_dir.join(format!("{}.sql", migration_name));
 
-        // Write up migration
         let up_content = self.migration_content(&migration_name, up_sql, MigrationDirection::Up);
 
         std::fs::write(&up_path, up_content)?;
 
-        // Write down migration if provided
         let down_path = if let Some(down) = down_sql {
             let path = self.out_dir.join(format!("{}.down.sql", migration_name));
             let down_content =
