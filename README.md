@@ -53,16 +53,30 @@ cargo install --path .
 shki init db --dialect postgres
 ```
 
+`init` creates a project layout like:
+
+```text
+db/
+  shki.toml
+  postgres-language-server.jsonc
+  schema/
+    main.sql
+  migrations/
+    _meta/
+```
+
+For PostgreSQL projects, `postgres-language-server.jsonc` is generated from the same init defaults so editor tooling points at the Declarative Schema entrypoint.
+
 2. Configure your live database URL.
 
 ```bash
 export DATABASE_URL='postgres://user:pass@localhost:5432/mydb'
 ```
 
-3. Create a Declarative Schema file.
+3. Edit the generated Declarative Schema entrypoint.
 
 ```sql
--- db/schema
+-- db/schema/main.sql
 CREATE TABLE users (
   id integer PRIMARY KEY,
   email text NOT NULL UNIQUE
@@ -142,20 +156,20 @@ Command-scoped options:
 - `create`, `generate`, `migrate`, `status`, and `down` accept migration options such as `--table <NAME>`, `--prefix <index|timestamp|unix>`, and `--generate-down` where applicable.
 - `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, `--serde`, `--sqlx`, and `--no-sqlx`.
 
-| Command                    | Alias  | Purpose                                                      |
-| -------------------------- | ------ | ------------------------------------------------------------ |
-| `config`                   | `conf` | Print the effective configuration                            |
-| `init [path]`              | `i`    | Initialize a project directory                               |
-| `dump`                     | -      | Export live database shape as SQL, JSON, or Directory Schema |
-| `diff`                     | -      | Compile Declarative Schema and preview the Migration Plan    |
-| `generate <name>`          | `gen`  | Generate schema-derived migration artifacts and a Snapshot   |
-| `generate <name> --custom` | `gen`  | Create a Custom Migration                                    |
-| `create <name>`            | `new`  | Create a Custom Migration for manual SQL editing             |
-| `migrate`                  | `up`   | Apply pending migrations                                     |
-| `status`                   | `s`    | Show migration status and checksum issues                    |
-| `down [count]`             | -      | Apply Down Migrations for local rollback                     |
-| `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape |
-| `drop [migration]`         | -      | Remove a local migration, Down Migration, Snapshot, and Journal entry |
+| Command                    | Alias  | Purpose                                                                                                              |
+| -------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| `config`                   | `conf` | Print the effective configuration                                                                                    |
+| `init [path]`              | `i`    | Initialize a project directory with config, schema, migrations metadata, and Postgres editor config where applicable |
+| `dump`                     | -      | Export live database shape as SQL, JSON, or Directory Schema                                                         |
+| `diff`                     | -      | Compile Declarative Schema and preview the Migration Plan                                                            |
+| `generate <name>`          | `gen`  | Generate schema-derived migration artifacts and a Snapshot                                                           |
+| `generate <name> --custom` | `gen`  | Create a Custom Migration                                                                                            |
+| `create <name>`            | `new`  | Create a Custom Migration for manual SQL editing                                                                     |
+| `migrate`                  | `up`   | Apply pending migrations                                                                                             |
+| `status`                   | `s`    | Show migration status and checksum issues                                                                            |
+| `down [count]`             | -      | Apply Down Migrations for local rollback                                                                             |
+| `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape                                                        |
+| `drop [migration]`         | -      | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                |
 
 ## Usage Patterns
 
@@ -325,25 +339,25 @@ jsonb = "serde_json::Value"
 
 Codegen options:
 
-| Option | Purpose |
-| ------ | ------- |
-| `output` | Default output path when `--output` is not provided. Relative paths resolve from `root`. |
-| `format` | Output layout: `single`, `singlemodule`, or `modules`. |
-| `struct_derives` | Replaces the default derives attached to generated structs. |
-| `struct_attributes` | Extra raw attributes added above generated structs. |
-| `enum_derives` | Replaces the default derives attached to generated enums. |
-| `enum_attributes` | Extra raw attributes added above generated enums. |
-| `struct_renames` | Exact table-name to generated struct-name overrides. These apply before `struct_pattern`. |
-| `struct_pattern` | Pattern for generated struct names. `{}` is replaced with the resolved base name. For table `users`, the base is `User`; pattern `{}Row` produces `UserRow`. |
-| `enum_renames` | Exact enum-name to generated enum-name overrides. These apply before `enum_pattern`. |
-| `enum_pattern` | Pattern for generated enum names. `{}` is replaced with the resolved base name. For enum `user_status`, the base is `UserStatus`; pattern `Db{}` produces `DbUserStatus`. |
-| `type_overrides` | SQL type to generated type overrides. Built-in types use lowercase keys like `jsonb`; custom PostgreSQL types may use schema-qualified keys like `public.money`. |
-| `serde` | Adds serde support to generated Rust structs/enums. |
-| `sqlx` | Controls sqlx derives in generated Rust output. Defaults to `true`. |
-| `include_tables` | If non-empty, only listed table names are generated. |
-| `exclude_tables` | Listed table names are skipped. Applied after `include_tables`. |
-| `verbose` | Prints generated code to stdout as well as writing files. |
-| `impl_file_name` | File name stem for hand-written impl files in `modules` mode. |
+| Option              | Purpose                                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`            | Default output path when `--output` is not provided. Relative paths resolve from `root`.                                                                                  |
+| `format`            | Output layout: `single`, `singlemodule`, or `modules`.                                                                                                                    |
+| `struct_derives`    | Replaces the default derives attached to generated structs.                                                                                                               |
+| `struct_attributes` | Extra raw attributes added above generated structs.                                                                                                                       |
+| `enum_derives`      | Replaces the default derives attached to generated enums.                                                                                                                 |
+| `enum_attributes`   | Extra raw attributes added above generated enums.                                                                                                                         |
+| `struct_renames`    | Exact table-name to generated struct-name overrides. These apply before `struct_pattern`.                                                                                 |
+| `struct_pattern`    | Pattern for generated struct names. `{}` is replaced with the resolved base name. For table `users`, the base is `User`; pattern `{}Row` produces `UserRow`.              |
+| `enum_renames`      | Exact enum-name to generated enum-name overrides. These apply before `enum_pattern`.                                                                                      |
+| `enum_pattern`      | Pattern for generated enum names. `{}` is replaced with the resolved base name. For enum `user_status`, the base is `UserStatus`; pattern `Db{}` produces `DbUserStatus`. |
+| `type_overrides`    | SQL type to generated type overrides. Built-in types use lowercase keys like `jsonb`; custom PostgreSQL types may use schema-qualified keys like `public.money`.          |
+| `serde`             | Adds serde support to generated Rust structs/enums.                                                                                                                       |
+| `sqlx`              | Controls sqlx derives in generated Rust output. Defaults to `true`.                                                                                                       |
+| `include_tables`    | If non-empty, only listed table names are generated.                                                                                                                      |
+| `exclude_tables`    | Listed table names are skipped. Applied after `include_tables`.                                                                                                           |
+| `verbose`           | Prints generated code to stdout as well as writing files.                                                                                                                 |
+| `impl_file_name`    | File name stem for hand-written impl files in `modules` mode.                                                                                                             |
 
 Name resolution order is: explicit rename, default casing, then pattern. Struct defaults singularize table names and use PascalCase, so `users` becomes `User`. Enum defaults use PascalCase, so `user_status` becomes `UserStatus`.
 
