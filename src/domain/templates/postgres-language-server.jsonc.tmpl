@@ -1,0 +1,50 @@
+{
+  "$schema": "https://pg-language-server.com/latest/schema.json",
+  "files": {
+    "include": [
+      "{{schema}}"
+    ]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "typecheck": {
+    "enabled": true
+  },
+  "plpgsqlCheck": {
+    "enabled": true
+  },
+  "format": {
+    "enabled": false,
+    "keywordCase": "upper",
+    "constantCase": "upper",
+    "typeCase": "upper"
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "db": {
+    // Database host address (default: "127.0.0.1")
+    "host": "localhost",
+    // Database port (default: 5432)
+    "port": 5432,
+    // Database username (default: "postgres")
+    "username": "postgres",
+    // Database password (default: "postgres")
+    "password": "postgres",
+    // Database name to connect to (default: "postgres")
+    "database": "app",
+    // Connection timeout in seconds (default: 10)
+    "connTimeoutSecs": {{conn_timeout_secs}},
+    // Schemas where code action statement execution is allowed (default: [])
+    "allowStatementExecutionsAgainst": [
+      "public",
+      "testing"
+    ]
+  }
+}

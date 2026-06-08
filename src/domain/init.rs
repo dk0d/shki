@@ -8,6 +8,10 @@ use crate::schema::SqlDialect;
 const CONFIG_TEMPLATE: &str = include_str!("templates/shki.toml");
 const POSTGRES_SCHEMA_TEMPLATE: &str = include_str!("templates/postgres_main.sql");
 const CUSTOM_MIGRATION_SCHEMA_TEMPLATE: &str = include_str!("templates/custom_migration_main.sql");
+const POSTGRES_LANGUAGE_SERVER_TEMPLATE: &str =
+    include_str!("templates/postgres-language-server.jsonc.tmpl");
+const INIT_SCHEMA_PATH: &str = "schema";
+const INIT_TIMEOUT_SECONDS: u32 = 2;
 
 /// Initialize a new shki project
 pub async fn cmd_init(target_dir: &Path, dialect: Option<SqlDialect>) -> Result<()> {
@@ -46,23 +50,37 @@ async fn init_sql_project(target_dir: &Path, dialect: SqlDialect) -> Result<()> 
         std::fs::write(&schema_path, schema_template(dialect))?;
     }
 
+    let postgres_lsp_path = target_dir.join("postgres-language-server.jsonc");
+    if dialect == SqlDialect::Postgres && !postgres_lsp_path.exists() {
+        std::fs::write(
+            &postgres_lsp_path,
+            postgres_language_server_template(INIT_SCHEMA_PATH, INIT_TIMEOUT_SECONDS),
+        )?;
+    }
+
     println!("{}", "Initialized shki Declarative Schema project".green());
     println!();
     println!("  {}: {}", "Directory".cyan(), target_dir.display());
     println!();
     println!("  {}", "Created files:".cyan());
     println!(
-        "    shki.toml             - {}",
-        "project configuration".dimmed()
+        "    shki.toml                      - {}",
+        "Project configuration".dimmed()
     );
     println!(
-        "    schema/main.sql       - {}",
-        "Declarative Schema entrypoint".dimmed()
+        "    schema/main.sql                - {}",
+        "Declarative schema entrypoint".dimmed()
     );
     println!(
-        "    migrations/_meta/     - {}",
+        "    migrations/_meta/              - {}",
         "Snapshot and Journal metadata".dimmed()
     );
+    if dialect == SqlDialect::Postgres {
+        println!(
+            "    postgres-language-server.jsonc - {}",
+            "Postgres Language Server configuration".dimmed()
+        );
+    }
     println!();
     println!("  {}", "Next steps:".cyan());
     println!("    1. Edit shki.toml to set database_url or export DATABASE_URL");
@@ -77,7 +95,13 @@ async fn init_sql_project(target_dir: &Path, dialect: SqlDialect) -> Result<()> 
 }
 
 fn config_template(dialect: SqlDialect) -> String {
-    CONFIG_TEMPLATE.replace("{dialect}", config_dialect(dialect))
+    CONFIG_TEMPLATE.replace("{{dialect}}", config_dialect(dialect))
+}
+
+fn postgres_language_server_template(path: &str, timeout: u32) -> String {
+    POSTGRES_LANGUAGE_SERVER_TEMPLATE
+        .replace("{{schema}}", path)
+        .replace("{{conn_timeout_secs}}", &timeout.to_string())
 }
 
 fn config_dialect(dialect: SqlDialect) -> &'static str {
@@ -127,12 +151,31 @@ mod tests {
         assert!(target_dir.join("shki.toml").exists());
         assert!(target_dir.join("schema/main.sql").exists());
         assert!(target_dir.join("migrations/_meta").is_dir());
+        assert!(target_dir.join("postgres-language-server.jsonc").exists());
         assert!(!target_dir.join("schema/index.ts").exists());
         assert!(!target_dir.join("schema/.shki/schema.ts").exists());
+
+        let pgls_config =
+            std::fs::read_to_string(target_dir.join("postgres-language-server.jsonc"))
+                .expect("postgres language server config should be readable");
+        assert!(pgls_config.contains(r#""schema""#));
+        assert!(pgls_config.contains("\"connTimeoutSecs\": 2"));
 
         let config = Config::load(&target_dir.join("shki.toml"), &CommonArgs::default())
             .expect("generated config should load");
         assert_eq!(config.schema_path(), target_dir.join("schema"));
         assert_eq!(config.out_dir(), target_dir.join("migrations"));
+    }
+
+    #[tokio::test]
+    async fn init_skips_postgres_language_server_config_for_non_postgres() {
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let target_dir = temp_dir.path().join("project");
+
+        cmd_init(&target_dir, Some(SqlDialect::Sqlite))
+            .await
+            .expect("init should succeed");
+
+        assert!(!target_dir.join("postgres-language-server.jsonc").exists());
     }
 }
