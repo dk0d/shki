@@ -32,10 +32,8 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         return Ok(());
     }
 
-    // Try to get applied migrations if database URL is available
     let applied = if config.database_url.is_some() {
-        let migrations = manager.get_applied_migrations().await?;
-        Some(migrations)
+        Some(manager.try_get_applied_migrations().await?)
     } else {
         None
     };
@@ -64,15 +62,15 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
                 "~".yellow()
             };
 
-            let checksum = "-".dimmed().to_string(); // Placeholder for checksum
-
-            // Check if down migration exists
             let has_down = manager.has_down_migration(name);
 
             MigrationState {
                 status: status.to_string(),
                 name: name.bright_white().to_string(),
-                checksum,
+                checksum: applied_by_name
+                    .get(name)
+                    .and_then(|m| m.checksum.clone())
+                    .unwrap_or_else(|| "-".dimmed().to_string()),
                 down: if has_down {
                     format!(" {}", DOWN_SYMBOL.cyan())
                 } else {
@@ -94,11 +92,6 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         .modify(Columns::one(2), Alignment::center());
 
     println!("{}", table);
-
-    // TODO: use verbose flag to show these types of things
-    // Show legend
-    // println!("   {} = down migration available", DOWN_SYMBOL.cyan());
-    // println!("   {} = down migration not available", "x".red());
 
     Ok(())
 }
