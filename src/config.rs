@@ -408,6 +408,12 @@ impl Config {
         self
     }
 
+    pub fn require_database_url(&self) -> crate::Result<&str> {
+        self.database_url
+            .as_deref()
+            .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))
+    }
+
     /// if dialect is not already set, try to infer it from the database URL
     pub fn infer_dialect(mut self) -> Self {
         if let Some(database_url) = self.database_url.as_deref()
