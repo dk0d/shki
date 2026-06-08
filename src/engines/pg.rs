@@ -1,5 +1,4 @@
 use crate::engines::EngineDriver;
-// use indexmap::IndexMap;
 use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
@@ -71,7 +70,27 @@ impl Postgres {
         Ok(())
     }
 
-    async fn mark_applied_in<'e, E>(&self, _exec: E, path: &Path) -> Result<MigrationRow>
+    async fn insert_migration_in<'e, E>(
+        &self,
+        exec: E,
+        name: &str,
+        checksum: &str,
+    ) -> Result<MigrationRow>
+    where
+        E: PgExecutor<'e>,
+    {
+        let query = self.insert_migration_query(&self.migrations_table);
+        sqlx::query_as::<_, MigrationRow>(&query)
+            .bind(name)
+            .bind(checksum)
+            .fetch_one(exec)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
+            })
+    }
+
+    async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
     where
         E: PgExecutor<'e>,
     {
@@ -81,16 +100,7 @@ impl Postgres {
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
         let checksum = sql_checksum(&sql);
-        let query = self.insert_migration_query(&self.migrations_table);
-        let row = sqlx::query_as::<_, MigrationRow>(&query)
-            .bind(name)
-            .bind(&checksum)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
-            })?;
-        Ok(row)
+        self.insert_migration_in(exec, name, &checksum).await
     }
 
     async fn rollback_migration_in(
@@ -100,7 +110,6 @@ impl Postgres {
     ) -> Result<()> {
         let sql = std::fs::read_to_string(path)?;
 
-        // Extract the migration name from the down file (remove .down.sql)
         let filename = path
             .file_name()
             .and_then(|s| s.to_str())
@@ -151,6 +160,7 @@ impl EngineDriver for Postgres {
     /// matches the migration state and only tracking metadata should be inserted.
     async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
         with_tx!(self.pool, |tx| {
+            self.ensure_migrations_in(&mut tx).await?;
             self.mark_applied_in(&mut *tx, path).await
         })
     }
@@ -174,13 +184,13 @@ impl EngineDriver for Postgres {
     /// run inside a transaction. For such cases, use separate migration files.
     async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
         with_tx!(self.pool, |tx| {
+            self.ensure_migrations_in(&mut tx).await?;
+
             let sql = std::fs::read_to_string(path)?;
             let name = path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-
-            // Calculate checksum of the SQL content
             let checksum = sql_checksum(&sql);
 
             sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
@@ -192,15 +202,7 @@ impl EngineDriver for Postgres {
                 ))
             })?;
 
-            // Build the SQL for recording the migration
-            let query = self.insert_migration_query(&self.migrations_table);
-            let row = sqlx::query_as::<_, MigrationRow>(&query)
-                .bind(name)
-                .bind(&checksum)
-                .fetch_one(&mut *tx)
-                .await?;
-
-            Ok(row)
+            self.insert_migration_in(&mut *tx, name, &checksum).await
         })
     }
 

@@ -53,21 +53,18 @@ impl Mysql {
         Ok(())
     }
 
-    async fn insert_migration_in<'e, E>(
+    async fn insert_migration_in(
         &self,
-        exec: E,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
         name: &str,
         checksum: &str,
-    ) -> Result<MigrationRow>
-    where
-        E: MySqlExecutor<'e>,
-    {
+    ) -> Result<MigrationRow> {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let insert = format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name);
         sqlx::query(&insert)
             .bind(name)
             .bind(checksum)
-            .execute(exec)
+            .execute(&mut **tx)
             .await
             .map_err(|e| {
                 ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
@@ -79,24 +76,25 @@ impl Mysql {
         );
         sqlx::query_as::<_, MigrationRow>(&select)
             .bind(name)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| {
                 ShkiError::migration(format!("Failed to load migration '{}': {}", name, e))
             })
     }
 
-    async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
-    where
-        E: MySqlExecutor<'e>,
-    {
+    async fn mark_applied_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
         let sql = std::fs::read_to_string(path)?;
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
         let checksum = sql_checksum(&sql);
-        self.insert_migration_in(exec, name, &checksum).await
+        self.insert_migration_in(tx, name, &checksum).await
     }
 
     async fn delete_migration_in<'e, E>(&self, exec: E, name: &str) -> Result<MigrationRow>
@@ -184,7 +182,7 @@ impl EngineDriver for Mysql {
                 ))
             })?;
 
-            self.insert_migration_in(&mut *tx, name, &checksum).await
+            self.insert_migration_in(&mut tx, name, &checksum).await
         })
     }
 
@@ -208,7 +206,8 @@ impl EngineDriver for Mysql {
 
     async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
         with_tx!(self.pool, |tx| {
-            self.mark_applied_in(&mut *tx, path).await
+            self.ensure_migrations_in(&mut *tx).await?;
+            self.mark_applied_in(&mut tx, path).await
         })
     }
 
