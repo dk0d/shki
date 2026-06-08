@@ -65,10 +65,11 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         Commands::Migrate {
             migrations,
+            mode,
             dry_run,
         } => {
             let config = config.with_migration_args(&migrations)?;
-            migrate::cmd_migrate(&config, dry_run).await
+            migrate::cmd_migrate(&config, mode, dry_run).await
         }
 
         Commands::Dump {

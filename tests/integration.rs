@@ -6,6 +6,7 @@ use shki::codegen::OutputMode;
 use shki::codegen::lang::typescript::TypescriptFlavor;
 use shki::compiler::{ExternalShadowDBCompiler, SchemaCompiler};
 use shki::config::Config;
+use shki::domain::migrate::manager::ApplyMigrationMode;
 use shki::dump::SchemaExportFormat;
 use shki::migrate::journal::{Journal, MigrationKind};
 use shki::models::iden::Iden;
@@ -90,7 +91,7 @@ async fn scenario_apply_all_and_pending_detection<T: TestBackend>(ctx: T) {
     );
 
     let applied = manager
-        .apply_all()
+        .apply(ApplyMigrationMode::All)
         .await
         .expect("failed to apply all pending migrations");
 
@@ -155,7 +156,7 @@ async fn scenario_rollback_all<T: TestBackend>(ctx: T) {
     ]);
 
     manager
-        .apply_all()
+        .apply(ApplyMigrationMode::All)
         .await
         .expect("failed to apply all migrations");
 
@@ -187,7 +188,7 @@ async fn scenario_rollback_count<T: TestBackend>(ctx: T) {
     }
 
     manager
-        .apply_all()
+        .apply(ApplyMigrationMode::All)
         .await
         .expect("failed to apply all migrations");
 

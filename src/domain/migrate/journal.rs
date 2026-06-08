@@ -66,7 +66,7 @@ impl Journal {
         let migration = migration_path
             .file_stem()
             .and_then(|stem| stem.to_str())
-            .unwrap_or("unknown")
+            .ok_or_else(|| crate::ShkiError::migration("Invalid migration filename"))?
             .to_string();
         let sql = std::fs::read_to_string(migration_path)?;
 
