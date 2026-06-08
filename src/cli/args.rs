@@ -22,6 +22,7 @@ use crate::codegen::OutputMode;
 use crate::config::MigrationPrefix;
 use crate::domain::codegen::lang::typescript::TypescriptFlavor;
 use crate::dump::SchemaExportFormat;
+use crate::migrate::manager::ApplyMigrationMode;
 use crate::schema::SqlDialect;
 
 pub fn get_styles() -> clap::builder::Styles {
@@ -247,6 +248,9 @@ pub enum Commands {
     /// Apply pending migrations to the database
     #[command(visible_alias = "up")]
     Migrate {
+        #[command(subcommand)]
+        mode: Option<ApplyMigrationMode>,
+
         #[command(flatten)]
         migrations: MigrationArgs,
 

@@ -116,6 +116,7 @@ database_url = "{}"
             },
             command: Commands::Migrate {
                 migrations: Default::default(),
+                mode: None,
                 dry_run: false,
             },
         }

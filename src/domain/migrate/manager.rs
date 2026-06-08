@@ -81,6 +81,17 @@ pub struct MigrationManager {
     pub engine: Engine,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Subcommand, Default)]
+pub enum ApplyMigrationMode {
+    /// Apply all migrations (default)
+    #[default]
+    All,
+    /// Apply this number of pending migrations
+    Steps { num: usize },
+    /// Up to migration name
+    To { name: String },
+}
+
 impl MigrationManager {
     pub async fn from_config(config: &crate::config::Config) -> Result<Self> {
         let table: Iden = config.migrations.entity().clone();
@@ -365,20 +376,38 @@ impl MigrationManager {
         Ok(())
     }
 
-    pub async fn apply_all(&self) -> Result<Vec<String>> {
+    pub async fn apply(&self, mode: ApplyMigrationMode) -> Result<Vec<String>> {
         self.validate_checksums().await?;
 
         let pending = self.get_pending_migrations().await?;
         let mut applied = Vec::new();
 
-        for migration_path in pending {
+        let num = match mode {
+            ApplyMigrationMode::All => Ok(pending.len()),
+            ApplyMigrationMode::Steps { num } => Ok(num),
+            ApplyMigrationMode::To { name } => {
+                let path = pending.iter().enumerate().find(|(_, p)| {
+                    p.file_stem()
+                        .is_some_and(|p| p.to_str().unwrap() == name.as_str())
+                });
+                match path {
+                    Some((idx, _)) => Ok(idx + 1),
+                    None => Err(ShkiError::migration(format!(
+                        "Migration target '{}' is not pending",
+                        name
+                    ))),
+                }
+            }
+        }?;
+
+        for migration_path in pending.iter().take(num) {
             let name = migration_path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?
                 .to_string();
 
-            self.apply_migration(&migration_path).await?;
+            self.apply_migration(migration_path).await?;
             applied.push(name);
         }
         Ok(applied)
@@ -696,6 +725,26 @@ mod tests {
         (temp_dir, manager)
     }
 
+    fn write_sqlite_migrations(manager: &MigrationManager, names: &[&str]) {
+        for (idx, name) in names.iter().enumerate() {
+            std::fs::write(
+                manager.out_dir.join(format!("{name}.sql")),
+                format!("CREATE TABLE migration_{idx} (id INTEGER PRIMARY KEY);"),
+            )
+            .expect("failed to write migration");
+        }
+    }
+
+    async fn applied_names(manager: &MigrationManager) -> Vec<String> {
+        manager
+            .get_applied_migrations()
+            .await
+            .expect("failed to load applied migrations")
+            .into_iter()
+            .map(|migration| migration.name)
+            .collect()
+    }
+
     #[test]
     fn list_migration_files_splits_up_and_down_entries() {
         let (_temp_dir, manager) = temp_manager();
@@ -833,6 +882,66 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("0001_changed"));
         assert!(message.contains("checksum mismatch"));
+    }
+
+    #[tokio::test]
+    async fn apply_all_applies_every_pending_migration() {
+        let (_temp_dir, manager) = sqlite_manager();
+        write_sqlite_migrations(&manager, &["0000_first", "0001_second", "0002_third"]);
+
+        let applied = manager
+            .apply(ApplyMigrationMode::All)
+            .await
+            .expect("failed to apply all migrations");
+
+        assert_eq!(applied, vec!["0000_first", "0001_second", "0002_third"]);
+        assert_eq!(applied_names(&manager).await, applied);
+    }
+
+    #[tokio::test]
+    async fn apply_steps_limits_pending_migrations() {
+        let (_temp_dir, manager) = sqlite_manager();
+        write_sqlite_migrations(&manager, &["0000_first", "0001_second", "0002_third"]);
+
+        let applied = manager
+            .apply(ApplyMigrationMode::Steps { num: 2 })
+            .await
+            .expect("failed to apply limited migrations");
+
+        assert_eq!(applied, vec!["0000_first", "0001_second"]);
+        assert_eq!(applied_names(&manager).await, applied);
+    }
+
+    #[tokio::test]
+    async fn apply_to_applies_through_named_pending_migration() {
+        let (_temp_dir, manager) = sqlite_manager();
+        write_sqlite_migrations(&manager, &["0000_first", "0001_second", "0002_third"]);
+
+        let applied = manager
+            .apply(ApplyMigrationMode::To {
+                name: "0001_second".to_string(),
+            })
+            .await
+            .expect("failed to apply to named migration");
+
+        assert_eq!(applied, vec!["0000_first", "0001_second"]);
+        assert_eq!(applied_names(&manager).await, applied);
+    }
+
+    #[tokio::test]
+    async fn apply_to_unknown_migration_does_not_apply_everything() {
+        let (_temp_dir, manager) = sqlite_manager();
+        write_sqlite_migrations(&manager, &["0000_first", "0001_second", "0002_third"]);
+
+        let error = manager
+            .apply(ApplyMigrationMode::To {
+                name: "9999_missing".to_string(),
+            })
+            .await
+            .expect_err("unknown target should fail");
+
+        assert!(error.to_string().contains("9999_missing"));
+        assert!(applied_names(&manager).await.is_empty());
     }
 
     #[tokio::test]
