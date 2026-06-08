@@ -14,21 +14,22 @@ use self::sqlite::Sqlite;
 use std::path::Path;
 use std::pin::Pin;
 
-use crate::Result;
 use crate::config::Config;
+use crate::engines::utils::tx::with_tx;
 use crate::migrate::manager::MigrationRow;
 use crate::models::iden::Iden;
 use crate::schema::*;
 use crate::snapshots::SnapshotProvider;
+use crate::{Result, ShkiError};
 
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
 #[enum_dispatch::enum_dispatch]
 pub enum Engine {
-    Postgres,
-    Sqlite,
-    Mysql,
-    Detached,
+    Postgres(Postgres),
+    Sqlite(Sqlite),
+    Mysql(Mysql),
+    Detached(Detached),
 }
 
 impl Engine {
@@ -47,7 +48,7 @@ impl Engine {
         match config.dialect {
             SqlDialect::Postgres => {
                 let pool = sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(5)
+                    .max_connections(5) // TODO: make this configurable?
                     .acquire_timeout(std::time::Duration::from_secs(config.timeout_seconds))
                     .connect(config.database_url.as_ref().ok_or_else(|| {
                         crate::ShkiError::migration("Database URL is required for Postgres engine")
@@ -95,31 +96,103 @@ impl Engine {
             Engine::Detached(engine) => engine.table(),
         }
     }
-}
 
-#[enum_dispatch::enum_dispatch(Engine)]
-pub(crate) trait EngineDriver {
-    /// make sure migrations table exists, if not create it
-    async fn ensure_migrations(&self) -> Result<()>;
+    pub(crate) async fn ensure_migrations(&self) -> Result<()> {
+        match self {
+            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut tx).await
+            }),
+            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await
+            }),
+            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await
+            }),
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Get all migration rows in the table sorted by applied_at ascending
-    async fn select_migrations(&self) -> Result<Vec<MigrationRow>>;
+    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+        match self {
+            Engine::Postgres(engine) => engine.select_migrations().await,
+            Engine::Sqlite(engine) => engine.select_migrations().await,
+            Engine::Mysql(engine) => engine.select_migrations().await,
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Check whether the migrations table exists without creating it.
-    async fn migrations_table_exists(&self) -> Result<bool>;
+    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
+        match self {
+            Engine::Postgres(engine) => engine.migrations_table_exists().await,
+            Engine::Sqlite(engine) => engine.migrations_table_exists().await,
+            Engine::Mysql(engine) => engine.migrations_table_exists().await,
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Apply a single migration within a transaction
-    async fn apply_migration(&self, path: &Path) -> Result<MigrationRow>;
+    pub(crate) async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
+        match self {
+            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut tx).await?;
+                engine.apply_migration_in(&mut tx, path).await
+            }),
+            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await?;
+                engine.apply_migration_in(&mut tx, path).await
+            }),
+            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await?;
+                engine.apply_migration_in(&mut tx, path).await
+            }),
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Rollback a single migration using its down migration file
-    ///
-    /// Executes the down migration within a transaction and removes
-    /// the migration record from the migrations table.
-    async fn rollback_migration(&self, path: &Path) -> Result<()>;
+    pub(crate) async fn rollback_migration(&self, path: &Path) -> Result<()> {
+        match self {
+            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
+                engine.rollback_migration_in(&mut tx, path).await
+            }),
+            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
+                engine.rollback_migration_in(&mut tx, path).await
+            }),
+            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
+                engine.rollback_migration_in(&mut tx, path).await
+            }),
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Mark a migration as applied without running it (used for baseline)
-    async fn mark_applied(&self, path: &Path) -> Result<MigrationRow>;
+    pub(crate) async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
+        match self {
+            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut tx).await?;
+                engine.mark_applied_in(&mut *tx, path).await
+            }),
+            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await?;
+                engine.mark_applied_in(&mut *tx, path).await
+            }),
+            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
+                engine.ensure_migrations_in(&mut *tx).await?;
+                engine.mark_applied_in(&mut tx, path).await
+            }),
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 
-    /// Delete all records from the migrations table
-    async fn delete_table(&self) -> Result<()>;
+    pub(crate) async fn delete_table(&self) -> Result<()> {
+        match self {
+            Engine::Postgres(engine) => {
+                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut tx).await })
+            }
+            Engine::Sqlite(engine) => {
+                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut *tx).await })
+            }
+            Engine::Mysql(engine) => {
+                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut *tx).await })
+            }
+            Engine::Detached(engine) => Err(engine.unavailable()),
+        }
+    }
 }

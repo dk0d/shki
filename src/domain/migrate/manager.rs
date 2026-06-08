@@ -7,7 +7,7 @@ use super::checksum::sql_checksum;
 use super::journal::{Journal, MigrationKind, journal_path};
 use super::utils::{generate_blank_migration_template, sanitize_migration_name};
 use crate::config::MigrationPrefix;
-use crate::engines::{Engine, EngineDriver};
+use crate::engines::Engine;
 use crate::models::iden::Iden;
 use crate::snapshots::Snapshot;
 use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};

@@ -1,5 +1,3 @@
-use crate::engines::EngineDriver;
-use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
@@ -40,7 +38,7 @@ impl Postgres {
         )
     }
 
-    async fn ensure_migrations_in(
+    pub(crate) async fn ensure_migrations_in(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     ) -> Result<()> {
@@ -90,7 +88,7 @@ impl Postgres {
             })
     }
 
-    async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
+    pub(crate) async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
     where
         E: PgExecutor<'e>,
     {
@@ -103,7 +101,7 @@ impl Postgres {
         self.insert_migration_in(exec, name, &checksum).await
     }
 
-    async fn rollback_migration_in(
+    pub(crate) async fn rollback_migration_in(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         path: &Path,
@@ -147,66 +145,32 @@ impl Postgres {
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
         Ok(row)
     }
-}
 
-impl EngineDriver for Postgres {
-    async fn ensure_migrations(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| { self.ensure_migrations_in(&mut tx).await })
+    pub(crate) async fn apply_migration_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
+        let sql = std::fs::read_to_string(path)?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
+        let checksum = sql_checksum(&sql);
+
+        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                name,
+                e,
+                truncate_sql(&sql, 200)
+            ))
+        })?;
+
+        self.insert_migration_in(&mut **tx, name, &checksum).await
     }
 
-    /// Record an existing migration file as applied without executing its SQL.
-    ///
-    /// This is useful for bootstrap/adoption workflows where the database already
-    /// matches the migration state and only tracking metadata should be inserted.
-    async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut tx).await?;
-            self.mark_applied_in(&mut *tx, path).await
-        })
-    }
-
-    /// Rollback a single migration using its down migration file
-    ///
-    /// Executes the down migration within a transaction and removes
-    /// the migration record from the migrations table.
-    async fn rollback_migration(&self, path: &Path) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            self.rollback_migration_in(&mut tx, path).await
-        })
-    }
-
-    /// Apply a single migration within a transaction
-    ///
-    /// The entire migration (all statements) is executed within a single transaction.
-    /// If any statement fails, the entire migration is rolled back.
-    ///
-    /// Note: Some statements like `CREATE INDEX CONCURRENTLY` in PostgreSQL cannot
-    /// run inside a transaction. For such cases, use separate migration files.
-    async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
-        with_tx!(self.pool, |tx| {
-            self.ensure_migrations_in(&mut tx).await?;
-
-            let sql = std::fs::read_to_string(path)?;
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-            let checksum = sql_checksum(&sql);
-
-            sqlx::raw_sql(&sql).execute(&mut *tx).await.map_err(|e| {
-                ShkiError::migration(format!(
-                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                    name,
-                    e,
-                    truncate_sql(&sql, 200)
-                ))
-            })?;
-
-            self.insert_migration_in(&mut *tx, name, &checksum).await
-        })
-    }
-
-    async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name =
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!(
@@ -219,7 +183,7 @@ impl EngineDriver for Postgres {
         Ok(rows)
     }
 
-    async fn migrations_table_exists(&self) -> Result<bool> {
+    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
         let schema = self.migrations_table.schema.as_deref().unwrap_or("public");
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2)",
@@ -231,13 +195,15 @@ impl EngineDriver for Postgres {
         Ok(exists)
     }
 
-    async fn delete_table(&self) -> Result<()> {
-        with_tx!(self.pool, |tx| {
-            let table_name = SqlGenerator::new(&SqlDialect::Postgres)
-                .qualified_table_name(&self.migrations_table);
-            let query = format!("DROP TABLE {}", table_name);
-            let _ = sqlx::query(&query).execute(&mut *tx).await;
-            Ok(())
-        })
+    pub(crate) async fn delete_table_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<()> {
+        let table_name =
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+        let _ = sqlx::query(&format!("DROP TABLE {}", table_name))
+            .execute(&mut **tx)
+            .await;
+        Ok(())
     }
 }
