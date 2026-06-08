@@ -1,4 +1,4 @@
-dialect = "{dialect}"
+dialect = "{{dialect}}"
 schema = "schema"
 migrations_dir = "migrations"
 timeout_seconds = 2
