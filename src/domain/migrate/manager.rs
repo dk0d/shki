@@ -300,6 +300,20 @@ impl MigrationManager {
         Ok(rows)
     }
 
+    /// Get applied migrations without creating the migrations table.
+    pub async fn try_get_applied_migrations(&self) -> Result<Vec<MigrationRow>> {
+        if !self.engine.migrations_table_exists().await? {
+            return Ok(Vec::new());
+        }
+
+        self.engine.select_migrations().await.map_err(|e| {
+            ShkiError::migration(format!(
+                "Failed to query applied migrations from table '{}': {}",
+                self.table.name, e
+            ))
+        })
+    }
+
     /// Get pending migrations
     pub async fn get_pending_migrations(&self) -> Result<Vec<PathBuf>> {
         let all_migrations = self.list_up_migrations()?;

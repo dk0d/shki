@@ -105,6 +105,9 @@ pub(crate) trait EngineDriver {
     /// Get all migration rows in the table sorted by applied_at ascending
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>>;
 
+    /// Check whether the migrations table exists without creating it.
+    async fn migrations_table_exists(&self) -> Result<bool>;
+
     /// Apply a single migration within a transaction
     async fn apply_migration(&self, path: &Path) -> Result<MigrationRow>;
 

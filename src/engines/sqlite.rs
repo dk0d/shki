@@ -164,6 +164,16 @@ impl EngineDriver for Sqlite {
         Ok(rows)
     }
 
+    async fn migrations_table_exists(&self) -> Result<bool> {
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
+        )
+        .bind(&self.table.name)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists != 0)
+    }
+
     async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
         with_tx!(self.pool, |tx| {
             self.ensure_migrations_in(&mut *tx).await?;
@@ -196,6 +206,7 @@ impl EngineDriver for Sqlite {
 
     async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
         with_tx!(self.pool, |tx| {
+            self.ensure_migrations_in(&mut *tx).await?;
             self.mark_applied_in(&mut *tx, path).await
         })
     }
@@ -212,10 +223,4 @@ impl EngineDriver for Sqlite {
             Ok(())
         })
     }
-
-    // async fn delete_migration(&self, name: &str) -> Result<MigrationRow> {
-    //     with_tx!(self.pool, |tx| {
-    //         self.delete_migration_in(&mut *tx, name).await
-    //     })
-    // }
 }

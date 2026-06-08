@@ -217,11 +217,17 @@ impl EngineDriver for Postgres {
         Ok(rows)
     }
 
-    // async fn delete_migration(&self, name: &str) -> Result<MigrationRow> {
-    //     with_tx!(self.pool, |tx| {
-    //         self.delete_migration_in(&mut *tx, name).await
-    //     })
-    // }
+    async fn migrations_table_exists(&self) -> Result<bool> {
+        let schema = self.migrations_table.schema.as_deref().unwrap_or("public");
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2)",
+        )
+        .bind(schema)
+        .bind(&self.migrations_table.name)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists)
+    }
 
     async fn delete_table(&self) -> Result<()> {
         with_tx!(self.pool, |tx| {

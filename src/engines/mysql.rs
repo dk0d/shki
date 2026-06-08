@@ -212,6 +212,24 @@ impl EngineDriver for Mysql {
         })
     }
 
+    async fn migrations_table_exists(&self) -> Result<bool> {
+        let table_schema = match self.table.schema.as_deref() {
+            Some(schema) => schema.to_string(),
+            None => sqlx::query_scalar::<_, Option<String>>("SELECT DATABASE()")
+                .fetch_one(&self.pool)
+                .await?
+                .ok_or_else(|| ShkiError::migration("No MySQL database selected"))?,
+        };
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?)",
+        )
+        .bind(&table_schema)
+        .bind(&self.table.name)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists != 0)
+    }
+
     async fn delete_table(&self) -> Result<()> {
         with_tx!(self.pool, |tx| {
             let table_name =
