@@ -42,6 +42,10 @@ impl EngineDriver for Detached {
         Err(self.unavailable())
     }
 
+    async fn migrations_table_exists(&self) -> Result<bool> {
+        Err(self.unavailable())
+    }
+
     async fn apply_migration(&self, _path: &Path) -> Result<MigrationRow> {
         Err(self.unavailable())
     }
