@@ -1,6 +1,6 @@
-use sqlx::{MySqlExecutor, Pool};
+use sqlx::Pool;
 
-use crate::migrate::checksum::sql_checksum;
+use crate::engines::TransactionalEngine;
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
 use crate::models::iden::Iden;
@@ -8,6 +8,8 @@ use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
 use std::path::Path;
+
+use super::MigrationFile;
 
 pub struct Mysql {
     table: Iden,
@@ -27,156 +29,12 @@ impl Mysql {
     pub fn table(&self) -> &Iden {
         &self.table
     }
+}
 
-    pub(crate) async fn ensure_migrations_in<'e, E>(&self, exec: E) -> Result<()>
-    where
-        E: MySqlExecutor<'e>,
-    {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let query = format!(
-            r#"
-                CREATE TABLE IF NOT EXISTS {} (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL UNIQUE,
-                    checksum VARCHAR(64),
-                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                "#,
-            table_name
-        );
-        sqlx::query(&query)
-            .execute(exec)
-            .await
-            .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
-        Ok(())
-    }
+impl TransactionalEngine for Mysql {
+    type Database = sqlx::MySql;
 
-    async fn insert_migration_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        name: &str,
-        checksum: &str,
-    ) -> Result<MigrationRow> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let insert = format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name);
-        sqlx::query(&insert)
-            .bind(name)
-            .bind(checksum)
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
-            })?;
-
-        let select = format!(
-            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
-            table_name
-        );
-        sqlx::query_as::<_, MigrationRow>(&select)
-            .bind(name)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to load migration '{}': {}", name, e))
-            })
-    }
-
-    pub(crate) async fn mark_applied_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        path: &Path,
-    ) -> Result<MigrationRow> {
-        let sql = std::fs::read_to_string(path)?;
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-        let checksum = sql_checksum(&sql);
-        self.insert_migration_in(tx, name, &checksum).await
-    }
-
-    async fn delete_migration_in<'e, E>(&self, exec: E, name: &str) -> Result<MigrationRow>
-    where
-        E: MySqlExecutor<'e>,
-    {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let select = format!(
-            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
-            table_name
-        );
-        let row = sqlx::query_as::<_, MigrationRow>(&select)
-            .bind(name)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to load migration '{}': {}", name, e))
-            })?;
-
-        let delete = format!("DELETE FROM {} WHERE name = ?", table_name);
-        sqlx::query(&delete)
-            .bind(name)
-            .execute(exec)
-            .await
-            .map_err(|e| {
-                ShkiError::migration(format!("Failed to delete migration '{}': {}", name, e))
-            })?;
-
-        Ok(row)
-    }
-
-    pub(crate) async fn rollback_migration_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        path: &Path,
-    ) -> Result<()> {
-        let sql = std::fs::read_to_string(path)?;
-        let filename = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid down migration filename"))?;
-
-        let name = filename
-            .strip_suffix(".down.sql")
-            .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
-
-        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in down migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        let _ = self.delete_migration_in(&mut **tx, name).await?;
-        Ok(())
-    }
-
-    pub(crate) async fn apply_migration_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        path: &Path,
-    ) -> Result<MigrationRow> {
-        let sql = std::fs::read_to_string(path)?;
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-        let checksum = sql_checksum(&sql);
-
-        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        self.insert_migration_in(tx, name, &checksum).await
-    }
-
-    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+    async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!(
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
@@ -188,7 +46,7 @@ impl Mysql {
         Ok(rows)
     }
 
-    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
+    async fn migrations_table_exists(&self) -> Result<bool> {
         let table_schema = match self.table.schema.as_deref() {
             Some(schema) => schema.to_string(),
             None => sqlx::query_scalar::<_, Option<String>>("SELECT DATABASE()")
@@ -206,17 +64,160 @@ impl Mysql {
         Ok(exists != 0)
     }
 
-    pub(crate) async fn delete_table_in<'e, E>(&self, exec: E) -> Result<()>
-    where
-        E: MySqlExecutor<'e>,
-    {
+    async fn ensure_migrations(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+    ) -> Result<()> {
         let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let query = format!("DROP TABLE {}", table_name);
+        let query = format!(
+            r#"
+                CREATE TABLE IF NOT EXISTS {} (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    checksum VARCHAR(64),
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                "#,
+            table_name
+        );
         sqlx::query(&query)
-            .execute(exec)
+            .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
         Ok(())
+    }
+
+    async fn apply_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationFile> {
+        let applied = self.read_migration_file(path)?;
+
+        sqlx::raw_sql(&applied.sql)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                    applied.name,
+                    e,
+                    truncate_sql(&applied.sql, 200)
+                ))
+            })?;
+
+        Ok(applied)
+    }
+
+    async fn insert_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        applied: &MigrationFile,
+    ) -> Result<MigrationRow> {
+        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let insert = format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name);
+        sqlx::query(&insert)
+            .bind(&applied.name)
+            .bind(&applied.checksum)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to record migration '{}': {}",
+                    applied.name, e
+                ))
+            })?;
+
+        let select = format!(
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
+            table_name
+        );
+        sqlx::query_as::<_, MigrationRow>(&select)
+            .bind(&applied.name)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to load migration '{}': {}",
+                    applied.name, e
+                ))
+            })
+    }
+
+    async fn rollback_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<()> {
+        let applied = self.read_migration_file(path)?;
+        if !applied.is_down {
+            return Err(ShkiError::migration(
+                "Down migration must end with .down.sql",
+            ));
+        };
+        sqlx::raw_sql(&applied.sql)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to execute statement in down migration '{}': {}\nStatement: {}",
+                    applied.name,
+                    e,
+                    truncate_sql(&applied.sql, 200)
+                ))
+            })?;
+
+        let _ = self.delete_migration(tx, &applied.name).await?;
+        Ok(())
+    }
+
+    async fn mark_applied(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
+        let applied = self.read_migration_file(path)?;
+        self.insert_migration(tx, &applied).await
+    }
+
+    async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
+        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let query = format!("DROP TABLE {}", table_name);
+        sqlx::query(&query)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
+        Ok(())
+    }
+
+    async fn delete_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        name: &str,
+    ) -> Result<MigrationRow> {
+        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let select = format!(
+            "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
+            table_name
+        );
+        let row = sqlx::query_as::<_, MigrationRow>(&select)
+            .bind(name)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!("Failed to load migration '{}': {}", name, e))
+            })?;
+
+        let delete = format!("DELETE FROM {} WHERE name = ?", table_name);
+        sqlx::query(&delete)
+            .bind(name)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!("Failed to delete migration '{}': {}", name, e))
+            })?;
+
+        Ok(row)
     }
 }
 

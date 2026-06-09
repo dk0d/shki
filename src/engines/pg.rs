@@ -1,12 +1,15 @@
-use crate::migrate::checksum::sql_checksum;
+use crate::engines::TransactionalEngine;
+
 use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
 use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::generator::SqlGenerator;
 use crate::{Result, ShkiError};
-use sqlx::{PgExecutor, Pool};
+use sqlx::Pool;
 use std::path::Path;
+
+use super::MigrationFile;
 
 pub struct Postgres {
     migrations_table: Iden,
@@ -37,10 +40,14 @@ impl Postgres {
             table_name
         )
     }
+}
 
-    pub(crate) async fn ensure_migrations_in(
+impl TransactionalEngine for Postgres {
+    type Database = sqlx::Postgres;
+
+    async fn ensure_migrations(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
         let table_name =
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
@@ -68,109 +75,111 @@ impl Postgres {
         Ok(())
     }
 
-    async fn insert_migration_in<'e, E>(
+    async fn apply_migration(
         &self,
-        exec: E,
-        name: &str,
-        checksum: &str,
-    ) -> Result<MigrationRow>
-    where
-        E: PgExecutor<'e>,
-    {
-        let query = self.insert_migration_query(&self.migrations_table);
-        sqlx::query_as::<_, MigrationRow>(&query)
-            .bind(name)
-            .bind(checksum)
-            .fetch_one(exec)
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationFile> {
+        let file = self.read_migration_file(path)?;
+        sqlx::raw_sql(&file.sql)
+            .execute(&mut **tx)
             .await
             .map_err(|e| {
-                ShkiError::migration(format!("Failed to record migration '{}': {}", name, e))
-            })
+                ShkiError::migration(format!(
+                    "Failed to execute statement in migration '{}': {}\nStatement: {}",
+                    file.name,
+                    e,
+                    truncate_sql(&file.sql, 200)
+                ))
+            })?;
+
+        Ok(file)
     }
 
-    pub(crate) async fn mark_applied_in<'e, E>(&self, exec: E, path: &Path) -> Result<MigrationRow>
-    where
-        E: PgExecutor<'e>,
-    {
-        let sql = std::fs::read_to_string(path)?;
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-        let checksum = sql_checksum(&sql);
-        self.insert_migration_in(exec, name, &checksum).await
-    }
-
-    pub(crate) async fn rollback_migration_in(
+    async fn rollback_migration(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
         path: &Path,
     ) -> Result<()> {
-        let sql = std::fs::read_to_string(path)?;
+        let file = self.read_migration_file(path)?;
 
-        let filename = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid down migration filename"))?;
+        if !file.is_down {
+            return Err(ShkiError::migration(
+                "Down migration must end with .down.sql",
+            ));
+        }
 
-        let name = filename
-            .strip_suffix(".down.sql")
-            .ok_or_else(|| ShkiError::migration("Down migration must end with .down.sql"))?;
+        sqlx::raw_sql(&file.sql)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to execute statement in down migration '{}': {}\nStatement: {}",
+                    file.name,
+                    e,
+                    truncate_sql(&file.sql, 200)
+                ))
+            })?;
 
-        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in down migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        let _ = self.delete_migration_in(&mut **tx, name).await?;
+        let _ = self.delete_migration(tx, &file.name).await?;
 
         Ok(())
     }
 
-    async fn delete_migration_in<'s, 'e, E>(&self, exec: E, name: &'s str) -> Result<MigrationRow>
-    where
-        E: PgExecutor<'e>,
-    {
+    async fn mark_applied(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationRow> {
+        let file = self.read_migration_file(path)?;
+        self.insert_migration(tx, &file).await
+    }
+
+    async fn insert_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        applied: &MigrationFile,
+    ) -> Result<MigrationRow> {
+        let query = self.insert_migration_query(&self.migrations_table);
+        sqlx::query_as::<_, MigrationRow>(&query)
+            .bind(&applied.name)
+            .bind(&applied.checksum)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| {
+                ShkiError::migration(format!(
+                    "Failed to record migration '{}': {}",
+                    applied.name, e
+                ))
+            })
+    }
+
+    async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
+        let table_name =
+            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+        let _ = sqlx::query(&format!("DROP TABLE {}", table_name))
+            .execute(&mut **tx)
+            .await;
+        Ok(())
+    }
+
+    async fn delete_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        name: &str,
+    ) -> Result<MigrationRow> {
         let table_name =
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!("DELETE FROM {} WHERE name = $1 returning *", table_name);
         let row = sqlx::query_as::<_, MigrationRow>(&query)
             .bind(name)
-            .fetch_one(exec)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
         Ok(row)
     }
 
-    pub(crate) async fn apply_migration_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        path: &Path,
-    ) -> Result<MigrationRow> {
-        let sql = std::fs::read_to_string(path)?;
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?;
-        let checksum = sql_checksum(&sql);
-
-        sqlx::raw_sql(&sql).execute(&mut **tx).await.map_err(|e| {
-            ShkiError::migration(format!(
-                "Failed to execute statement in migration '{}': {}\nStatement: {}",
-                name,
-                e,
-                truncate_sql(&sql, 200)
-            ))
-        })?;
-
-        self.insert_migration_in(&mut **tx, name, &checksum).await
-    }
-
-    pub(crate) async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
+    async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name =
             SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!(
@@ -183,7 +192,7 @@ impl Postgres {
         Ok(rows)
     }
 
-    pub(crate) async fn migrations_table_exists(&self) -> Result<bool> {
+    async fn migrations_table_exists(&self) -> Result<bool> {
         let schema = self.migrations_table.schema.as_deref().unwrap_or("public");
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2)",
@@ -193,17 +202,5 @@ impl Postgres {
         .fetch_one(&self.pool)
         .await?;
         Ok(exists)
-    }
-
-    pub(crate) async fn delete_table_in(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<()> {
-        let table_name =
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
-        let _ = sqlx::query(&format!("DROP TABLE {}", table_name))
-            .execute(&mut **tx)
-            .await;
-        Ok(())
     }
 }
