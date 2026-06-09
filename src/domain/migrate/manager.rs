@@ -330,7 +330,18 @@ impl MigrationManager {
     /// are skipped.
     pub async fn validate_checksums(&self) -> Result<()> {
         let applied = self.get_applied_migrations().await?;
+        self.validate_applied_checksums(applied)
+    }
 
+    pub async fn validate_existing_checksums(&self) -> Result<()> {
+        if !self.engine.migrations_table_exists().await? {
+            return Ok(());
+        }
+        let applied = self.engine.select_migrations().await?;
+        self.validate_applied_checksums(applied)
+    }
+
+    fn validate_applied_checksums(&self, applied: Vec<MigrationRow>) -> Result<()> {
         for migration in applied {
             let Some(stored_checksum) = migration.checksum else {
                 continue;
