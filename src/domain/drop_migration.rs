@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use colored::Colorize;
+use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Confirm, FuzzySelect};
 
 use crate::{Config, Result, ShkiError};
 
@@ -31,9 +31,11 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
         return Ok(());
     };
 
-    if to_drop.applied && !confirm_drop(&to_drop.name)? {
-        println!("{}", "Aborted".yellow());
-        return Ok(());
+    if to_drop.applied {
+        return Err(ShkiError::migration(format!(
+            "Cannot drop applied migration '{}'. Roll it back before dropping it.",
+            to_drop.name
+        )));
     }
 
     drop_migration(&manager, to_drop)?;
@@ -117,17 +119,6 @@ fn prompt_for_migration(migrations: &[LocalMigration]) -> Result<Option<&LocalMi
         println!("\n{}", "Canceled".dimmed());
         Ok(None)
     }
-}
-
-fn confirm_drop(name: &str) -> Result<bool> {
-    Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt(format!(
-            "Are you sure you want to remove migration {}?",
-            name.red()
-        ))
-        .default(false)
-        .interact()
-        .map_err(|e| ShkiError::config(format!("Prompt error: {}", e)))
 }
 
 fn drop_migration(manager: &MigrationManager, migration: &LocalMigration) -> Result<()> {

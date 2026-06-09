@@ -22,7 +22,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
     // Validate applied migration checksums if database is available
     if config.database_url.is_some()
-        && let Err(e) = migration_manager.validate_checksums().await
+        && let Err(e) = migration_manager.validate_existing_checksums().await
     {
         println!("{}", "Checksum Validation Failed".red().bold());
         println!("{}", e);

@@ -313,6 +313,173 @@ async fn scenario_cli_migrate_applies_pending<T: TestBackend>(ctx: T) {
     ctx.cleanup().await;
 }
 
+async fn scenario_cli_migrate_steps_applies_limited_pending<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let users = ctx.unique_name("users");
+    let posts = ctx.unique_name("posts");
+    let config_path = ctx.write_config();
+
+    ctx.write_migrations(&[
+        ("0001_create_users.sql", ctx.create_table_sql(&users, &[])),
+        ("0002_create_posts.sql", ctx.create_table_sql(&posts, &[])),
+    ]);
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Migrate {
+            mode: Some(ApplyMigrationMode::Steps { num: 1 }),
+            migrations: Default::default(),
+            dry_run: false,
+        },
+    })
+    .await
+    .expect("cli migrate steps should succeed");
+
+    assert!(ctx.table_exists(&users).await);
+    assert!(!ctx.table_exists(&posts).await);
+    assert_eq!(ctx.applied_names(&manager).await, vec!["0001_create_users"]);
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_migrate_to_applies_through_named_pending<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let users = ctx.unique_name("users");
+    let posts = ctx.unique_name("posts");
+    let logs = ctx.unique_name("logs");
+    let config_path = ctx.write_config();
+
+    ctx.write_migrations(&[
+        ("0001_create_users.sql", ctx.create_table_sql(&users, &[])),
+        ("0002_create_posts.sql", ctx.create_table_sql(&posts, &[])),
+        ("0003_create_logs.sql", ctx.create_table_sql(&logs, &[])),
+    ]);
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Migrate {
+            mode: Some(ApplyMigrationMode::To {
+                name: "0002_create_posts".to_string(),
+            }),
+            migrations: Default::default(),
+            dry_run: false,
+        },
+    })
+    .await
+    .expect("cli migrate to should succeed");
+
+    assert!(ctx.table_exists(&users).await);
+    assert!(ctx.table_exists(&posts).await);
+    assert!(!ctx.table_exists(&logs).await);
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0001_create_users", "0002_create_posts"]
+    );
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_migrate_to_unknown_fails_without_applying<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let users = ctx.unique_name("users");
+    let config_path = ctx.write_config();
+
+    ctx.write_migration("0001_create_users.sql", &ctx.create_table_sql(&users, &[]));
+
+    let error = run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Migrate {
+            mode: Some(ApplyMigrationMode::To {
+                name: "9999_missing".to_string(),
+            }),
+            migrations: Default::default(),
+            dry_run: false,
+        },
+    })
+    .await
+    .expect_err("unknown migration target should fail");
+
+    assert!(error.to_string().contains("9999_missing"));
+    assert!(!ctx.table_exists(&users).await);
+    assert!(ctx.applied_names(&manager).await.is_empty());
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_migrate_dry_run_does_not_modify_database<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let users = ctx.unique_name("users");
+    let config_path = ctx.write_config();
+
+    ctx.write_migration("0001_create_users.sql", &ctx.create_table_sql(&users, &[]));
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Migrate {
+            mode: None,
+            migrations: Default::default(),
+            dry_run: true,
+        },
+    })
+    .await
+    .expect("migrate dry-run should succeed");
+
+    assert!(!ctx.table_exists(&users).await);
+    assert!(!ctx.migration_table_exists(&manager).await);
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_status_does_not_create_migration_table<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let users = ctx.unique_name("status_users");
+    let config_path = ctx.write_config();
+
+    ctx.write_migration(
+        "0001_create_status_users.sql",
+        &ctx.create_table_sql(&users, &[]),
+    );
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Status {
+            migrations: Default::default(),
+        },
+    })
+    .await
+    .expect("status should report local migrations without mutating database");
+
+    assert!(!ctx.table_exists(&users).await);
+    assert!(!ctx.migration_table_exists(&manager).await);
+
+    ctx.cleanup().await;
+}
+
 async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>(ctx: T) {
     let config_path = ctx.write_config();
 
@@ -396,6 +563,49 @@ async fn scenario_cli_drop_removes_pending_custom_migration<T: TestBackend>(ctx:
     let journal_json = std::fs::read_to_string(&journal_path).expect("journal should remain");
     let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
     assert!(journal.entries.is_empty());
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_drop_refuses_applied_migration<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("applied_users");
+    let up_path = ctx.write_migration(
+        "0001_create_applied_users.sql",
+        &ctx.create_table_sql(&table_name, &[]),
+    );
+    let down_path = ctx.write_migration(
+        "0001_create_applied_users.down.sql",
+        &ctx.drop_table_sql(&table_name),
+    );
+
+    manager
+        .apply_migration(&up_path)
+        .await
+        .expect("failed to apply migration before drop");
+
+    let error = run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(ctx.dialect()),
+            database_url: Some(ctx.database_url()),
+            ..CommonArgs::default()
+        },
+        command: Commands::Drop {
+            migration: Some("create_applied_users".to_string()),
+        },
+    })
+    .await
+    .expect_err("drop should refuse applied migrations");
+
+    assert!(error.to_string().contains("applied"));
+    assert!(up_path.exists());
+    assert!(down_path.exists());
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0001_create_applied_users"]
+    );
 
     ctx.cleanup().await;
 }
@@ -501,6 +711,120 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
     assert!(!entry.checksum.is_empty());
 
     ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
+    let ctx = PgTestContext::setup("cli_generate_after_custom").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("generated_after_custom");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: Default::default(),
+            migrations: Default::default(),
+            name: "custom audit step".to_string(),
+            custom: true,
+            with_down: false,
+        },
+    })
+    .await
+    .expect("custom generate should write Custom Migration");
+
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table_name} (id integer primary key, name text not null);\n"),
+    )
+    .expect("failed to write declarative schema");
+
+    run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url),
+                ..Default::default()
+            },
+            migrations: Default::default(),
+            name: "create declared table".to_string(),
+            custom: false,
+            with_down: false,
+        },
+    })
+    .await
+    .expect("schema generate should succeed after Custom Migration");
+
+    let journal_json = std::fs::read_to_string(ctx.migrations_dir().join("_meta/_journal.json"))
+        .expect("journal should exist");
+    let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
+
+    assert_eq!(journal.entries.len(), 2);
+    assert_eq!(journal.entries[0].migration, "0000_custom-audit-step");
+    assert_eq!(journal.entries[0].kind, MigrationKind::Custom);
+    assert_eq!(journal.entries[1].migration, "0001_create-declared-table");
+    assert_eq!(journal.entries[1].kind, MigrationKind::Schema);
+    assert!(
+        ctx.migrations_dir()
+            .join("_meta/0001_create-declared-table.snapshot.json")
+            .exists()
+    );
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn cli_migrate_steps_applies_limited_pending() {
+    scenario_cli_migrate_steps_applies_limited_pending(
+        SqliteTestContext::setup("cli_migrate_steps").await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cli_migrate_to_applies_through_named_pending() {
+    scenario_cli_migrate_to_applies_through_named_pending(
+        SqliteTestContext::setup("cli_migrate_to").await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cli_migrate_to_unknown_fails_without_applying() {
+    scenario_cli_migrate_to_unknown_fails_without_applying(
+        SqliteTestContext::setup("cli_migrate_missing").await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cli_migrate_dry_run_does_not_modify_database() {
+    scenario_cli_migrate_dry_run_does_not_modify_database(
+        SqliteTestContext::setup("cli_migrate_dry").await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cli_status_does_not_create_migration_table() {
+    scenario_cli_status_does_not_create_migration_table(
+        SqliteTestContext::setup("cli_status_readonly").await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cli_drop_refuses_applied_migration() {
+    scenario_cli_drop_refuses_applied_migration(SqliteTestContext::setup("cli_drop_applied").await)
+        .await;
 }
 
 #[tokio::test]
