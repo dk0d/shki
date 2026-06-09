@@ -16,6 +16,7 @@ use std::pin::Pin;
 
 use crate::config::Config;
 use crate::engines::utils::tx::with_tx;
+use crate::migrate::checksum::sql_checksum;
 use crate::migrate::manager::MigrationRow;
 use crate::models::iden::Iden;
 use crate::schema::*;
@@ -23,6 +24,86 @@ use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
 
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct MigrationFile {
+    pub filename: String,
+    pub name: String,
+    pub sql: String,
+    pub checksum: String,
+    pub is_down: bool,
+}
+
+pub(crate) trait TransactionalEngine {
+    type Database: sqlx::Database;
+
+    async fn ensure_migrations(&self, tx: &mut sqlx::Transaction<'_, Self::Database>)
+    -> Result<()>;
+
+    async fn apply_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationFile>;
+
+    async fn insert_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        file: &MigrationFile,
+    ) -> Result<MigrationRow>;
+
+    async fn rollback_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<()>;
+
+    async fn mark_applied(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        path: &Path,
+    ) -> Result<MigrationRow>;
+
+    async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()>;
+
+    async fn delete_migration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Self::Database>,
+        name: &str,
+    ) -> Result<MigrationRow>;
+
+    async fn migrations_table_exists(&self) -> Result<bool>;
+
+    async fn select_migrations(&self) -> Result<Vec<MigrationRow>>;
+
+    fn read_migration_file(&self, path: &Path) -> Result<MigrationFile> {
+        let sql = std::fs::read_to_string(path)?;
+        let name = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+            ShkiError::migration(format!(
+                "Invalid migration path: {}",
+                path.to_string_lossy()
+            ))
+        })?;
+        let filename = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
+            ShkiError::migration(format!(
+                "Invalid migration filename: {}",
+                path.to_string_lossy()
+            ))
+        })?;
+        let (name, is_down) = match name.strip_suffix(".down") {
+            Some(name) => (name, true),
+            None => (name, false),
+        };
+        let checksum = sql_checksum(&sql);
+        Ok(MigrationFile {
+            filename: filename.to_string(),
+            name: name.to_string(),
+            sql,
+            checksum,
+            is_down,
+        })
+    }
+}
 
 #[enum_dispatch::enum_dispatch]
 pub enum Engine {
@@ -100,13 +181,13 @@ impl Engine {
     pub(crate) async fn ensure_migrations(&self) -> Result<()> {
         match self {
             Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut tx).await
+                engine.ensure_migrations(&mut tx).await
             }),
             Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await
+                engine.ensure_migrations(&mut tx).await
             }),
             Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await
+                engine.ensure_migrations(&mut tx).await
             }),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
@@ -133,16 +214,19 @@ impl Engine {
     pub(crate) async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
         match self {
             Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut tx).await?;
-                engine.apply_migration_in(&mut tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                let applied = engine.apply_migration(&mut tx, path).await?;
+                engine.insert_migration(&mut tx, &applied).await
             }),
             Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await?;
-                engine.apply_migration_in(&mut tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                let applied = engine.apply_migration(&mut tx, path).await?;
+                engine.insert_migration(&mut tx, &applied).await
             }),
             Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await?;
-                engine.apply_migration_in(&mut tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                let applied = engine.apply_migration(&mut tx, path).await?;
+                engine.insert_migration(&mut tx, &applied).await
             }),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
@@ -151,13 +235,13 @@ impl Engine {
     pub(crate) async fn rollback_migration(&self, path: &Path) -> Result<()> {
         match self {
             Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration_in(&mut tx, path).await
+                engine.rollback_migration(&mut tx, path).await
             }),
             Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration_in(&mut tx, path).await
+                engine.rollback_migration(&mut tx, path).await
             }),
             Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration_in(&mut tx, path).await
+                engine.rollback_migration(&mut tx, path).await
             }),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
@@ -166,16 +250,16 @@ impl Engine {
     pub(crate) async fn mark_applied(&self, path: &Path) -> Result<MigrationRow> {
         match self {
             Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut tx).await?;
-                engine.mark_applied_in(&mut *tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                engine.mark_applied(&mut tx, path).await
             }),
             Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await?;
-                engine.mark_applied_in(&mut *tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                engine.mark_applied(&mut tx, path).await
             }),
             Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations_in(&mut *tx).await?;
-                engine.mark_applied_in(&mut tx, path).await
+                engine.ensure_migrations(&mut tx).await?;
+                engine.mark_applied(&mut tx, path).await
             }),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
@@ -184,13 +268,13 @@ impl Engine {
     pub(crate) async fn delete_table(&self) -> Result<()> {
         match self {
             Engine::Postgres(engine) => {
-                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut tx).await })
+                with_tx!(engine.pool, |tx| { engine.delete_table(&mut tx).await })
             }
             Engine::Sqlite(engine) => {
-                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut *tx).await })
+                with_tx!(engine.pool, |tx| { engine.delete_table(&mut tx).await })
             }
             Engine::Mysql(engine) => {
-                with_tx!(engine.pool, |tx| { engine.delete_table_in(&mut *tx).await })
+                with_tx!(engine.pool, |tx| { engine.delete_table(&mut tx).await })
             }
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
