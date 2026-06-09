@@ -146,14 +146,15 @@ Global options:
 - `-c, --config <PATH>`: config file, default `shki.toml`
 - `-l, --dialect <postgres|mysql|sqlite>`: database dialect
 - `-u, --database-url <URL>`: live database URL, env fallback `DATABASE_URL`
-- `-d, --dir <PATH>`: migration output/read directory
+- `-d, --migrations-dir <PATH>`: migration output/read directory
 - `-v, --verbose`: verbose output
-- `--no-color`: disable color output
+- `-n, --no-color`: disable color output
 
 Command-scoped options:
 
 - `diff`, `generate`, and `codegen` accept `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
 - `create`, `generate`, `migrate`, `status`, and `down` accept migration options such as `--table <NAME>`, `--prefix <index|timestamp|unix>`, and `--generate-down` where applicable.
+- `migrate` accepts `--dry` and optional mode subcommands: `all`, `steps <NUM>`, and `to <NAME>`.
 - `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, `--serde`, `--sqlx`, and `--no-sqlx`.
 
 | Command                    | Alias  | Purpose                                                                                                              |
@@ -165,7 +166,7 @@ Command-scoped options:
 | `generate <name>`          | `gen`  | Generate schema-derived migration artifacts and a Snapshot                                                           |
 | `generate <name> --custom` | `gen`  | Create a Custom Migration                                                                                            |
 | `create <name>`            | `new`  | Create a Custom Migration for manual SQL editing                                                                     |
-| `migrate`                  | `up`   | Apply pending migrations                                                                                             |
+| `migrate [mode]`           | `up`   | Apply all pending migrations, a limited number of pending migrations, or through a named pending migration           |
 | `status`                   | `s`    | Show migration status and checksum issues                                                                            |
 | `down [count]`             | -      | Apply Down Migrations for local rollback                                                                             |
 | `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape                                                        |
@@ -236,7 +237,26 @@ Custom Migrations are executable artifacts. They are recorded in the Journal but
 shki migrate
 ```
 
-`migrate` applies pending SQL files and records applied checksums in the live database migration table. It does not mutate local Snapshot files or the Journal.
+`migrate` applies pending SQL files and records applied checksums in the live database migration table. It does not mutate local Snapshot files or the Journal. With no mode, `migrate` applies all pending migrations.
+
+Apply a limited number of pending migrations:
+
+```bash
+shki migrate steps 2
+```
+
+Apply through a specific pending migration name:
+
+```bash
+shki migrate to 0003_add_users
+```
+
+Preview what would be applied without changing the database:
+
+```bash
+shki migrate --dry
+shki migrate --dry steps 1
+```
 
 ### Roll Back During Development
 
