@@ -132,9 +132,15 @@ pub fn write_directory_schema(snapshot: &Snapshot, output: &Path, force: bool) -
 
 pub fn render_directory_schema_preview(config: &Config, snapshot: &Snapshot) -> Result<String> {
     let files = directory_schema_files(snapshot)?;
+    let count = files.len().to_string();
+    let count = if config.no_color {
+        count
+    } else {
+        count.cyan().to_string()
+    };
     let mut output = format!(
         "Directory Schema would create {} files:\n",
-        files.len().to_string().cyan()
+        count
     );
 
     for file in files {
