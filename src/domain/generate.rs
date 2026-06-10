@@ -13,7 +13,7 @@ use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::migrate::utils::sanitize_migration_name;
 use crate::snapshots::Snapshot;
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::tui::prompt_for_rename;
 use crate::{Result, ShkiError};
 
@@ -56,7 +56,7 @@ pub async fn cmd_generate(
         diff = diff.apply_rename_decisions(&decisions)?;
     }
 
-    let generator = SqlGenerator::new(&config.dialect);
+    let generator = SqlRenderer::new(&config.dialect);
     let up_sql = generator.generate_string(&diff.statements)?;
     compiler
         .validate_generated_diff_sql(config, &baseline, &up_sql)

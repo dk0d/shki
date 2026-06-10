@@ -5,7 +5,7 @@ use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
 use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::{Result, ShkiError};
 use std::path::Path;
 
@@ -35,7 +35,7 @@ impl TransactionalEngine for Mysql {
     type Database = sqlx::MySql;
 
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!(
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
             table_name
@@ -68,7 +68,7 @@ impl TransactionalEngine for Mysql {
         &self,
         tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!(
             r#"
                 CREATE TABLE IF NOT EXISTS {} (
@@ -114,7 +114,7 @@ impl TransactionalEngine for Mysql {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
         applied: &MigrationFile,
     ) -> Result<MigrationRow> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let insert = format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name);
         sqlx::query(&insert)
             .bind(&applied.name)
@@ -181,7 +181,7 @@ impl TransactionalEngine for Mysql {
     }
 
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let query = format!("DROP TABLE {}", table_name);
         sqlx::query(&query)
             .execute(&mut **tx)
@@ -195,7 +195,7 @@ impl TransactionalEngine for Mysql {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
         name: &str,
     ) -> Result<MigrationRow> {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
         let select = format!(
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
             table_name
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn mysql_qualified_table_name_uses_backticks() {
-        let table_name = SqlGenerator::new(&SqlDialect::Mysql).qualified_table_name(&table());
+        let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&table());
 
         assert_eq!(table_name, "`meta`.`__shki_migrations`");
     }

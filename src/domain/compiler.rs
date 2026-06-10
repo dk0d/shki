@@ -13,7 +13,7 @@ use crate::diff::diff_snapshots;
 use crate::engines::pg::Postgres;
 use crate::schema::SqlDialect;
 use crate::snapshots::{Introspectable, Snapshot};
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 
 use crate::{Result, ShkiError};
 
@@ -323,7 +323,7 @@ async fn validate_generated_diff_sql_with_pool(
 fn render_baseline_sql(config: &Config, baseline: &Snapshot) -> Result<String> {
     let empty = Snapshot::new(config.dialect);
     let baseline_diff = diff_snapshots(&empty, baseline)?;
-    SqlGenerator::new(&config.dialect).generate_string(&baseline_diff.statements)
+    SqlRenderer::new(&config.dialect).generate_string(&baseline_diff.statements)
 }
 
 fn generated_diff_sql_is_empty(generated_sql: &str) -> bool {

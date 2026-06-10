@@ -1,6 +1,6 @@
 use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::sql::statements::qualified_table_name;
 
 pub fn delete_table(dialect: &SqlDialect, table: &Iden) -> String {
@@ -17,7 +17,7 @@ pub fn delete_table(dialect: &SqlDialect, table: &Iden) -> String {
 }
 
 pub fn ensure_migrations(dialect: &SqlDialect, table: &Iden) -> String {
-    let generator = SqlGenerator::new(dialect);
+    let generator = SqlRenderer::new(dialect);
     let table_name = generator.qualified_table_name(table);
 
     // use text for `applied_at` for simplicity across dialects

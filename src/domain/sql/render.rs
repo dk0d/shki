@@ -4,12 +4,12 @@
 
 use crate::Result;
 use crate::models::iden::Iden;
-use crate::schema::SqlDialect;
+use crate::schema::{DefaultValue, SqlDialect};
 
 use super::statements::{qualified_name, qualified_table_name, quote_identifier};
 
 /// SQL generator for a specific dialect
-pub struct SqlGenerator {
+pub struct SqlRenderer {
     dialect: SqlDialect,
     breakpoints: Option<String>,
 }
@@ -162,7 +162,7 @@ impl From<Vec<SqlStmt>> for SqlOutput {
     }
 }
 
-impl SqlGenerator {
+impl SqlRenderer {
     /// Create a new SQL generator
     pub fn new(dialect: &SqlDialect) -> Self {
         Self {
@@ -200,8 +200,36 @@ impl SqlGenerator {
     }
 
     // Helper methods
-    fn quote_identifier(&self, name: impl Into<String>) -> String {
+    pub fn quote_identifier(&self, name: impl Into<String>) -> String {
         quote_identifier(&self.dialect, name)
+    }
+
+    pub fn statement(&self, sql: impl Into<String>) -> SqlStmt {
+        SqlStmt::from(sql.into())
+    }
+
+    pub fn fragment(&self, sql: impl Into<String>) -> SqlStmtPart {
+        SqlStmtPart::from(sql.into())
+    }
+
+    pub fn sql_literal(&self, value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+
+    pub fn default_value(&self, default: &DefaultValue) -> String {
+        match default {
+            DefaultValue::Literal(value) if is_unquoted_scalar_literal(value) => value.clone(),
+            DefaultValue::Literal(value) => self.sql_literal(value),
+            _ => default.to_string(),
+        }
+    }
+
+    pub fn quoted_list<'a>(&self, values: impl IntoIterator<Item = &'a String>) -> String {
+        values
+            .into_iter()
+            .map(|value| self.quote_identifier(value))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn qualified_table_name(&self, id: &Iden) -> String {
@@ -211,6 +239,14 @@ impl SqlGenerator {
     pub fn qualified_name(&self, name: impl Into<String>, schema: &Option<String>) -> String {
         qualified_name(&self.dialect, name, schema)
     }
+}
+
+fn is_unquoted_scalar_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower == "true"
+        || lower == "false"
+        || value.parse::<i64>().is_ok()
+        || value.parse::<f64>().is_ok()
 }
 
 pub trait ToSql {
@@ -225,17 +261,35 @@ mod tests {
     fn quotes_identifiers_per_dialect() {
         let table = Iden::new("odd\"name", Some("app\"schema".to_string()));
         assert_eq!(
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&table),
+            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&table),
             "\"app\"\"schema\".\"odd\"\"name\""
         );
         assert_eq!(
-            SqlGenerator::new(&SqlDialect::Sqlite).qualified_name("users", &None),
+            SqlRenderer::new(&SqlDialect::Sqlite).qualified_name("users", &None),
             "\"users\""
         );
         assert_eq!(
-            SqlGenerator::new(&SqlDialect::Mysql)
+            SqlRenderer::new(&SqlDialect::Mysql)
                 .qualified_name("odd`name", &Some("app`schema".to_string())),
             "`app``schema`.`odd``name`"
+        );
+    }
+
+    #[test]
+    fn renders_default_literals_with_sql_string_escaping() {
+        let renderer = SqlRenderer::new(&SqlDialect::Postgres);
+
+        assert_eq!(
+            renderer.default_value(&DefaultValue::Literal("default".to_string())),
+            "'default'"
+        );
+        assert_eq!(
+            renderer.default_value(&DefaultValue::Literal("owner's".to_string())),
+            "'owner''s'"
+        );
+        assert_eq!(
+            renderer.default_value(&DefaultValue::Literal("42".to_string())),
+            "42"
         );
     }
 }

@@ -3,7 +3,7 @@ use crate::diff::DiffStatement;
 use crate::schema::SqlDialect;
 use crate::sql::statements::*;
 
-use super::generator::{SqlOutput, ToSql};
+use super::render::{SqlOutput, ToSql};
 
 impl ToSql for DiffStatement {
     fn to_sql(&self, dialect: &SqlDialect) -> Result<SqlOutput> {

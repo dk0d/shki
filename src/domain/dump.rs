@@ -8,7 +8,7 @@ use crate::schema::{
     TriggerEvent, TriggerOrientation, TriggerTiming,
 };
 use crate::snapshots::{Introspectable, Snapshot};
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::sql::statements::{
     create_enum, create_extension, create_index, create_sequence, create_table, create_view,
     qualified_name, quote_identifier,
@@ -927,7 +927,7 @@ pub fn render_snapshot(snapshot: &Snapshot, format: &SchemaExportFormat) -> Resu
         SchemaExportFormat::Sql => {
             let empty = Snapshot::new(snapshot.dialect);
             let diff = diff_snapshots(&empty, snapshot)?;
-            let generator = SqlGenerator::new(&snapshot.dialect);
+            let generator = SqlRenderer::new(&snapshot.dialect);
             generator.generate_string(&diff.statements)
         }
     }

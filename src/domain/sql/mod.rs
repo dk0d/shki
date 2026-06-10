@@ -1,3 +1,3 @@
 pub mod diffs;
-pub mod generator;
+pub mod render;
 pub mod statements;

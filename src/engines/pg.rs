@@ -4,7 +4,7 @@ use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
 use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::{Result, ShkiError};
 use sqlx::Pool;
 use std::path::Path;
@@ -34,7 +34,7 @@ impl Postgres {
     }
 
     fn insert_migration_query(&self, table: &Iden) -> String {
-        let table_name = SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(table);
+        let table_name = SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(table);
         format!(
             "INSERT INTO {} (name, checksum) VALUES ($1, $2) returning id, name, checksum, applied_at",
             table_name
@@ -50,7 +50,7 @@ impl TransactionalEngine for Postgres {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
         let table_name =
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
 
         let query = format!(
             r#"
@@ -156,7 +156,7 @@ impl TransactionalEngine for Postgres {
 
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
         let table_name =
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let _ = sqlx::query(&format!("DROP TABLE {}", table_name))
             .execute(&mut **tx)
             .await;
@@ -169,7 +169,7 @@ impl TransactionalEngine for Postgres {
         name: &str,
     ) -> Result<MigrationRow> {
         let table_name =
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!("DELETE FROM {} WHERE name = $1 returning *", table_name);
         let row = sqlx::query_as::<_, MigrationRow>(&query)
             .bind(name)
@@ -181,7 +181,7 @@ impl TransactionalEngine for Postgres {
 
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name =
-            SqlGenerator::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
+            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
             table_name

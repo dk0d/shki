@@ -5,7 +5,7 @@ use crate::migrate::manager::MigrationRow;
 use crate::migrate::utils::truncate_sql;
 use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
-use crate::sql::generator::SqlGenerator;
+use crate::sql::render::SqlRenderer;
 use crate::{Result, ShkiError};
 use std::path::Path;
 
@@ -35,7 +35,7 @@ impl TransactionalEngine for Sqlite {
     type Database = sqlx::Sqlite;
 
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
-        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
             table_name
@@ -61,7 +61,7 @@ impl TransactionalEngine for Sqlite {
         &self,
         tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
-        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!(
             r#"
                 CREATE TABLE IF NOT EXISTS {} (
@@ -107,7 +107,7 @@ impl TransactionalEngine for Sqlite {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
         applied: &MigrationFile,
     ) -> Result<MigrationRow> {
-        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!(
             "INSERT INTO {} (name, checksum) VALUES (?, ?) RETURNING id, name, checksum, applied_at",
             table_name
@@ -158,7 +158,7 @@ impl TransactionalEngine for Sqlite {
     }
 
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
-        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!("DROP TABLE {}", table_name);
         sqlx::query(&query)
             .execute(&mut **tx)
@@ -172,7 +172,7 @@ impl TransactionalEngine for Sqlite {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
         name: &str,
     ) -> Result<MigrationRow> {
-        let table_name = SqlGenerator::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
+        let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
         let query = format!(
             "DELETE FROM {} WHERE name = ? RETURNING id, name, checksum, applied_at",
             table_name

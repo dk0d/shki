@@ -1434,6 +1434,7 @@ fn parse_check_constraint_expression(definition: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sql::statements::create_table;
 
     fn base_column_row(name: &str, data_type: &str) -> PgInfoSchemaColumnRow {
         PgInfoSchemaColumnRow {
@@ -1497,6 +1498,21 @@ mod tests {
             pg_snapshot_queries::COLUMN_PRIVILEGES
                 .contains("cp.grantee <> pg_get_userbyid(c.relowner)")
         );
+    }
+
+    #[test]
+    fn renders_text_default_named_default_as_string_literal() {
+        let row = PgInfoSchemaColumnRow {
+            column_default: Some("'default'::text".to_string()),
+            is_nullable: "NO".to_string(),
+            ..base_column_row("indexing", "text")
+        };
+        let mut table = Table::in_schema("dust", "public");
+        table.column(Column::from(row));
+
+        let sql = create_table(&SqlDialect::Postgres, &table).to_string(None);
+
+        assert!(sql.contains("\"indexing\" TEXT NOT NULL DEFAULT 'default'"));
     }
 
     #[test]

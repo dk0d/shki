@@ -6,7 +6,11 @@ use crate::schema::*;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use super::generator::{SqlOutput, SqlStmt, SqlStmtPart};
+use super::render::{SqlOutput, SqlRenderer, SqlStmt, SqlStmtPart};
+
+fn get_renderer(dialect: &SqlDialect) -> SqlRenderer {
+    SqlRenderer::new(dialect)
+}
 
 pub fn quote_identifier(dialect: &SqlDialect, name: impl Into<String>) -> String {
     let name: String = name.into();
@@ -47,21 +51,27 @@ pub fn qualified_name(
 }
 
 pub fn create_schema(dialect: &SqlDialect, name: &str) -> SqlStmt {
-    format!("CREATE SCHEMA {}", quote_identifier(dialect, name)).into()
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!("CREATE SCHEMA {}", renderer.quote_identifier(name)))
 }
 
 pub fn drop_schema(dialect: &SqlDialect, name: &str, cascade: bool) -> SqlStmt {
+    let renderer = get_renderer(dialect);
     let cascade = if cascade { " CASCADE" } else { "" };
-    format!("DROP SCHEMA {}{}", quote_identifier(dialect, name), cascade).into()
+    renderer.statement(format!(
+        "DROP SCHEMA {}{}",
+        renderer.quote_identifier(name),
+        cascade
+    ))
 }
 
 pub fn rename_schema(dialect: &SqlDialect, from: &str, to: &str) -> SqlStmt {
-    format!(
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!(
         "ALTER SCHEMA {} RENAME TO {}",
-        quote_identifier(dialect, from),
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(from),
+        renderer.quote_identifier(to)
+    ))
 }
 
 // Enum operations (PostgreSQL)
@@ -73,9 +83,10 @@ pub fn create_enum(
     values: &[String],
     description: &Option<String>,
 ) -> SqlOutput {
-    let qualified = qualified_name(dialect, name, schema);
-    let values_str: Vec<String> = values.iter().map(|v| format!("'{}'", v)).collect();
-    let mut result = vec![SqlStmt::from(format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
+    let values_str: Vec<String> = values.iter().map(|v| renderer.sql_literal(v)).collect();
+    let mut result = vec![renderer.statement(format!(
         "CREATE TYPE {} AS ENUM ({})",
         qualified,
         values_str.join(", ")
@@ -83,10 +94,10 @@ pub fn create_enum(
 
     // Add COMMENT ON TYPE if description is present
     if let Some(desc) = description {
-        let escaped = desc.replace('\'', "''");
-        result.push(SqlStmt::from(format!(
+        result.push(renderer.statement(format!(
             "COMMENT ON TYPE {} IS '{}'",
-            qualified, escaped
+            qualified,
+            desc.replace('\'', "''")
         )));
     }
 
@@ -94,18 +105,21 @@ pub fn create_enum(
 }
 
 pub fn drop_enum(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
-    format!("DROP TYPE {}", qualified).into()
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!(
+        "DROP TYPE {}",
+        renderer.qualified_name(name, schema)
+    ))
 }
 
 pub fn rename_enum(dialect: &SqlDialect, from: &str, to: &str, schema: &Option<String>) -> SqlStmt {
-    let qualified = qualified_name(dialect, from, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(from, schema);
+    renderer.statement(format!(
         "ALTER TYPE {} RENAME TO {}",
         qualified,
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(to)
+    ))
 }
 
 pub fn add_enum_value(
@@ -115,17 +129,19 @@ pub fn add_enum_value(
     value: &str,
     position: &EnumValuePosition,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, enum_name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(enum_name, schema);
     let position_str = match position {
         EnumValuePosition::End => String::new(),
-        EnumValuePosition::Before(v) => format!(" BEFORE '{}'", v),
-        EnumValuePosition::After(v) => format!(" AFTER '{}'", v),
+        EnumValuePosition::Before(v) => format!(" BEFORE {}", renderer.sql_literal(v)),
+        EnumValuePosition::After(v) => format!(" AFTER {}", renderer.sql_literal(v)),
     };
-    format!(
-        "ALTER TYPE {} ADD VALUE '{}'{}",
-        qualified, value, position_str
-    )
-    .into()
+    renderer.statement(format!(
+        "ALTER TYPE {} ADD VALUE {}{}",
+        qualified,
+        renderer.sql_literal(value),
+        position_str
+    ))
 }
 
 pub fn rename_enum_value(
@@ -135,14 +151,14 @@ pub fn rename_enum_value(
     from: &str,
     to: &str,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, enum_name, schema);
-    format!(
-        "ALTER TYPE {} RENAME VALUE '{}' TO '{}'",
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(enum_name, schema);
+    renderer.statement(format!(
+        "ALTER TYPE {} RENAME VALUE {} TO {}",
         qualified,
-        from.replace('\'', "''"),
-        to.replace('\'', "''")
-    )
-    .into()
+        renderer.sql_literal(from),
+        renderer.sql_literal(to)
+    ))
 }
 
 pub fn drop_enum_value(
@@ -211,20 +227,22 @@ pub fn alter_enum_description(
     schema: &Option<String>,
     description: &Option<String>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
     match description {
         Some(desc) => {
             let escaped = desc.replace('\'', "''");
-            format!("COMMENT ON TYPE {} IS '{}'", qualified, escaped).into()
+            renderer.statement(format!("COMMENT ON TYPE {} IS '{}'", qualified, escaped))
         }
-        None => format!("COMMENT ON TYPE {} IS NULL", qualified).into(),
+        None => renderer.statement(format!("COMMENT ON TYPE {} IS NULL", qualified)),
     }
 }
 
 // Sequence operations
 
 pub fn create_sequence(dialect: &SqlDialect, sequence: &Sequence) -> SqlStmt {
-    let name = qualified_name(dialect, &sequence.name, &sequence.schema);
+    let renderer = get_renderer(dialect);
+    let name = renderer.qualified_name(&sequence.name, &sequence.schema);
     let mut parts = vec![format!("CREATE SEQUENCE {}", name)];
 
     parts.push(format!("INCREMENT BY {}", sequence.increment));
@@ -245,12 +263,13 @@ pub fn create_sequence(dialect: &SqlDialect, sequence: &Sequence) -> SqlStmt {
         parts.push("NO CYCLE".to_string());
     }
 
-    parts.join(" ").into()
+    renderer.statement(parts.join(" "))
 }
 
 pub fn drop_sequence(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
-    format!("DROP SEQUENCE {}", qualified).into()
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
+    renderer.statement(format!("DROP SEQUENCE {}", qualified))
 }
 
 pub fn alter_sequence(
@@ -259,7 +278,8 @@ pub fn alter_sequence(
     schema: &Option<String>,
     changes: &[SequenceChange],
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
 
     let mut line = String::new();
     let _ = write!(line, "ALTER SEQUENCE {}", qualified);
@@ -277,13 +297,14 @@ pub fn alter_sequence(
         };
     }
 
-    line.into()
+    renderer.statement(line)
 }
 
 // Table operations
 
 pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
-    let name = qualified_name(dialect, &table.name, &table.schema);
+    let renderer = get_renderer(dialect);
+    let name = renderer.qualified_name(&table.name, &table.schema);
 
     let mut table_pk_cols: HashMap<String, Option<String>> = HashMap::new();
     let mut table_unique_cols: HashMap<String, Option<String>> = HashMap::new();
@@ -322,7 +343,7 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
         column_defs.push(constraint_definition(dialect, constraint).to_string());
     }
 
-    let mut result = vec![SqlStmt::from(format!(
+    let mut result = vec![renderer.statement(format!(
         "CREATE TABLE {} (\n  {}\n)",
         name,
         column_defs.join(",\n  ")
@@ -330,22 +351,21 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
 
     // Add COMMENT ON TABLE if comment is present
     if let Some(comment) = &table.comment {
-        let escaped = comment.replace('\'', "''");
-        result.push(SqlStmt::from(format!(
+        result.push(renderer.statement(format!(
             "COMMENT ON TABLE {} IS '{}'",
-            name, escaped
+            name,
+            comment.replace('\'', "''")
         )));
     }
 
     // Add COMMENT ON COLUMN for columns with comments
     for col in table.columns.values() {
         if let Some(comment) = &col.comment {
-            let escaped = comment.replace('\'', "''");
-            result.push(SqlStmt::from(format!(
+            result.push(renderer.statement(format!(
                 "COMMENT ON COLUMN {}.{} IS '{}'",
                 name,
-                quote_identifier(dialect, &col.name),
-                escaped
+                renderer.quote_identifier(&col.name),
+                comment.replace('\'', "''")
             )));
         }
     }
@@ -363,14 +383,15 @@ fn column_definition_with_suppression(
     inline_primary_key: Option<Option<&str>>,
     inline_unique: Option<Option<&str>>,
 ) -> SqlStmtPart {
+    let renderer = get_renderer(dialect);
     let mut parts = vec![
-        quote_identifier(dialect, &col.name),
+        renderer.quote_identifier(&col.name),
         col.data_type.clone().to_string(dialect),
     ];
 
     if let Some(name) = inline_primary_key {
         if let Some(name) = name {
-            parts.push(format!("CONSTRAINT {}", quote_identifier(dialect, name)));
+            parts.push(format!("CONSTRAINT {}", renderer.quote_identifier(name)));
         }
         parts.push("PRIMARY KEY".to_string());
     } else if col.primary_key {
@@ -383,7 +404,7 @@ fn column_definition_with_suppression(
 
     if let Some(name) = inline_unique {
         if let Some(name) = name {
-            parts.push(format!("CONSTRAINT {}", quote_identifier(dialect, name)));
+            parts.push(format!("CONSTRAINT {}", renderer.quote_identifier(name)));
         }
         parts.push("UNIQUE".to_string());
     } else if col.unique && !col.primary_key {
@@ -391,7 +412,7 @@ fn column_definition_with_suppression(
     }
 
     if let Some(default) = &col.default {
-        parts.push(format!("DEFAULT {}", default));
+        parts.push(format!("DEFAULT {}", renderer.default_value(default)));
     }
 
     if let Some(generated) = &col.generated {
@@ -399,10 +420,10 @@ fn column_definition_with_suppression(
     }
 
     if let Some(collation) = &col.collation {
-        parts.push(format!("COLLATE {}", quote_identifier(dialect, collation)));
+        parts.push(format!("COLLATE {}", renderer.quote_identifier(collation)));
     }
 
-    parts.join(" ").into()
+    renderer.fragment(parts.join(" "))
 }
 
 fn is_inlined_single_column_constraint(constraint: &Constraint, table: &Table) -> bool {
@@ -416,10 +437,11 @@ fn is_inlined_single_column_constraint(constraint: &Constraint, table: &Table) -
 }
 
 pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> SqlStmtPart {
+    let renderer = get_renderer(dialect);
     let mut sql = String::new();
 
     if let Some(name) = &constraint.name() {
-        write!(&mut sql, "CONSTRAINT {} ", quote_identifier(dialect, *name))
+        write!(&mut sql, "CONSTRAINT {} ", renderer.quote_identifier(*name))
             .expect("writing to String cannot fail");
     }
 
@@ -430,7 +452,7 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
                 if idx > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&quote_identifier(dialect, col));
+                sql.push_str(&renderer.quote_identifier(col));
             }
             sql.push(')');
         }
@@ -440,19 +462,19 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
                 if idx > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&quote_identifier(dialect, col));
+                sql.push_str(&renderer.quote_identifier(col));
             }
             sql.push(')');
         }
         (_, Constraint::ForeignKey(c)) => {
-            let ref_table = qualified_name(dialect, &c.references.name, &c.references.schema);
+            let ref_table = renderer.qualified_name(&c.references.name, &c.references.schema);
 
             sql.push_str("FOREIGN KEY (");
             for (idx, col) in c.columns.iter().enumerate() {
                 if idx > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&quote_identifier(dialect, col));
+                sql.push_str(&renderer.quote_identifier(col));
             }
             write!(&mut sql, ") REFERENCES {} (", ref_table)
                 .expect("writing to String cannot fail");
@@ -460,7 +482,7 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
                 if idx > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&quote_identifier(dialect, col));
+                sql.push_str(&renderer.quote_identifier(col));
             }
             sql.push(')');
 
@@ -499,7 +521,7 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
         }
     }
 
-    sql.into()
+    renderer.fragment(sql)
 }
 
 pub fn drop_table(
@@ -508,9 +530,10 @@ pub fn drop_table(
     schema: &Option<String>,
     cascade: bool,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
     let cascade_str = if cascade { " CASCADE" } else { "" };
-    format!("DROP TABLE {}{}", qualified, cascade_str).into()
+    renderer.statement(format!("DROP TABLE {}{}", qualified, cascade_str))
 }
 
 pub fn rename_table(
@@ -519,13 +542,13 @@ pub fn rename_table(
     to: &str,
     schema: &Option<String>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, from, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(from, schema);
+    renderer.statement(format!(
         "ALTER TABLE {} RENAME TO {}",
         qualified,
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(to)
+    ))
 }
 
 pub fn alter_table_comment(
@@ -534,7 +557,8 @@ pub fn alter_table_comment(
     schema: &Option<String>,
     comment: &Option<String>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
     let stmt = match comment {
         Some(c) => {
             let escaped = c.replace('\'', "''");
@@ -542,7 +566,7 @@ pub fn alter_table_comment(
         }
         None => format!("COMMENT ON TABLE {} IS NULL", qualified),
     };
-    stmt.into()
+    renderer.statement(stmt)
 }
 
 pub fn alter_table_options(
@@ -551,7 +575,8 @@ pub fn alter_table_options(
     schema: &Option<String>,
     changes: &[TableOptionChange],
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
     let rendered = changes
         .iter()
         .map(|change| match change {
@@ -561,7 +586,7 @@ pub fn alter_table_options(
         .collect::<Vec<_>>()
         .join(", ");
 
-    format!("ALTER TABLE {} SET ({})", qualified, rendered).into()
+    renderer.statement(format!("ALTER TABLE {} SET ({})", qualified, rendered))
 }
 
 pub fn alter_table_tablespace(
@@ -570,21 +595,20 @@ pub fn alter_table_tablespace(
     schema: &Option<String>,
     tablespace: &Option<String>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
 
     match tablespace {
-        Some(tablespace) => format!(
+        Some(tablespace) => renderer.statement(format!(
             "ALTER TABLE {} SET TABLESPACE {}",
             qualified,
-            quote_identifier(dialect, tablespace)
-        )
-        .into(),
-        None => format!(
+            renderer.quote_identifier(tablespace)
+        )),
+        None => renderer.statement(format!(
             "ALTER TABLE {} SET TABLESPACE {}",
             qualified,
-            quote_identifier(dialect, "pg_default")
-        )
-        .into(),
+            renderer.quote_identifier("pg_default")
+        )),
     }
 }
 
@@ -594,17 +618,17 @@ pub fn alter_table_partition(
     schema: &Option<String>,
     partition: &Option<PartitionSpec>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
 
     match partition {
-        Some(partition) => format!(
+        Some(partition) => renderer.statement(format!(
             "ALTER TABLE {} PARTITION BY {} ({})",
             qualified,
             render_partition_method(partition.method),
             partition.columns.join(", ")
-        )
-        .into(),
-        None => format!("ALTER TABLE {} NOT PARTITIONED", qualified).into(),
+        )),
+        None => renderer.statement(format!("ALTER TABLE {} NOT PARTITIONED", qualified)),
     }
 }
 
@@ -616,13 +640,13 @@ pub fn add_column(
     schema: &Option<String>,
     column: &Column,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    renderer.statement(format!(
         "ALTER TABLE {} ADD COLUMN {}",
         qualified,
         column_definition(dialect, column)
-    )
-    .into()
+    ))
 }
 
 pub fn drop_column(
@@ -632,15 +656,15 @@ pub fn drop_column(
     column: &str,
     cascade: bool,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
     let cascade_str = if cascade { " CASCADE" } else { "" };
-    format!(
+    renderer.statement(format!(
         "ALTER TABLE {} DROP COLUMN {}{}",
         qualified,
-        quote_identifier(dialect, column),
+        renderer.quote_identifier(column),
         cascade_str
-    )
-    .into()
+    ))
 }
 
 pub fn rename_column(
@@ -650,14 +674,14 @@ pub fn rename_column(
     from: &str,
     to: &str,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    renderer.statement(format!(
         "ALTER TABLE {} RENAME COLUMN {} TO {}",
         qualified,
-        quote_identifier(dialect, from),
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(from),
+        renderer.quote_identifier(to)
+    ))
 }
 
 pub fn alter_column(
@@ -667,8 +691,9 @@ pub fn alter_column(
     column: &str,
     changes: &[ColumnChange],
 ) -> SqlOutput {
-    let qualified = qualified_name(dialect, table, schema);
-    let column_quoted = quote_identifier(dialect, column);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    let column_quoted = renderer.quote_identifier(column);
 
     changes
         .iter()
@@ -694,7 +719,9 @@ pub fn alter_column(
             ColumnChange::SetDefault(d) => {
                 format!(
                     "ALTER TABLE {} ALTER COLUMN {} SET DEFAULT {}",
-                    qualified, column_quoted, d
+                    qualified,
+                    column_quoted,
+                    renderer.default_value(d)
                 )
             }
             ColumnChange::DropDefault => {
@@ -720,7 +747,7 @@ pub fn alter_column(
                     "ALTER TABLE {} ALTER COLUMN {} SET COLLATION {}",
                     qualified,
                     column_quoted,
-                    quote_identifier(dialect, collation)
+                    renderer.quote_identifier(collation)
                 )
             }
             ColumnChange::DropCollation => {
@@ -768,7 +795,7 @@ pub fn alter_column(
                 )
             }
         })
-        .map(SqlStmt::from)
+        .map(|sql| renderer.statement(sql))
         .collect::<Vec<_>>()
         .into()
 }
@@ -780,8 +807,9 @@ pub fn alter_column_comment(
     column: &str,
     comment: &Option<String>,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
-    let column_quoted = quote_identifier(dialect, column);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    let column_quoted = renderer.quote_identifier(column);
     let stmt = match comment {
         Some(c) => {
             let escaped = c.replace('\'', "''");
@@ -792,7 +820,7 @@ pub fn alter_column_comment(
         }
         None => format!("COMMENT ON COLUMN {}.{} IS NULL", qualified, column_quoted),
     };
-    stmt.into()
+    renderer.statement(stmt)
 }
 
 pub fn create_index(
@@ -803,6 +831,7 @@ pub fn create_index(
     concurrently: bool,
     if_not_exists: bool,
 ) -> SqlStmt {
+    let renderer = get_renderer(dialect);
     let mut sql = String::from("CREATE ");
 
     if index.unique {
@@ -819,9 +848,9 @@ pub fn create_index(
         sql.push_str("IF NOT EXISTS ");
     }
 
-    sql.push_str(&quote_identifier(dialect, &index.name));
+    sql.push_str(&renderer.quote_identifier(&index.name));
     sql.push_str(" ON ");
-    sql.push_str(&qualified_name(dialect, table, schema));
+    sql.push_str(&renderer.qualified_name(table, schema));
 
     if index.method != IndexMethod::BTree {
         write!(&mut sql, " USING {}", index.method).expect("writing to String cannot fail");
@@ -833,7 +862,7 @@ pub fn create_index(
             sql.push_str(", ");
         }
 
-        sql.push_str(&render_index_column(dialect, col));
+        sql.push_str(&render_index_column(&renderer, col));
     }
     sql.push(')');
 
@@ -843,7 +872,7 @@ pub fn create_index(
             if idx > 0 {
                 sql.push_str(", ");
             }
-            sql.push_str(&quote_identifier(dialect, col));
+            sql.push_str(&renderer.quote_identifier(col));
         }
         sql.push(')');
     }
@@ -866,12 +895,12 @@ pub fn create_index(
         write!(
             &mut sql,
             " TABLESPACE {}",
-            quote_identifier(dialect, tablespace)
+            renderer.quote_identifier(tablespace)
         )
         .expect("writing to String cannot fail");
     }
 
-    sql.into()
+    renderer.statement(sql)
 }
 
 pub fn drop_index(
@@ -881,6 +910,7 @@ pub fn drop_index(
     concurrently: bool,
     if_exists: bool,
 ) -> SqlStmt {
+    let renderer = get_renderer(dialect);
     let mut sql = String::from("DROP INDEX ");
 
     if concurrently {
@@ -891,8 +921,8 @@ pub fn drop_index(
         sql.push_str("IF EXISTS ");
     }
 
-    sql.push_str(&qualified_name(dialect, name, schema));
-    sql.into()
+    sql.push_str(&renderer.qualified_name(name, schema));
+    renderer.statement(sql)
 }
 
 pub fn rename_index(
@@ -901,13 +931,13 @@ pub fn rename_index(
     schema: &Option<String>,
     to: &str,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, from, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(from, schema);
+    renderer.statement(format!(
         "ALTER INDEX {} RENAME TO {}",
         qualified,
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(to)
+    ))
 }
 
 // Constraint operations
@@ -918,13 +948,13 @@ pub fn add_constraint(
     schema: &Option<String>,
     constraint: &Constraint,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    renderer.statement(format!(
         "ALTER TABLE {} ADD {}",
         qualified,
         constraint_definition(dialect, constraint)
-    )
-    .into()
+    ))
 }
 
 pub fn drop_constraint(
@@ -934,15 +964,15 @@ pub fn drop_constraint(
     name: &str,
     cascade: bool,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
     let cascade_str = if cascade { " CASCADE" } else { "" };
-    format!(
+    renderer.statement(format!(
         "ALTER TABLE {} DROP CONSTRAINT {}{}",
         qualified,
-        quote_identifier(dialect, name),
+        renderer.quote_identifier(name),
         cascade_str
-    )
-    .into()
+    ))
 }
 
 pub fn rename_constraint(
@@ -952,20 +982,21 @@ pub fn rename_constraint(
     from: &str,
     to: &str,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, table, schema);
-    format!(
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(table, schema);
+    renderer.statement(format!(
         "ALTER TABLE {} RENAME CONSTRAINT {} TO {}",
         qualified,
-        quote_identifier(dialect, from),
-        quote_identifier(dialect, to)
-    )
-    .into()
+        renderer.quote_identifier(from),
+        renderer.quote_identifier(to)
+    ))
 }
 
 // View operations
 
 pub fn create_view(dialect: &SqlDialect, view: &View, or_replace: bool) -> SqlStmt {
-    let name = qualified_name(dialect, &view.name, &view.schema);
+    let renderer = get_renderer(dialect);
+    let name = renderer.qualified_name(&view.name, &view.schema);
 
     let mut sql = String::from("CREATE ");
 
@@ -979,7 +1010,7 @@ pub fn create_view(dialect: &SqlDialect, view: &View, or_replace: bool) -> SqlSt
 
     write!(&mut sql, "VIEW {} AS {}", name, view.definition)
         .expect("writing to String cannot fail");
-    sql.into()
+    renderer.statement(sql)
 }
 
 pub fn drop_view(
@@ -989,10 +1020,14 @@ pub fn drop_view(
     materialized: bool,
     cascade: bool,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
     let materialized_str = if materialized { "MATERIALIZED " } else { "" };
     let cascade_str = if cascade { " CASCADE" } else { "" };
-    format!("DROP {}VIEW {}{}", materialized_str, qualified, cascade_str).into()
+    renderer.statement(format!(
+        "DROP {}VIEW {}{}",
+        materialized_str, qualified, cascade_str
+    ))
 }
 
 pub fn alter_view(
@@ -1001,26 +1036,30 @@ pub fn alter_view(
     schema: &Option<String>,
     new_definition: &str,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, name, schema);
-    format!("CREATE OR REPLACE VIEW {} AS {}", qualified, new_definition).into()
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(name, schema);
+    renderer.statement(format!(
+        "CREATE OR REPLACE VIEW {} AS {}",
+        qualified, new_definition
+    ))
 }
 
 // Extension operations (PostgreSQL)
 
 pub fn create_extension(dialect: &SqlDialect, name: &str) -> SqlStmt {
-    format!(
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!(
         "CREATE EXTENSION IF NOT EXISTS {}",
-        quote_identifier(dialect, name)
-    )
-    .into()
+        renderer.quote_identifier(name)
+    ))
 }
 
 pub fn drop_extension(dialect: &SqlDialect, name: &str) -> SqlStmt {
-    format!(
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!(
         "DROP EXTENSION IF EXISTS {}",
-        quote_identifier(dialect, name)
-    )
-    .into()
+        renderer.quote_identifier(name)
+    ))
 }
 
 fn format_sequence_options(options: &SequenceOptions) -> String {
@@ -1064,7 +1103,7 @@ fn format_identity_change(change: &IdentityChange) -> String {
     }
 }
 
-fn render_index_column(dialect: &SqlDialect, column: &IndexColumn) -> String {
+fn render_index_column(renderer: &SqlRenderer, column: &IndexColumn) -> String {
     let mut rendered = String::new();
 
     match column {
@@ -1074,7 +1113,7 @@ fn render_index_column(dialect: &SqlDialect, column: &IndexColumn) -> String {
             nulls,
             opclass,
         } => {
-            rendered.push_str(&quote_identifier(dialect, name));
+            rendered.push_str(&renderer.quote_identifier(name));
             if let Some(opclass) = opclass {
                 write!(&mut rendered, " {}", opclass).expect("writing to String cannot fail");
             }
@@ -1130,9 +1169,10 @@ fn rebuild_enum(
     values_assignment_sql: String,
     preserve_comment: bool,
 ) -> SqlStmt {
-    let qualified = qualified_name(dialect, enum_name, schema);
+    let renderer = get_renderer(dialect);
+    let qualified = renderer.qualified_name(enum_name, schema);
     let temp_name = format!("{}__old", enum_name);
-    let temp_qualified = qualified_name(dialect, &temp_name, schema);
+    let temp_qualified = renderer.qualified_name(&temp_name, schema);
     let schema_expr = match schema {
         Some(schema) => format!("'{}'", schema.replace('\'', "''")),
         None => "current_schema()".to_string(),
@@ -1163,7 +1203,7 @@ fn rebuild_enum(
     block.push(format!(
         "    EXECUTE 'ALTER TYPE {} RENAME TO {}';",
         qualified,
-        quote_identifier(dialect, &temp_name)
+        renderer.quote_identifier(&temp_name)
     ));
     block.push(format!(
         "    SELECT t.oid INTO old_type_oid FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = '{}' AND n.nspname = {};",
@@ -1206,7 +1246,7 @@ fn rebuild_enum(
 
     block.push("END $$;".to_string());
 
-    block.join("\n").into()
+    renderer.statement(block.join("\n"))
 }
 
 #[cfg(test)]
@@ -1235,6 +1275,23 @@ mod tests {
         assert_eq!(
             constraint_definition(&SqlDialect::Mysql, &constraint).to_string(),
             ""
+        );
+    }
+
+    #[test]
+    fn renders_enum_values_through_sql_literal_escaping() {
+        let sql = add_enum_value(
+            &SqlDialect::Postgres,
+            "status",
+            &Some("public".to_string()),
+            "owner's",
+            &EnumValuePosition::After("reader's".to_string()),
+        )
+        .to_string();
+
+        assert_eq!(
+            sql,
+            "ALTER TYPE \"public\".\"status\" ADD VALUE 'owner''s' AFTER 'reader''s';"
         );
     }
 
