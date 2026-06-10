@@ -8,7 +8,7 @@ use sqlx::Executor;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::declarative::load_declarative_schema;
+use crate::declarative::{load_declarative_schema, normalize_declarative_apply_sql};
 use crate::diff::diff_snapshots;
 use crate::engines::pg::Postgres;
 use crate::schema::SqlDialect;
@@ -271,7 +271,8 @@ async fn apply_declarative_schema_sql(
     pool: &sqlx::Pool<sqlx::Postgres>,
     schema_sql: &str,
 ) -> Result<()> {
-    sqlx::raw_sql(schema_sql)
+    let apply_sql = normalize_declarative_apply_sql(schema_sql)?;
+    sqlx::raw_sql(&apply_sql)
         .execute(pool)
         .await
         .map_err(|err| {
