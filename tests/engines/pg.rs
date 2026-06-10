@@ -1,6 +1,8 @@
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, Pool, Postgres};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
@@ -8,7 +10,7 @@ use testcontainers::ImageExt;
 use testcontainers::ReuseDirective;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres as PostgresContainer;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 
 use super::{TestBackend, cleanup_postgres_schema};
 use shki::engines::Engine;
@@ -25,6 +27,8 @@ struct SharedPostgresServer {
 }
 
 static POSTGRES_SERVER: OnceCell<SharedPostgresServer> = OnceCell::const_new();
+static POSTGRES_TEST_LIMIT: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(1)));
 
 async fn shared_postgres_server() -> &'static SharedPostgresServer {
     POSTGRES_SERVER
@@ -121,10 +125,16 @@ pub struct PgTestContext {
     pub temp_dir: TempDir,
     pub migrations_dir: PathBuf,
     pub suffix: String,
+    _permit: OwnedSemaphorePermit,
 }
 
 impl PgTestContext {
     pub async fn new(name: &str) -> Self {
+        let permit = POSTGRES_TEST_LIMIT
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("failed to acquire postgres test permit");
         let server = shared_postgres_server().await;
         let database_url = server.admin_url.clone();
         let pg_pool = connect_with_retries("Postgres", || {
@@ -157,6 +167,7 @@ impl PgTestContext {
             temp_dir,
             migrations_dir,
             suffix: unique_suffix(),
+            _permit: permit,
         }
     }
 }
