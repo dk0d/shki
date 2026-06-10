@@ -1,7 +1,9 @@
 use std::future::Future;
 
 use async_trait::async_trait;
-use postgresql_embedded::{PostgreSQL as EmbeddedPostgres, Settings, SettingsBuilder, VersionReq};
+use postgresql_embedded::{
+    PostgreSQL as EmbeddedPostgres, Settings, SettingsBuilder, Status, VersionReq,
+};
 use sqlx::Executor;
 use uuid::Uuid;
 
@@ -14,6 +16,8 @@ use crate::snapshots::{Introspectable, Snapshot};
 use crate::sql::generator::SqlGenerator;
 
 use crate::{Result, ShkiError};
+
+const MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS: u64 = 120;
 
 #[async_trait]
 pub trait SchemaCompiler {
@@ -40,17 +44,20 @@ where
     Fut: Future<Output = Result<T>>,
 {
     let mut server = EmbeddedPostgres::new(embedded_shadow_settings(config)?);
-    server.setup().await.map_err(|err| {
-        ShkiError::schema(format!(
-            "Failed to set up embedded Shadow Database: {}",
-            err
-        ))
-    })?;
-    server.start().await.map_err(|err| {
-        ShkiError::schema(format!("Failed to start embedded Shadow Database: {}", err))
-    })?;
+    if is_embedded_not_installed(server.status()) {
+        println!("{}", first_start_message(shadow_timeout_seconds(config)));
+    }
+    server
+        .setup()
+        .await
+        .map_err(|err| ShkiError::schema(server_setup_failed_message(err)))?;
+    server
+        .start()
+        .await
+        .map_err(|err| ShkiError::schema(server_start_failed_message(err)))?;
 
     let database_name = format!("shki_shadow_{}", Uuid::new_v4().simple());
+
     server
         .create_database(&database_name)
         .await
@@ -75,10 +82,47 @@ where
 }
 
 fn embedded_shadow_settings(config: &Config) -> Result<Settings> {
-    let mut settings = SettingsBuilder::new()
-        .timeout(Some(std::time::Duration::from_secs(config.timeout_seconds)));
+    let mut settings = SettingsBuilder::new().timeout(Some(std::time::Duration::from_secs(
+        shadow_timeout_seconds(config),
+    )));
     settings = settings.version(postgres_major_version_req(config.pg_version.unwrap_or(18))?);
     Ok(settings.build())
+}
+
+fn shadow_timeout_seconds(config: &Config) -> u64 {
+    config
+        .timeout_seconds
+        .max(MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS)
+}
+
+fn first_start_message(timeout_seconds: u64) -> String {
+    format!(
+        "Starting embedded postgres for schema compilation. First use may download/install PostgreSQL and initialize a local data directory; waiting up to {timeout_seconds}s."
+    )
+}
+
+fn server_setup_failed_message(err: postgresql_embedded::Error) -> String {
+    format!(
+        r#"Failed to set up embedded Shadow Database: {}.
+On first use, shki may need to download/install PostgreSQL binaries and initialize a local data directory.
+Try again after checking network access, or configure shadow_database_url to use your own disposable PostgreSQL database.
+"#,
+        err
+    )
+}
+
+fn server_start_failed_message(err: postgresql_embedded::Error) -> String {
+    format!(
+        r#"Failed to start embedded Shadow Database: {}.
+The embedded database can take longer on first use while PostgreSQL finishes initialization.
+Try again, increase timeout_seconds, or configure shadow_database_url to use your own disposable PostgreSQL database.
+"#,
+        err,
+    )
+}
+
+fn is_embedded_not_installed(status: Status) -> bool {
+    matches!(status, Status::NotInstalled)
 }
 
 fn ensure_postgres_compiler_config(config: &Config) -> Result<()> {
@@ -400,6 +444,58 @@ mod tests {
         for version in 14..=18 {
             postgres_major_version_req(version).expect("supported major version should parse");
         }
+    }
+
+    #[test]
+    fn embedded_shadow_settings_uses_longer_startup_timeout_floor() {
+        let config = Config {
+            dialect: SqlDialect::Postgres,
+            timeout_seconds: 2,
+            ..Config::default()
+        };
+
+        let settings = embedded_shadow_settings(&config).expect("settings should build");
+
+        assert_eq!(
+            settings.timeout,
+            Some(std::time::Duration::from_secs(
+                MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS
+            ))
+        );
+    }
+
+    #[test]
+    fn embedded_shadow_settings_preserves_longer_configured_timeout() {
+        let config = Config {
+            dialect: SqlDialect::Postgres,
+            timeout_seconds: MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS + 30,
+            ..Config::default()
+        };
+
+        let settings = embedded_shadow_settings(&config).expect("settings should build");
+
+        assert_eq!(
+            settings.timeout,
+            Some(std::time::Duration::from_secs(
+                MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS + 30
+            ))
+        );
+    }
+
+    #[test]
+    fn embedded_shadow_startup_message_explains_first_run_setup() {
+        let message = first_start_message(MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS);
+
+        assert!(message.contains("First use may download/install PostgreSQL"));
+        assert!(message.contains("waiting up to 120s"));
+    }
+
+    #[test]
+    fn embedded_shadow_first_run_message_only_prints_before_install() {
+        assert!(is_embedded_not_installed(Status::NotInstalled));
+        assert!(!is_embedded_not_installed(Status::Installed));
+        assert!(!is_embedded_not_installed(Status::Stopped));
+        assert!(!is_embedded_not_installed(Status::Started));
     }
 
     #[test]
