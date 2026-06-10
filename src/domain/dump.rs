@@ -3,7 +3,7 @@ use crate::engines::Engine;
 use crate::models::iden::Iden;
 use crate::schema::{
     Aggregate, CatalogSchema, CompositeType, Domain, Function, FunctionParameterMode, Procedure,
-    SqlDialect, TriggerEvent, TriggerOrientation, TriggerTiming,
+    SqlDialect, Table, Trigger, TriggerEvent, TriggerOrientation, TriggerTiming,
 };
 use crate::snapshots::{Introspectable, Snapshot};
 use crate::sql::generator::SqlGenerator;
@@ -289,33 +289,19 @@ fn render_schema_directory(
     }
 
     for table in schema.tables.values() {
+        let triggers = schema
+            .triggers
+            .values()
+            .filter(|trigger| iden_matches_table(&trigger.table, table));
+
         push_file(
             files,
             includes,
             schema_root
                 .join("tables")
                 .join(format!("{}.sql", sanitize_file_name(&table.name))),
-            create_table(&snapshot.dialect, table).to_string(None),
+            render_table_file(&snapshot.dialect, table, triggers)?,
         );
-
-        for index in table.indexes.values() {
-            push_file(
-                files,
-                includes,
-                schema_root
-                    .join("indexes")
-                    .join(format!("{}.sql", sanitize_file_name(&index.name))),
-                create_index(
-                    &snapshot.dialect,
-                    &table.name,
-                    &table.schema,
-                    index,
-                    false,
-                    false,
-                )
-                .to_string(),
-            );
-        }
     }
 
     for view in schema.views.values() {
@@ -367,7 +353,12 @@ fn render_schema_directory(
         );
     }
 
-    for trigger in schema.triggers.values() {
+    for trigger in schema.triggers.values().filter(|trigger| {
+        !schema
+            .tables
+            .values()
+            .any(|table| iden_matches_table(&trigger.table, table))
+    }) {
         push_file(
             files,
             includes,
@@ -379,6 +370,30 @@ fn render_schema_directory(
     }
 
     Ok(())
+}
+
+fn render_table_file<'a>(
+    dialect: &SqlDialect,
+    table: &Table,
+    triggers: impl Iterator<Item = &'a Trigger>,
+) -> Result<String> {
+    let mut statements = vec![create_table(dialect, table).to_string(None)];
+
+    for index in table.indexes.values() {
+        statements.push(
+            create_index(dialect, &table.name, &table.schema, index, false, false).to_string(),
+        );
+    }
+
+    for trigger in triggers {
+        statements.push(render_trigger(dialect, trigger)?);
+    }
+
+    Ok(statements.join("\n\n"))
+}
+
+fn iden_matches_table(iden: &Iden, table: &Table) -> bool {
+    iden.name == table.name && (iden.schema.is_none() || iden.schema == table.schema)
 }
 
 fn push_file(

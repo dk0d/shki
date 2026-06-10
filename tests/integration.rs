@@ -1110,7 +1110,8 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
         CREATE TABLE "{schema}"."{table_name}" (
             id integer primary key,
             name text not null,
-            status "{schema}"."{enum_name}" not null
+            status "{schema}"."{enum_name}" not null,
+            CONSTRAINT "{table_name}_name_unique" UNIQUE (name)
         );
         CREATE INDEX "{index_name}" ON "{schema}"."{table_name}" (name);
         CREATE VIEW "{schema}"."{view_name}" AS
@@ -1173,7 +1174,7 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
         "\\i {}/tables/{}.sql",
         ctx.schema_name, table_name
     )));
-    assert!(main_sql.contains(&format!(
+    assert!(!main_sql.contains(&format!(
         "\\i {}/indexes/{}.sql",
         ctx.schema_name, index_name
     )));
@@ -1191,7 +1192,7 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
             })
         })
         .expect("main.sql should include the dumped function file");
-    assert!(main_sql.contains(&format!(
+    assert!(!main_sql.contains(&format!(
         "\\i {}/triggers/{}.sql",
         ctx.schema_name, trigger_name
     )));
@@ -1206,19 +1207,18 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
             .expect("enum file should be written")
             .contains("CREATE TYPE")
     );
-    assert!(
+    let table_sql =
         std::fs::read_to_string(schema_root.join("tables").join(format!("{table_name}.sql")))
-            .expect("table file should be written")
-            .contains("CREATE TABLE")
-    );
+            .expect("table file should be written");
+    assert!(table_sql.contains("CREATE TABLE"));
+    assert!(table_sql.contains(&format!("CONSTRAINT \"{table_name}_name_unique\" UNIQUE")));
+    assert!(table_sql.contains("CREATE INDEX"));
+    assert!(table_sql.contains(&format!("CREATE TRIGGER \"{trigger_name}\"")));
     assert!(
-        std::fs::read_to_string(
-            schema_root
-                .join("indexes")
-                .join(format!("{index_name}.sql"))
-        )
-        .expect("index file should be written")
-        .contains("CREATE INDEX")
+        !schema_root
+            .join("indexes")
+            .join(format!("{index_name}.sql"))
+            .exists()
     );
     assert!(
         std::fs::read_to_string(schema_root.join("views").join(format!("{view_name}.sql")))
@@ -1240,13 +1240,10 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
             .contains("CREATE FUNCTION")
     );
     assert!(
-        std::fs::read_to_string(
-            schema_root
-                .join("triggers")
-                .join(format!("{trigger_name}.sql"))
-        )
-        .expect("trigger file should be written")
-        .contains("CREATE TRIGGER")
+        !schema_root
+            .join("triggers")
+            .join(format!("{trigger_name}.sql"))
+            .exists()
     );
 
     ctx.cleanup().await;
