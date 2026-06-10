@@ -5,10 +5,11 @@ use crate::schema::{
     Aggregate, CheckConstraint, Column, ColumnPrivilege, CompositeType, CompositeTypeColumn,
     Constraint, DataType, DbEnum, DefaultPrivilege, DefaultValue, Domain, DomainConstraint,
     ForeignKeyConstraint, Function, FunctionParameter, FunctionParameterMode, GeneratedColumn,
-    IdentitySpec, Index, IndexColumn, NullsOrder, ObjectPrivilege, PartitionAttachment,
-    PartitionMethod, PartitionSpec, PrimaryKeyConstraint, Procedure, RevokedDefaultPrivilege,
-    RowLevelSecurity, RowLevelSecurityPolicy, Sequence, SequenceOptions, SqlDialect, Table,
-    Trigger, TriggerEvent, TriggerOrientation, TriggerTiming, UniqueConstraint,
+    IdentitySpec, Index, IndexColumn, IndexMethod, NullsOrder, ObjectPrivilege,
+    PartitionAttachment, PartitionMethod, PartitionSpec, PrimaryKeyConstraint, Procedure,
+    RevokedDefaultPrivilege, RowLevelSecurity, RowLevelSecurityPolicy, Sequence, SequenceOptions,
+    SortOrder, SqlDialect, Table, Trigger, TriggerEvent, TriggerOrientation, TriggerTiming,
+    UniqueConstraint,
 };
 use crate::snapshots::SnapshotProvider;
 use crate::{Result, ShkiError};
@@ -1023,13 +1024,14 @@ fn indexes_from_rows(rows: Vec<PgIndexRow>) -> Result<IndexMap<Iden, IndexMap<St
             ))
             .or_default();
 
+        let method = parse_index_method(&row.index_method);
         let index = index_map
             .entry(row.index_name.clone())
             .or_insert_with(|| Index {
                 name: row.index_name.clone(),
                 columns: Vec::new(),
                 unique: row.is_unique,
-                method: parse_index_method(&row.index_method),
+                method,
                 where_clause: row.where_clause.clone(),
                 options: parse_index_options(&row.reloptions),
                 is_constraint: row.is_constraint,
@@ -1050,14 +1052,14 @@ fn indexes_from_rows(rows: Vec<PgIndexRow>) -> Result<IndexMap<Iden, IndexMap<St
         let index_column = if let Some(expression) = row.expression.as_ref() {
             IndexColumn::Expression {
                 expression: expression.clone(),
-                order: parse_sort_order(row.sort_order.as_deref()),
-                nulls: parse_nulls_order(row.nulls_order.as_deref()),
+                order: parse_index_sort_order(index.method, row.sort_order.as_deref()),
+                nulls: parse_index_nulls_order(index.method, row.nulls_order.as_deref()),
             }
         } else if let Some(column_name) = row.column_name.as_ref() {
             IndexColumn::Column {
                 name: column_name.clone(),
-                order: parse_sort_order(row.sort_order.as_deref()),
-                nulls: parse_nulls_order(row.nulls_order.as_deref()),
+                order: parse_index_sort_order(index.method, row.sort_order.as_deref()),
+                nulls: parse_index_nulls_order(index.method, row.nulls_order.as_deref()),
                 opclass: row.opclass.clone(),
             }
         } else {
@@ -1364,6 +1366,18 @@ fn parse_nulls_order(order: Option<&str>) -> Option<NullsOrder> {
         Some("LAST") => Some(NullsOrder::Last),
         _ => None,
     }
+}
+
+fn parse_index_sort_order(method: IndexMethod, order: Option<&str>) -> Option<SortOrder> {
+    index_method_supports_ordering(method).then(|| parse_sort_order(order))?
+}
+
+fn parse_index_nulls_order(method: IndexMethod, order: Option<&str>) -> Option<NullsOrder> {
+    index_method_supports_ordering(method).then(|| parse_nulls_order(order))?
+}
+
+fn index_method_supports_ordering(method: IndexMethod) -> bool {
+    matches!(method, IndexMethod::BTree)
 }
 
 fn parse_index_options(options: &[String]) -> Vec<(String, String)> {
@@ -1730,6 +1744,44 @@ mod tests {
 
         assert!(!table_indexes.contains_key("users_email_key"));
         assert!(table_indexes.contains_key("users_email_idx"));
+    }
+
+    #[test]
+    fn non_btree_indexes_drop_sort_and_nulls_metadata_from_rows() {
+        let indexes = indexes_from_rows(vec![PgIndexRow {
+            table_schema: "public".to_string(),
+            table_name: "events".to_string(),
+            index_name: "events_payload_idx".to_string(),
+            index_method: "gin".to_string(),
+            is_unique: false,
+            is_constraint: false,
+            where_clause: None,
+            tablespace: None,
+            reloptions: Vec::new(),
+            is_include_column: false,
+            column_name: Some("payload".to_string()),
+            expression: None,
+            opclass: Some("jsonb_path_ops".to_string()),
+            sort_order: Some("ASC".to_string()),
+            nulls_order: Some("LAST".to_string()),
+        }])
+        .expect("index rows should aggregate successfully");
+
+        let index = indexes
+            .get(&Iden::new("events", Some("public".to_string())))
+            .and_then(|table_indexes| table_indexes.get("events_payload_idx"))
+            .expect("gin index should be present");
+
+        assert_eq!(index.method, IndexMethod::Gin);
+        assert!(matches!(
+            index.columns.as_slice(),
+            [IndexColumn::Column {
+                name,
+                order: None,
+                nulls: None,
+                opclass: Some(opclass),
+            }] if name == "payload" && opclass == "jsonb_path_ops"
+        ));
     }
 
     #[test]

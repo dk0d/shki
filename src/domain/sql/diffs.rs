@@ -332,7 +332,7 @@ mod tests {
                 .to_sql(&SqlDialect::Postgres)
                 .expect("index sql should render")
                 .to_string(None),
-            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \"users_email_idx\" ON \"app\".\"users\" USING gin (\"email\" text_pattern_ops DESC NULLS LAST, lower(name) ASC) INCLUDE (\"id\", \"tenant_id\") WHERE email IS NOT NULL WITH (fillfactor=80) TABLESPACE \"fastspace\";"
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \"users_email_idx\" ON \"app\".\"users\" USING gin (\"email\" text_pattern_ops, lower(name)) INCLUDE (\"id\", \"tenant_id\") WHERE email IS NOT NULL WITH (fillfactor=80) TABLESPACE \"fastspace\";"
         );
 
         let drop_index = DiffStatement::DropIndex {

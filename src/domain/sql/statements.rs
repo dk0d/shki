@@ -862,7 +862,7 @@ pub fn create_index(
             sql.push_str(", ");
         }
 
-        sql.push_str(&render_index_column(&renderer, col));
+        sql.push_str(&render_index_column(&renderer, index.method, col));
     }
     sql.push(')');
 
@@ -1103,8 +1103,13 @@ fn format_identity_change(change: &IdentityChange) -> String {
     }
 }
 
-fn render_index_column(renderer: &SqlRenderer, column: &IndexColumn) -> String {
+fn render_index_column(
+    renderer: &SqlRenderer,
+    method: IndexMethod,
+    column: &IndexColumn,
+) -> String {
     let mut rendered = String::new();
+    let supports_ordering = matches!(method, IndexMethod::BTree);
 
     match column {
         IndexColumn::Column {
@@ -1117,11 +1122,11 @@ fn render_index_column(renderer: &SqlRenderer, column: &IndexColumn) -> String {
             if let Some(opclass) = opclass {
                 write!(&mut rendered, " {}", opclass).expect("writing to String cannot fail");
             }
-            if let Some(order) = order {
+            if supports_ordering && let Some(order) = order {
                 write!(&mut rendered, " {}", order.to_sql())
                     .expect("writing to String cannot fail");
             }
-            if let Some(nulls) = nulls {
+            if supports_ordering && let Some(nulls) = nulls {
                 write!(&mut rendered, " {}", nulls.to_sql())
                     .expect("writing to String cannot fail");
             }
@@ -1132,11 +1137,11 @@ fn render_index_column(renderer: &SqlRenderer, column: &IndexColumn) -> String {
             nulls,
         } => {
             rendered.push_str(expression);
-            if let Some(order) = order {
+            if supports_ordering && let Some(order) = order {
                 write!(&mut rendered, " {}", order.to_sql())
                     .expect("writing to String cannot fail");
             }
-            if let Some(nulls) = nulls {
+            if supports_ordering && let Some(nulls) = nulls {
                 write!(&mut rendered, " {}", nulls.to_sql())
                     .expect("writing to String cannot fail");
             }
