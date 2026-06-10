@@ -97,13 +97,13 @@ pub async fn cmd_generate(
     manager.record_migration_in_journal(&up_path, MigrationKind::Schema)?;
 
     println!("{} {}", "Generated migration:".green(), migration_name);
-    println!("  Up:       {}", up_path.display());
+    println!("\nUp:       {}", up_path.display());
     if let Some(path) = &down_path {
-        println!("  Down:     {}", path.display());
+        println!("Down:     {}", path.display());
     }
-    println!("  Snapshot: {}", snapshot_path.display());
+    println!("Snapshot: {}", snapshot_path.display());
     println!();
-    println!("{}", diff_preview(config, &baseline, &desired, &diff)?);
+    println!("{}", diff_preview(config, &diff)?);
 
     Ok(())
 }

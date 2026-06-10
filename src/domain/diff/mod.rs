@@ -20,7 +20,7 @@ pub async fn cmd_diff(config: &Config) -> Result<()> {
     let baseline = load_latest_snapshot(config)?;
     let desired = compiler_from_config(config)?.compile(config).await?;
     let diff = diff_snapshots(&baseline, &desired)?;
-    let preview = diff_preview(config, &baseline, &desired, &diff)?;
+    let preview = diff_preview(config, &diff)?;
 
     println!("{}", preview);
 
@@ -55,16 +55,8 @@ pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
     Ok(serde_json::from_str(&content)?)
 }
 
-pub fn diff_preview(
-    _config: &Config,
-    baseline: &Snapshot,
-    desired: &Snapshot,
-    diff: &SchemaDiff,
-) -> Result<String> {
+pub fn diff_preview(_config: &Config, diff: &SchemaDiff) -> Result<String> {
     let mut lines = Vec::new();
-    lines.push("Shki Diff Preview".to_string());
-    lines.push(format!("Baseline Snapshot: {}", snapshot_label(baseline)));
-    lines.push(format!("Desired Snapshot: {}", snapshot_label(desired)));
     lines.push(format!("Statements: {}", diff.len()));
     lines.push(format!(
         "Rename candidates: {}",
@@ -303,12 +295,8 @@ mod tests {
             ..Config::default()
         };
 
-        let preview =
-            diff_preview(&config, &baseline, &desired, &diff).expect("preview should render");
+        let preview = diff_preview(&config, &diff).expect("preview should render");
 
-        assert!(preview.contains("Shki Diff Preview"));
-        assert!(preview.contains("Baseline Snapshot: baseline"));
-        assert!(preview.contains("Desired Snapshot: desired"));
         assert!(preview.contains("Statements: 1"));
         assert!(preview.contains("Destructive changes: no"));
         assert!(preview.contains("Changes:"));
@@ -334,8 +322,7 @@ mod tests {
             ..Config::default()
         };
 
-        let preview =
-            diff_preview(&config, &baseline, &desired, &diff).expect("preview should render");
+        let preview = diff_preview(&config, &diff).expect("preview should render");
 
         assert!(preview.contains("Rename candidates: 1"));
         assert!(preview.contains("Rename Candidates:"));
@@ -372,16 +359,19 @@ mod tests {
             version: "1".to_string(),
             entries: vec![
                 JournalEntry {
+                    index: 0,
                     migration: "0000_custom".to_string(),
                     kind: MigrationKind::Custom,
                     checksum: "custom".to_string(),
                 },
                 JournalEntry {
+                    index: 1,
                     migration: "0001_schema".to_string(),
                     kind: MigrationKind::Schema,
                     checksum: "schema-1".to_string(),
                 },
                 JournalEntry {
+                    index: 2,
                     migration: "0002_schema".to_string(),
                     kind: MigrationKind::Schema,
                     checksum: "schema-2".to_string(),
