@@ -2,6 +2,8 @@ pub mod rename;
 pub mod statements;
 pub use statements::*;
 mod helpers;
+mod table;
+mod topological;
 
 use crate::compiler::compiler_from_config;
 use crate::config::Config;
@@ -247,7 +249,9 @@ mod tests {
     use crate::migrate::journal::{Journal, JournalEntry};
     use crate::models::iden::Iden;
     use crate::schema::DataType;
-    use crate::schema::{Column, Constraint, Index, PrimaryKeyConstraint, SqlDialect, Table};
+    use crate::schema::{
+        Column, Constraint, ForeignKeyConstraint, Index, PrimaryKeyConstraint, SqlDialect, Table,
+    };
     use crate::snapshots::Snapshot;
     use tempfile::TempDir;
 
@@ -449,6 +453,49 @@ mod tests {
                 && scenario.dropped.contains_key("users_email_key")
                 && scenario.created.contains_key("users_primary_email_key")
         }));
+    }
+
+    #[test]
+    fn creates_referenced_tables_before_referencing_tables_and_defers_foreign_keys() {
+        let from = Snapshot::new(SqlDialect::Postgres);
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        let mut child = Table::in_schema("child", "public");
+        child.column(Column::new("id", DataType::Integer));
+        child.column(Column::new("parent_id", DataType::Integer));
+        child.constraint(Constraint::ForeignKey(
+            ForeignKeyConstraint::new(
+                vec!["parent_id"],
+                Iden::new("parent", Some("public".to_string())),
+                vec!["id"],
+            )
+            .named("child_parent_fkey"),
+        ));
+        to.insert_table(Iden::new("child", Some("public".to_string())), child);
+
+        let mut parent = Table::in_schema("parent", "public");
+        parent.column(Column::new("id", DataType::Integer));
+        parent.constraint(Constraint::PrimaryKey(
+            PrimaryKeyConstraint::new(vec!["id"]).named("parent_pkey"),
+        ));
+        to.insert_table(Iden::new("parent", Some("public".to_string())), parent);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::CreateTable { table } if table.name == "parent"
+        ));
+        assert!(matches!(
+            &diff.statements[1],
+            DiffStatement::CreateTable { table }
+                if table.name == "child" && !table.constraints.iter().any(|constraint| matches!(constraint, Constraint::ForeignKey(_)))
+        ));
+        assert!(matches!(
+            &diff.statements[2],
+            DiffStatement::AddConstraint { table, constraint, .. }
+                if table == "child" && matches!(constraint, Constraint::ForeignKey(_))
+        ));
     }
 
     #[test]

@@ -164,27 +164,7 @@ pub(super) fn diff_tables(
     dialect: &SqlDialect,
     statements: &mut Vec<DiffStatement>,
 ) {
-    diff_index_map_entries(
-        from,
-        to,
-        |statements, _, table_to| {
-            statements.push(DiffStatement::CreateTable {
-                table: table_to.clone(),
-            });
-        },
-        |statements, _, table_from| {
-            statements.push(DiffStatement::DropTable {
-                name: table_from.name.clone(),
-                schema: table_from.schema.clone(),
-                cascade: false,
-                prev: table_from.clone(),
-            });
-        },
-        |statements, _, table_from, table_to| {
-            diff_table(table_from, table_to, dialect, statements);
-        },
-        statements,
-    );
+    super::table::diff_tables(from, to, dialect, statements);
 }
 
 pub(super) fn detect_table_renames(
@@ -213,7 +193,12 @@ pub(super) fn detect_table_renames(
     build_scenario(RenameKind::Table, None, created, dropped)
 }
 
-fn diff_table(from: &Table, to: &Table, dialect: &SqlDialect, statements: &mut Vec<DiffStatement>) {
+pub(super) fn diff_table(
+    from: &Table,
+    to: &Table,
+    dialect: &SqlDialect,
+    statements: &mut Vec<DiffStatement>,
+) {
     let schema = to.schema.clone();
     let table = to.name.clone();
 

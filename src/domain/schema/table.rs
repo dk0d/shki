@@ -3,6 +3,8 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::models::iden::Iden;
+
 use super::{Column, ColumnBuilder, Constraint, Index};
 
 /// A database table definition
@@ -78,6 +80,10 @@ impl Table {
             tablespace: None,
             partition: None,
         }
+    }
+
+    pub fn id(&self) -> Iden {
+        Iden::new(self.name.clone(), self.schema.clone())
     }
 
     /// Create a new table in a schema
