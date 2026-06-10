@@ -194,7 +194,7 @@ mod tests {
         let manager = test_manager(&config);
         let snapshot = test_snapshot();
         let force = false;
-        let name = "inital";
+        let name = "initial";
         let plan =
             plan_bootstrap(&config, &manager, &snapshot, Some(name), force).expect("planned");
         let result = write_bootstrap_artifacts(&config, &manager, plan, snapshot, force)
