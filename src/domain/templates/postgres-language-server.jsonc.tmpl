@@ -18,7 +18,15 @@
     "enabled": true
   },
   "format": {
-    "enabled": false,
+    "ignore": [
+      // need to ignore this because the formatter will remove the import directives
+      "main.sql"
+    ],
+    // NOTE: https://pg-language-server.com/latest/features/formatting/#known-limitations
+    // currently removes any comment blocks during formatting, so disable if you want comments
+    // in the sql
+    "enabled": true,
+    "lineWidth": 120,
     "keywordCase": "upper",
     "constantCase": "upper",
     "typeCase": "upper"
@@ -38,7 +46,7 @@
     // Database password (default: "postgres")
     "password": "postgres",
     // Database name to connect to (default: "postgres")
-    "database": "app",
+    "database": "postgres",
     // Connection timeout in seconds (default: 10)
     "connTimeoutSecs": {{conn_timeout_secs}},
     // Schemas where code action statement execution is allowed (default: [])
