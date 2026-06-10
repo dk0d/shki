@@ -16,6 +16,7 @@ pub struct Journal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalEntry {
+    pub index: usize,
     pub migration: String,
     pub kind: MigrationKind,
     pub checksum: String,
@@ -71,6 +72,7 @@ impl Journal {
         let sql = std::fs::read_to_string(migration_path)?;
 
         self.upsert_entry(JournalEntry {
+            index: self.entries.len(),
             migration,
             kind,
             checksum: sql_checksum(&sql),
