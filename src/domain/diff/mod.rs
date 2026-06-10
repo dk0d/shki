@@ -3,7 +3,7 @@ pub mod statements;
 pub use statements::*;
 mod helpers;
 mod table;
-mod topological;
+pub(crate) mod topological;
 
 use crate::compiler::compiler_from_config;
 use crate::config::Config;

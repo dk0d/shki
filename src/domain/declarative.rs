@@ -3,6 +3,11 @@ use std::path::{Path, PathBuf};
 
 use squawk_lexer::TokenKind;
 
+use indexmap::IndexMap;
+
+use crate::diff::topological::sort_created_tables;
+use crate::models::iden::Iden;
+use crate::schema::{Constraint, ForeignKeyConstraint, Table};
 use crate::{Result, ShkiError};
 
 pub const DIRECTORY_SCHEMA_ENTRYPOINT: &str = "main.sql";
@@ -43,10 +48,127 @@ pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
         }
     }
 
+    let setup = sort_create_table_setup(setup)?;
+
     Ok(DeclarativeApplySql {
         setup_sql: join_sql_statements(&setup),
         deferred_sql: join_sql_statements(&deferred),
     })
+}
+
+fn sort_create_table_setup(statements: Vec<String>) -> Result<Vec<String>> {
+    let mut first_table_index = None;
+    for (idx, statement) in statements.iter().enumerate() {
+        if create_table_info(statement)?.is_some() {
+            first_table_index = Some(idx);
+            break;
+        }
+    }
+    let Some(first_table_index) = first_table_index else {
+        return Ok(statements);
+    };
+
+    let mut prefix = Vec::new();
+    let mut tables = Vec::new();
+    let mut table_sql = IndexMap::new();
+    let mut suffix = Vec::new();
+
+    for (idx, statement) in statements.into_iter().enumerate() {
+        if let Some(table) = create_table_info(&statement)? {
+            table_sql.insert(table.id(), statement);
+            tables.push(table);
+        } else if idx < first_table_index {
+            prefix.push(statement);
+        } else {
+            suffix.push(statement);
+        }
+    }
+
+    let mut sorted = prefix;
+    for table in sort_created_tables(tables) {
+        if let Some(sql) = table_sql.shift_remove(&table.id()) {
+            sorted.push(sql);
+        }
+    }
+    sorted.extend(suffix);
+    Ok(sorted)
+}
+
+fn create_table_info(statement: &str) -> Result<Option<Table>> {
+    let Some(table_keyword_end) = create_table_keyword_end(statement) else {
+        return Ok(None);
+    };
+
+    let Some(open_paren) = find_first_code_char(statement, TokenKind::OpenParen, table_keyword_end)
+    else {
+        return Ok(None);
+    };
+    let Some(close_paren) = find_matching_paren(statement, open_paren)? else {
+        return Ok(None);
+    };
+
+    let table_name = create_table_name(statement, table_keyword_end, open_paren);
+    let Some(table_id) = parse_relation_id(&table_name)? else {
+        return Ok(None);
+    };
+
+    let mut table = match table_id.schema {
+        Some(schema) => Table::in_schema(table_id.name, schema),
+        None => Table::new(table_id.name),
+    };
+
+    let body = &statement[open_paren + 1..close_paren];
+    for item in split_top_level_commas(body)? {
+        if let Some(referenced) = referenced_table_id(&item)? {
+            table.constraint(Constraint::ForeignKey(ForeignKeyConstraint::new(
+                Vec::<String>::new(),
+                referenced,
+                Vec::<String>::new(),
+            )));
+        }
+    }
+
+    Ok(Some(table))
+}
+
+fn referenced_table_id(item: &str) -> Result<Option<Iden>> {
+    let tokens = lex_sql(item)?;
+    let Some(reference_token) = tokens.iter().find(|token| token.is_keyword("REFERENCES")) else {
+        return Ok(None);
+    };
+
+    parse_relation_id(&item[reference_token.end..])
+}
+
+fn parse_relation_id(sql: &str) -> Result<Option<Iden>> {
+    let tokens = lex_sql(sql)?;
+    let mut parts = Vec::new();
+
+    for token in tokens {
+        if matches!(token.kind, TokenKind::OpenParen) {
+            break;
+        }
+        if is_name_token(&token.kind) {
+            parts.push(unquote_identifier(token.text));
+            if parts.len() == 2 {
+                break;
+            }
+        }
+    }
+
+    Ok(match parts.as_slice() {
+        [name] => Some(Iden::new(name.clone(), None)),
+        [schema, name] => Some(Iden::new(name.clone(), Some(schema.clone()))),
+        _ => None,
+    })
+}
+
+fn unquote_identifier(value: &str) -> String {
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        value[1..value.len() - 1].replace("\"\"", "\"")
+    } else {
+        value.to_string()
+    }
 }
 
 pub fn load_declarative_schema(path: impl AsRef<Path>) -> Result<DeclarativeSchema> {
@@ -678,6 +800,33 @@ CREATE TABLE child (parent_id int);
             plan.deferred_sql,
             "ALTER TABLE child ADD CONSTRAINT child_parent_fkey FOREIGN KEY (parent_id) REFERENCES parent(id);"
         );
+    }
+
+    #[test]
+    fn normalizes_create_tables_in_dependency_order() {
+        let sql = r#"
+CREATE SCHEMA app;
+CREATE TABLE app.child (
+  id int,
+  parent_id int REFERENCES app.parent(id)
+);
+CREATE TABLE app.parent (id int PRIMARY KEY);
+CREATE INDEX child_parent_id_idx ON app.child (parent_id);
+"#;
+
+        let plan = plan_declarative_apply_sql(sql).expect("sql should normalize");
+
+        let schema_pos = plan.setup_sql.find("CREATE SCHEMA app").unwrap();
+        let parent_pos = plan.setup_sql.find("CREATE TABLE app.parent").unwrap();
+        let child_pos = plan.setup_sql.find("CREATE TABLE app.child").unwrap();
+        let index_pos = plan
+            .setup_sql
+            .find("CREATE INDEX child_parent_id_idx")
+            .unwrap();
+
+        assert!(schema_pos < parent_pos);
+        assert!(parent_pos < child_pos);
+        assert!(child_pos < index_pos);
     }
 
     #[test]

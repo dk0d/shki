@@ -4,7 +4,7 @@ use crate::models::iden::Iden;
 use crate::schema::{Constraint, Table};
 
 /// port of https://github.com/pgplex/pgschema/blob/main/internal/diff/topological.go
-pub(super) fn sort_created_tables(tables: Vec<Table>) -> Vec<Table> {
+pub(crate) fn sort_created_tables(tables: Vec<Table>) -> Vec<Table> {
     if tables.len() <= 1 {
         // already sorted
         return tables;
