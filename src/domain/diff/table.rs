@@ -68,6 +68,18 @@ fn lower_table_diffs(
         statements.push(DiffStatement::CreateTable {
             table: table_without_fks.clone(),
         });
+        for index in table_without_fks.indexes.values() {
+            if index.is_constraint {
+                continue;
+            }
+            statements.push(DiffStatement::CreateIndex {
+                table: table_without_fks.name.clone(),
+                schema: table_without_fks.schema.clone(),
+                index: index.clone(),
+                concurrently: false,
+                if_not_exists: false,
+            });
+        }
         for constraint in foreign_keys {
             deferred_foreign_keys.push(DiffStatement::AddConstraint {
                 table: table_without_fks.name.clone(),

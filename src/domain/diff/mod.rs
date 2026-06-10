@@ -489,6 +489,36 @@ mod tests {
     }
 
     #[test]
+    fn creates_standalone_indexes_for_new_tables() {
+        let from = Snapshot::new(SqlDialect::Postgres);
+
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        let mut table = Table::in_schema("item", "public");
+        table.column(Column::new(
+            "created_at",
+            DataType::Timestamp {
+                with_timezone: true,
+                precision: None,
+            },
+        ));
+        table.index(Index::new("ix_item_created_at", vec!["created_at"]));
+        to.insert_table(Iden::new("item", Some("public".to_string())), table);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert!(matches!(
+            &diff.statements[..],
+            [
+                DiffStatement::CreateTable { table },
+                DiffStatement::CreateIndex { table: index_table, schema, index, .. }
+            ] if table.name == "item"
+                && index_table == "item"
+                && schema.as_deref() == Some("public")
+                && index.name == "ix_item_created_at"
+        ));
+    }
+
+    #[test]
     fn applies_table_rename_decision_with_nested_renames() {
         let mut from = Snapshot::new(SqlDialect::Postgres);
         from.insert_table(Iden::new("accounts", None), Table::new("accounts"));

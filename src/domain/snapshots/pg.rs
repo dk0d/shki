@@ -1521,7 +1521,7 @@ mod tests {
             is_nullable: "NO".to_string(),
             ..base_column_row("indexing", "text")
         };
-        let mut table = Table::in_schema("dust", "public");
+        let mut table = Table::in_schema("item", "public");
         table.column(Column::from(row));
 
         let sql = create_table(&SqlDialect::Postgres, &table).to_string(None);
