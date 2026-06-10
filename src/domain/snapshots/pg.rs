@@ -1484,6 +1484,22 @@ mod tests {
     }
 
     #[test]
+    fn object_privileges_query_omits_owner_privileges() {
+        assert!(
+            pg_snapshot_queries::OBJECT_PRIVILEGES
+                .contains("tp.grantee <> pg_get_userbyid(c.relowner)")
+        );
+    }
+
+    #[test]
+    fn column_privileges_query_omits_owner_privileges() {
+        assert!(
+            pg_snapshot_queries::COLUMN_PRIVILEGES
+                .contains("cp.grantee <> pg_get_userbyid(c.relowner)")
+        );
+    }
+
+    #[test]
     fn parses_partition_spec_from_pg_catalog_values() {
         let partition = parse_partition_spec(Some("r"), Some("RANGE (created_at, tenant_id)"))
             .expect("partition spec should be parsed");
