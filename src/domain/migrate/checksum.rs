@@ -15,9 +15,18 @@ use sha2::{Digest, Sha256};
 /// - Line endings are normalized to `\n`
 pub fn sql_checksum(sql: &str) -> String {
     let normalized = normalize_sql(sql);
-    let mut hasher = Sha256::new();
-    hasher.update(normalized.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let hash = Sha256::digest(normalized.as_bytes());
+    hex_encode(&hash)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 /// Normalize SQL content by removing comments and empty lines
@@ -71,6 +80,7 @@ fn strip_line_comment(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hex_literal::hex;
 
     #[test]
     fn test_normalize_removes_single_line_comments() {
@@ -130,6 +140,20 @@ CREATE TABLE users (
 "#;
         let expected = "CREATE TABLE users (\nid SERIAL PRIMARY KEY,\nname TEXT NOT NULL\n);";
         assert_eq!(normalize_sql(sql), expected);
+    }
+
+    #[test]
+    fn test_checksum_hello_world() {
+        let hash = Sha256::digest(b"hello world");
+        assert_eq!(
+            hash,
+            hex!("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+        );
+        let hash = sql_checksum("hello world");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
     }
 
     #[test]

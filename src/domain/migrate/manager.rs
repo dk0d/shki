@@ -12,7 +12,6 @@ use crate::models::iden::Iden;
 use crate::snapshots::Snapshot;
 use crate::{MIGRATION_SPLIT_MARKER, Result, ShkiError};
 use chrono::Utc;
-use petname::Generator;
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 
@@ -178,7 +177,9 @@ impl MigrationManager {
         let suffix = match suffix {
             Some(s) => s.to_string(),
             None => petname::Petnames::default()
-                .generate_one(2, "-")
+                .namer(2, "-")
+                .iter(&mut rand::rng())
+                .next()
                 .expect("no names available")
                 .to_lowercase(),
         };
