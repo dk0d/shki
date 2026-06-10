@@ -403,6 +403,11 @@ impl Config {
         Ok(config)
     }
 
+    pub fn with_root(mut self, root: PathBuf) -> Self {
+        self.root = root;
+        self
+    }
+
     pub fn with_dialect(mut self, dialect: SqlDialect) -> Self {
         self.dialect = dialect;
         self

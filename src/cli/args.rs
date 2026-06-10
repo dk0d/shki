@@ -308,41 +308,39 @@ pub enum Commands {
         schema: Option<String>,
     },
 
-    // /// Bootstrap shki from an existing database state
-    // #[command(visible_alias = "strap")]
-    // Bootstrap {
-    //     /// Migration name/suffix for the generated initial migration
-    //     name: Option<String>,
-    //
-    //     /// Legacy migration table(s) to exclude and optionally drop
-    //     #[arg(long = "legacy-table")]
-    //     legacy_tables: Vec<String>,
-    //
-    //     /// Drop provided legacy migration table(s) from the database
-    //     #[arg(long, default_value_t = false)]
-    //     drop_legacy_tables: bool,
-    //
-    //     /// Also generate Lua schema definitions from the introspected snapshot
-    //     #[arg(long, default_value_t = false)]
-    //     write_lua: bool,
-    //
-    //     /// Path to write generated Lua schema (defaults to config schema path)
-    //     #[arg(long)]
-    //     lua_output: Option<PathBuf>,
-    //
-    //     /// Do not record the generated bootstrap migration as already applied
-    //     #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
-    //     no_mark_applied: bool,
-    //
-    //     /// Show what would be generated without writing files or changing DB
-    //     #[arg(long, short)]
-    //     dry_run: bool,
-    //
-    //     /// Allow running even when migrations/snapshots already exist locally
-    //     #[arg(long, default_value_t = false)]
-    //     force: bool,
-    // },
-    //
+    /// Bootstrap shki from an existing database state
+    #[command(visible_alias = "strap")]
+    Bootstrap {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
+        /// Migration name/suffix for the generated initial migration (defaults to 'bootstrap')
+        name: Option<String>,
+
+        // /// Legacy migration table(s) to exclude and optionally drop
+        // #[arg(long = "legacy-table")]
+        // legacy_tables: Vec<String>,
+
+        // /// Drop provided legacy migration table(s) from the database
+        // #[arg(long, default_value_t = false)]
+        // drop_legacy_tables: bool,
+        /// Do not record the generated bootstrap migration as already applied
+        #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
+        no_mark_applied: bool,
+
+        /// Show what would be generated without writing files or changing DB
+        #[arg(long, short)]
+        dry_run: bool,
+
+        /// Allow running even when migrations/snapshots already exist locally
+        #[arg(long, default_value_t = false)]
+        force: bool,
+
+        /// Schema to bootstrap (Postgres, defaults to public)
+        #[arg(long)]
+        schema: Option<String>,
+    },
+
     // /// Squash existing shki migrations into a single baseline migration
     // #[command(visible_alias = "sq")]
     // Squash {

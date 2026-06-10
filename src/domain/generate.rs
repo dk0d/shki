@@ -108,7 +108,12 @@ pub async fn cmd_generate(
     Ok(())
 }
 
-fn write_schema_migration(path: &Path, migration_name: &str, sql: &str, down: bool) -> Result<()> {
+pub(crate) fn write_schema_migration(
+    path: &Path,
+    migration_name: &str,
+    sql: &str,
+    down: bool,
+) -> Result<()> {
     if path.exists() {
         return Err(ShkiError::migration(format!(
             "Migration file already exists: {}",

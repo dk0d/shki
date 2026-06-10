@@ -80,6 +80,26 @@ pub async fn run(cli: Cli) -> Result<()> {
             schema,
         } => dump::cmd_dump(&config, &format, output.as_deref(), dirs, force, &schema).await,
 
+        Commands::Bootstrap {
+            migrations,
+            name,
+            no_mark_applied,
+            dry_run,
+            force,
+            schema,
+        } => {
+            let config = config.with_migration_args(&migrations)?;
+            bootstrap::cmd_bootstrap(
+                &config,
+                name.as_deref(),
+                !no_mark_applied,
+                dry_run,
+                force,
+                &schema,
+            )
+            .await
+        }
+
         Commands::Diff { shadow } => {
             let config = config.with_shadow_args(&shadow)?;
             diff::cmd_diff(&config).await
