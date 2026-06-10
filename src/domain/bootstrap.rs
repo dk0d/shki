@@ -227,12 +227,8 @@ mod tests {
         let snapshot = test_snapshot();
         let force = false;
         let name = "inital";
-        let plan =
-            plan_bootstrap(&config, &manager, &snapshot, Some(name), force).expect("planned");
-
-        let error = write_bootstrap_artifacts(&config, &manager, plan, snapshot, force)
-            .expect_err("bootstrap should refuse existing migrations");
-
+        let error = plan_bootstrap(&config, &manager, &snapshot, Some(name), force)
+            .expect_err("planned error");
         assert!(error.to_string().contains("empty migrations directory"));
     }
 }
