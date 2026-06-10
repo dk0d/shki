@@ -11,7 +11,7 @@ use shki::migrate::manager::MigrationManager;
 use shki::models::iden::Iden;
 use shki::schema::SqlDialect;
 use shki::{Cli, Commands, CommonArgs};
-use sqlx::{Executor, Pool, Postgres};
+use sqlx::{AssertSqlSafe, Executor, Pool, Postgres};
 use std::path::{Path, PathBuf};
 
 pub trait TestBackend: Sized {
@@ -150,7 +150,8 @@ database_url = "{}"
 }
 
 pub async fn cleanup_postgres_schema(pool: &Pool<Postgres>, schema_name: &str) {
-    pool.execute(format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", schema_name).as_str())
+    let query = format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", schema_name);
+    pool.execute(AssertSqlSafe(query))
         .await
         .expect("failed to cleanup schema");
 }

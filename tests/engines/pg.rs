@@ -1,5 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, Pool, Postgres};
+use sqlx::{AssertSqlSafe, Pool, Postgres};
 use std::path::PathBuf;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -76,8 +76,9 @@ impl TestDatabase {
         })
         .await;
 
-        admin_pool
-            .execute(format!("CREATE DATABASE \"{}\"", database_name).as_str())
+        let create_database_sql = format!("CREATE DATABASE \"{}\"", database_name);
+        sqlx::raw_sql(AssertSqlSafe(create_database_sql))
+            .execute(&admin_pool)
             .await
             .expect("failed to create postgres shadow database");
 
@@ -102,14 +103,12 @@ impl TestDatabase {
         })
         .await;
 
-        admin_pool
-            .execute(
-                format!(
-                    "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
-                    self.database_name
-                )
-                .as_str(),
-            )
+        let drop_database_sql = format!(
+            "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+            self.database_name
+        );
+        sqlx::raw_sql(AssertSqlSafe(drop_database_sql))
+            .execute(&admin_pool)
             .await
             .expect("failed to drop postgres shadow database");
     }
@@ -136,12 +135,14 @@ impl PgTestContext {
         })
         .await;
         let schema_name = format!("{}_{}", name, unique_suffix());
-        pg_pool
-            .execute(format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", schema_name).as_str())
+        let drop_schema_sql = format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", schema_name);
+        sqlx::raw_sql(AssertSqlSafe(drop_schema_sql))
+            .execute(&pg_pool)
             .await
             .expect("failed to drop schema");
-        pg_pool
-            .execute(format!("CREATE SCHEMA \"{}\"", schema_name).as_str())
+        let create_schema_sql = format!("CREATE SCHEMA \"{}\"", schema_name);
+        sqlx::raw_sql(AssertSqlSafe(create_schema_sql))
+            .execute(&pg_pool)
             .await
             .expect("failed to create schema");
 

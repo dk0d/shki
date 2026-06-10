@@ -10,7 +10,7 @@ use super::{DiffStatement, helpers};
 pub(super) enum TableDiff {
     Create(Table),
     Drop(Table),
-    Modify { from: Table, to: Table },
+    Modify { from: Box<Table>, to: Box<Table> },
 }
 
 pub(super) fn diff_tables(
@@ -38,8 +38,8 @@ pub(super) fn diff_tables(
     for (id, table_to) in to {
         if let Some(table_from) = from.get(id) {
             modified.push(TableDiff::Modify {
-                from: table_from.clone(),
-                to: table_to.clone(),
+                from: Box::new(table_from.clone()),
+                to: Box::new(table_to.clone()),
             });
         }
     }

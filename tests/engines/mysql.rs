@@ -1,3 +1,4 @@
+use sqlx::AssertSqlSafe;
 use sqlx::Pool;
 use sqlx::mysql::MySqlPoolOptions;
 use std::path::PathBuf;
@@ -105,7 +106,8 @@ impl MysqlTestContext {
         })
         .await;
 
-        sqlx::query(&format!("CREATE DATABASE `{database_name}`"))
+        let create_database_sql = format!("CREATE DATABASE `{}`", database_name);
+        sqlx::raw_sql(AssertSqlSafe(create_database_sql))
             .execute(&admin_pool)
             .await
             .expect("failed to create mysql test database");
@@ -209,7 +211,8 @@ impl TestBackend for MysqlTestContext {
         })
         .await;
 
-        sqlx::query(&format!("DROP DATABASE IF EXISTS `{}`", self.database_name))
+        let query = format!("DROP DATABASE IF EXISTS `{}`", self.database_name);
+        sqlx::query(AssertSqlSafe(query))
             .execute(&admin_pool)
             .await
             .expect("failed to drop mysql test database");

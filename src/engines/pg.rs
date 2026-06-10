@@ -6,7 +6,7 @@ use crate::models::iden::Iden;
 use crate::schema::SqlDialect;
 use crate::sql::render::SqlRenderer;
 use crate::{Result, ShkiError};
-use sqlx::Pool;
+use sqlx::{AssertSqlSafe, Pool};
 use std::path::Path;
 
 use super::MigrationFile;
@@ -49,9 +49,10 @@ impl TransactionalEngine for Postgres {
         &self,
         tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
-        let table_name =
-            SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
-
+        let renderer = SqlRenderer::new(&SqlDialect::Postgres);
+        let schema_name =
+            renderer.quote_identifier(self.migrations_table.schema.as_deref().unwrap_or("public"));
+        let table_name = renderer.qualified_table_name(&self.migrations_table);
         let query = format!(
             r#"
                 CREATE SCHEMA IF NOT EXISTS {};
@@ -62,13 +63,9 @@ impl TransactionalEngine for Postgres {
                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             "#,
-            self.migrations_table
-                .schema
-                .clone()
-                .unwrap_or("public".to_string()),
-            table_name
+            schema_name, table_name
         );
-        sqlx::raw_sql(&query)
+        sqlx::raw_sql(AssertSqlSafe(query))
             .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}",)))?;
@@ -81,7 +78,7 @@ impl TransactionalEngine for Postgres {
         path: &Path,
     ) -> Result<MigrationFile> {
         let file = self.read_migration_file(path)?;
-        sqlx::raw_sql(&file.sql)
+        sqlx::raw_sql(AssertSqlSafe(file.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -109,7 +106,7 @@ impl TransactionalEngine for Postgres {
             ));
         }
 
-        sqlx::raw_sql(&file.sql)
+        sqlx::raw_sql(AssertSqlSafe(file.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -141,7 +138,7 @@ impl TransactionalEngine for Postgres {
         applied: &MigrationFile,
     ) -> Result<MigrationRow> {
         let query = self.insert_migration_query(&self.migrations_table);
-        sqlx::query_as::<_, MigrationRow>(&query)
+        sqlx::query_as::<_, MigrationRow>(AssertSqlSafe(query))
             .bind(&applied.name)
             .bind(&applied.checksum)
             .fetch_one(&mut **tx)
@@ -157,9 +154,8 @@ impl TransactionalEngine for Postgres {
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
         let table_name =
             SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
-        let _ = sqlx::query(&format!("DROP TABLE {}", table_name))
-            .execute(&mut **tx)
-            .await;
+        let query = format!("DROP TABLE {}", table_name);
+        let _ = sqlx::raw_sql(AssertSqlSafe(query)).execute(&mut **tx).await;
         Ok(())
     }
 
@@ -171,7 +167,7 @@ impl TransactionalEngine for Postgres {
         let table_name =
             SqlRenderer::new(&SqlDialect::Postgres).qualified_table_name(&self.migrations_table);
         let query = format!("DELETE FROM {} WHERE name = $1 returning *", table_name);
-        let row = sqlx::query_as::<_, MigrationRow>(&query)
+        let row = sqlx::query_as::<_, MigrationRow>(AssertSqlSafe(query))
             .bind(name)
             .fetch_one(&mut **tx)
             .await
@@ -186,7 +182,7 @@ impl TransactionalEngine for Postgres {
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
             table_name
         );
-        let rows = sqlx::query_as::<_, MigrationRow>(&query)
+        let rows = sqlx::query_as::<_, MigrationRow>(AssertSqlSafe(query))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows)

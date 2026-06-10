@@ -1,4 +1,4 @@
-use sqlx::Pool;
+use sqlx::{AssertSqlSafe, Pool};
 
 use crate::engines::TransactionalEngine;
 use crate::migrate::manager::MigrationRow;
@@ -36,12 +36,11 @@ impl TransactionalEngine for Sqlite {
 
     async fn select_migrations(&self) -> Result<Vec<MigrationRow>> {
         let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-        let query = format!(
+        let query = AssertSqlSafe(format!(
             "SELECT id, name, checksum, applied_at from {} ORDER BY id",
             table_name
-        );
-
-        let rows = sqlx::query_as::<_, MigrationRow>(&query)
+        ));
+        let rows = sqlx::query_as::<_, MigrationRow>(query)
             .fetch_all(&self.pool)
             .await?;
         Ok(rows)
@@ -62,7 +61,7 @@ impl TransactionalEngine for Sqlite {
         tx: &mut sqlx::Transaction<'_, Self::Database>,
     ) -> Result<()> {
         let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-        let query = format!(
+        let query = AssertSqlSafe(format!(
             r#"
                 CREATE TABLE IF NOT EXISTS {} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,8 +71,8 @@ impl TransactionalEngine for Sqlite {
                 )
                 "#,
             table_name
-        );
-        sqlx::query(&query)
+        ));
+        sqlx::query(query)
             .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
@@ -87,7 +86,7 @@ impl TransactionalEngine for Sqlite {
     ) -> Result<MigrationFile> {
         let summary = self.read_migration_file(path)?;
 
-        sqlx::raw_sql(&summary.sql)
+        sqlx::raw_sql(AssertSqlSafe(summary.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -108,11 +107,11 @@ impl TransactionalEngine for Sqlite {
         applied: &MigrationFile,
     ) -> Result<MigrationRow> {
         let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-        let query = format!(
+        let query = AssertSqlSafe(format!(
             "INSERT INTO {} (name, checksum) VALUES (?, ?) RETURNING id, name, checksum, applied_at",
             table_name
-        );
-        sqlx::query_as::<_, MigrationRow>(&query)
+        ));
+        sqlx::query_as::<_, MigrationRow>(query)
             .bind(&applied.name)
             .bind(&applied.checksum)
             .fetch_one(&mut **tx)
@@ -132,7 +131,7 @@ impl TransactionalEngine for Sqlite {
     ) -> Result<()> {
         let summary = self.read_migration_file(path)?;
 
-        sqlx::raw_sql(&summary.sql)
+        sqlx::raw_sql(AssertSqlSafe(summary.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -159,8 +158,8 @@ impl TransactionalEngine for Sqlite {
 
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
         let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-        let query = format!("DROP TABLE {}", table_name);
-        sqlx::query(&query)
+        let query = AssertSqlSafe(format!("DROP TABLE {}", table_name));
+        sqlx::query(query)
             .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
@@ -173,11 +172,11 @@ impl TransactionalEngine for Sqlite {
         name: &str,
     ) -> Result<MigrationRow> {
         let table_name = SqlRenderer::new(&SqlDialect::Sqlite).qualified_table_name(&self.table);
-        let query = format!(
+        let query = AssertSqlSafe(format!(
             "DELETE FROM {} WHERE name = ? RETURNING id, name, checksum, applied_at",
             table_name
-        );
-        sqlx::query_as::<_, MigrationRow>(&query)
+        ));
+        sqlx::query_as::<_, MigrationRow>(query)
             .bind(name)
             .fetch_one(&mut **tx)
             .await

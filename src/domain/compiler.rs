@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use postgresql_embedded::{
     PostgreSQL as EmbeddedPostgres, Settings, SettingsBuilder, Status, VersionReq,
 };
-use sqlx::Executor;
+use sqlx::{AssertSqlSafe, Executor};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -272,7 +272,7 @@ async fn apply_declarative_schema_sql(
     schema_sql: &str,
 ) -> Result<()> {
     let apply_sql = normalize_declarative_apply_sql(schema_sql)?;
-    sqlx::raw_sql(&apply_sql)
+    sqlx::raw_sql(AssertSqlSafe(apply_sql))
         .execute(pool)
         .await
         .map_err(|err| {
@@ -295,7 +295,7 @@ async fn validate_generated_diff_sql_with_pool(
 
     let baseline_sql = render_baseline_sql(config, baseline)?;
     if !baseline_sql.trim().is_empty() {
-        sqlx::raw_sql(&baseline_sql)
+        sqlx::raw_sql(AssertSqlSafe(baseline_sql))
             .execute(&pool)
             .await
             .map_err(|err| {
@@ -306,7 +306,7 @@ async fn validate_generated_diff_sql_with_pool(
             })?;
     }
 
-    sqlx::raw_sql(generated_sql)
+    sqlx::raw_sql(AssertSqlSafe(generated_sql))
         .execute(&pool)
         .await
         .map_err(|err| {

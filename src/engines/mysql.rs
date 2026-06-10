@@ -1,4 +1,4 @@
-use sqlx::Pool;
+use sqlx::{AssertSqlSafe, Pool};
 
 use crate::engines::TransactionalEngine;
 use crate::migrate::manager::MigrationRow;
@@ -40,7 +40,7 @@ impl TransactionalEngine for Mysql {
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at from {} ORDER BY id",
             table_name
         );
-        let rows = sqlx::query_as::<_, MigrationRow>(&query)
+        let rows = sqlx::query_as::<_, MigrationRow>(AssertSqlSafe(query))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows)
@@ -80,7 +80,7 @@ impl TransactionalEngine for Mysql {
                 "#,
             table_name
         );
-        sqlx::query(&query)
+        sqlx::query(AssertSqlSafe(query))
             .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
@@ -94,7 +94,7 @@ impl TransactionalEngine for Mysql {
     ) -> Result<MigrationFile> {
         let applied = self.read_migration_file(path)?;
 
-        sqlx::raw_sql(&applied.sql)
+        sqlx::raw_sql(AssertSqlSafe(applied.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -115,8 +115,11 @@ impl TransactionalEngine for Mysql {
         applied: &MigrationFile,
     ) -> Result<MigrationRow> {
         let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let insert = format!("INSERT INTO {} (name, checksum) VALUES (?, ?)", table_name);
-        sqlx::query(&insert)
+        let insert = AssertSqlSafe(format!(
+            "INSERT INTO {} (name, checksum) VALUES (?, ?)",
+            table_name
+        ));
+        sqlx::query(insert)
             .bind(&applied.name)
             .bind(&applied.checksum)
             .execute(&mut **tx)
@@ -128,11 +131,11 @@ impl TransactionalEngine for Mysql {
                 ))
             })?;
 
-        let select = format!(
+        let select = AssertSqlSafe(format!(
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
             table_name
-        );
-        sqlx::query_as::<_, MigrationRow>(&select)
+        ));
+        sqlx::query_as::<_, MigrationRow>(select)
             .bind(&applied.name)
             .fetch_one(&mut **tx)
             .await
@@ -155,7 +158,7 @@ impl TransactionalEngine for Mysql {
                 "Down migration must end with .down.sql",
             ));
         };
-        sqlx::raw_sql(&applied.sql)
+        sqlx::raw_sql(AssertSqlSafe(applied.sql.clone()))
             .execute(&mut **tx)
             .await
             .map_err(|e| {
@@ -182,8 +185,8 @@ impl TransactionalEngine for Mysql {
 
     async fn delete_table(&self, tx: &mut sqlx::Transaction<'_, Self::Database>) -> Result<()> {
         let table_name = SqlRenderer::new(&SqlDialect::Mysql).qualified_table_name(&self.table);
-        let query = format!("DROP TABLE {}", table_name);
-        sqlx::query(&query)
+        let query = AssertSqlSafe(format!("DROP TABLE {}", table_name));
+        sqlx::query(query)
             .execute(&mut **tx)
             .await
             .map_err(|e| ShkiError::migration(format!("Failed to execute query {e}")))?;
@@ -200,7 +203,7 @@ impl TransactionalEngine for Mysql {
             "SELECT id, name, checksum, CAST(applied_at AS CHAR) AS applied_at FROM {} WHERE name = ?",
             table_name
         );
-        let row = sqlx::query_as::<_, MigrationRow>(&select)
+        let row = sqlx::query_as::<_, MigrationRow>(AssertSqlSafe(select))
             .bind(name)
             .fetch_one(&self.pool)
             .await
@@ -208,8 +211,8 @@ impl TransactionalEngine for Mysql {
                 ShkiError::migration(format!("Failed to load migration '{}': {}", name, e))
             })?;
 
-        let delete = format!("DELETE FROM {} WHERE name = ?", table_name);
-        sqlx::query(&delete)
+        let delete = AssertSqlSafe(format!("DELETE FROM {} WHERE name = ?", table_name));
+        sqlx::query(delete)
             .bind(name)
             .execute(&mut **tx)
             .await

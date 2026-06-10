@@ -14,7 +14,7 @@ use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
 use shki::snapshots::{Introspectable, Snapshot};
 use shki::{Cli, CodegenLanguage, Commands, CommonArgs};
-use sqlx::Executor;
+use sqlx::{AssertSqlSafe, Executor};
 
 use self::common::*;
 
@@ -1102,10 +1102,8 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
         .execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
         .await
         .expect("failed to create extension fixture");
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"
+    let fixture_sql = format!(
+        r#"
         CREATE TYPE "{schema}"."{enum_name}" AS ENUM ('active', 'inactive');
         CREATE TABLE "{schema}"."{table_name}" (
             id integer primary key,
@@ -1131,18 +1129,18 @@ async fn postgres_dump_dirs_writes_catalog_object_layout() {
         FOR EACH ROW
         EXECUTE FUNCTION "{schema}"."{trigger_function_name}"();
         "#,
-                schema = ctx.schema_name,
-                enum_name = enum_name,
-                table_name = table_name,
-                index_name = index_name,
-                view_name = view_name,
-                materialized_view_name = materialized_view_name,
-                function_name = function_name,
-                trigger_function_name = trigger_function_name,
-                trigger_name = trigger_name,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        enum_name = enum_name,
+        table_name = table_name,
+        index_name = index_name,
+        view_name = view_name,
+        materialized_view_name = materialized_view_name,
+        function_name = function_name,
+        trigger_function_name = trigger_function_name,
+        trigger_name = trigger_name,
+    );
+    sqlx::raw_sql(AssertSqlSafe(fixture_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to create catalog dump fixture");
 
@@ -1592,10 +1590,8 @@ async fn postgres_catalog_includes_functions_and_triggers() {
     let trigger_function_name = ctx.unique_name("touch_updated_at");
     let trigger_name = ctx.unique_name("set_updated_at");
 
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"
+    let fixture_sql = format!(
+        r#"
         CREATE TABLE "{schema}"."{table}" (
             id integer primary key,
             updated_at timestamp without time zone
@@ -1623,14 +1619,14 @@ async fn postgres_catalog_includes_functions_and_triggers() {
         FOR EACH ROW
         EXECUTE FUNCTION "{schema}"."{trigger_function}"();
         "#,
-                schema = ctx.schema_name,
-                table = table_name,
-                function = function_name,
-                trigger_function = trigger_function_name,
-                trigger = trigger_name,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        table = table_name,
+        function = function_name,
+        trigger_function = trigger_function_name,
+        trigger = trigger_name,
+    );
+    sqlx::raw_sql(AssertSqlSafe(fixture_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to create function and trigger fixture");
 
@@ -1698,10 +1694,8 @@ async fn postgres_catalog_includes_composite_types_and_domains() {
     let composite_name = ctx.unique_name("postal_address");
     let domain_name = ctx.unique_name("email_address");
 
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"
+    let fixture_sql = format!(
+        r#"
         CREATE TYPE "{schema}"."{composite}" AS (
             street text,
             zip_code integer
@@ -1711,12 +1705,12 @@ async fn postgres_catalog_includes_composite_types_and_domains() {
         NOT NULL
         CHECK (VALUE LIKE '%@%');
         "#,
-                schema = ctx.schema_name,
-                composite = composite_name,
-                domain = domain_name,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        composite = composite_name,
+        domain = domain_name,
+    );
+    sqlx::raw_sql(AssertSqlSafe(fixture_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to create composite type and domain fixture");
 
@@ -1771,10 +1765,8 @@ async fn postgres_catalog_includes_procedures_aggregates_rls_and_partitions() {
     let parent_table = ctx.unique_name("events");
     let child_table = ctx.unique_name("events_2026");
 
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"
+    let fixture_sql = format!(
+        r#"
         CREATE PROCEDURE "{schema}"."{procedure}"(message text)
         LANGUAGE plpgsql
         AS $$
@@ -1811,17 +1803,17 @@ async fn postgres_catalog_includes_procedures_aggregates_rls_and_partitions() {
         CREATE TABLE "{schema}"."{child}" PARTITION OF "{schema}"."{parent}"
             FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
         "#,
-                schema = ctx.schema_name,
-                procedure = procedure_name,
-                state_function = state_function_name,
-                aggregate = aggregate_name,
-                rls_table = rls_table,
-                policy = policy_name,
-                parent = parent_table,
-                child = child_table,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        procedure = procedure_name,
+        state_function = state_function_name,
+        aggregate = aggregate_name,
+        rls_table = rls_table,
+        policy = policy_name,
+        parent = parent_table,
+        child = child_table,
+    );
+    sqlx::raw_sql(AssertSqlSafe(fixture_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to create remaining catalog fixture");
 
@@ -1900,10 +1892,8 @@ async fn postgres_catalog_includes_privileges() {
     let table_name = ctx.unique_name("secure_docs");
     let role_name = format!("shki_test_role_{}", unique_suffix());
 
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"
+    let fixture_sql = format!(
+        r#"
         CREATE ROLE "{role}";
         CREATE TABLE "{schema}"."{table}" (
             id integer,
@@ -1914,12 +1904,12 @@ async fn postgres_catalog_includes_privileges() {
         ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT SELECT ON TABLES TO "{role}";
         ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
         "#,
-                schema = ctx.schema_name,
-                table = table_name,
-                role = role_name,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        table = table_name,
+        role = role_name,
+    );
+    sqlx::raw_sql(AssertSqlSafe(fixture_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to create privilege fixture");
 
@@ -1953,17 +1943,15 @@ async fn postgres_catalog_includes_privileges() {
             && privilege.privilege_type == "SELECT"
     }));
 
-    ctx.pg_pool
-        .execute(
-            format!(
-                r#"ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA "{schema}" REVOKE ALL ON TABLES FROM "{role}";
+    let cleanup_sql = format!(
+        r#"ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA "{schema}" REVOKE ALL ON TABLES FROM "{role}";
 DROP OWNED BY "{role}";
 DROP ROLE IF EXISTS "{role}""#,
-                schema = ctx.schema_name,
-                role = role_name,
-            )
-            .as_str(),
-        )
+        schema = ctx.schema_name,
+        role = role_name,
+    );
+    sqlx::raw_sql(AssertSqlSafe(cleanup_sql))
+        .execute(&ctx.pg_pool)
         .await
         .expect("failed to drop test role");
     ctx.cleanup().await;

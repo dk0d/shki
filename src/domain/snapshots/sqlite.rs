@@ -9,6 +9,7 @@ use crate::schema::{
 };
 use crate::snapshots::SnapshotProvider;
 use indexmap::IndexMap;
+use sqlx::AssertSqlSafe;
 
 use super::utils::{parse_default_value, parse_reference_action, take_parenthesized};
 
@@ -273,7 +274,7 @@ async fn sqlite_table_info(
     table: &str,
 ) -> Result<Vec<SqliteTableInfoRow>> {
     let query = format!("PRAGMA table_xinfo({})", quote_sqlite_string(table));
-    sqlx::query_as::<_, SqliteTableInfoRow>(&query)
+    sqlx::query_as::<_, SqliteTableInfoRow>(AssertSqlSafe(query))
         .fetch_all(pool)
         .await
         .map_err(Into::into)
@@ -304,7 +305,7 @@ async fn sqlite_index_list(
     table: &str,
 ) -> Result<Vec<SqliteIndexListRow>> {
     let query = format!("PRAGMA index_list({})", quote_sqlite_string(table));
-    sqlx::query_as::<_, SqliteIndexListRow>(&query)
+    sqlx::query_as::<_, SqliteIndexListRow>(AssertSqlSafe(query))
         .fetch_all(pool)
         .await
         .map_err(Into::into)
@@ -312,7 +313,7 @@ async fn sqlite_index_list(
 
 async fn sqlite_index_columns(pool: &sqlx::Pool<sqlx::Sqlite>, index: &str) -> Result<Vec<String>> {
     let query = format!("PRAGMA index_xinfo({})", quote_sqlite_string(index));
-    let mut rows = sqlx::query_as::<_, SqliteIndexXinfoRow>(&query)
+    let mut rows = sqlx::query_as::<_, SqliteIndexXinfoRow>(AssertSqlSafe(query))
         .fetch_all(pool)
         .await?;
     rows.sort_by_key(|row| row.seqno);
@@ -329,7 +330,7 @@ async fn sqlite_foreign_keys(
     table: &str,
 ) -> Result<Vec<Constraint>> {
     let query = format!("PRAGMA foreign_key_list({})", quote_sqlite_string(table));
-    let mut rows = sqlx::query_as::<_, SqliteForeignKeyRow>(&query)
+    let mut rows = sqlx::query_as::<_, SqliteForeignKeyRow>(AssertSqlSafe(query))
         .fetch_all(pool)
         .await?;
     rows.sort_by_key(|row| (row.id, row.seq));
