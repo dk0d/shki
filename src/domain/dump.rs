@@ -138,10 +138,7 @@ pub fn render_directory_schema_preview(config: &Config, snapshot: &Snapshot) -> 
     } else {
         count.cyan().to_string()
     };
-    let mut output = format!(
-        "Directory Schema would create {} files:\n",
-        count
-    );
+    let mut output = format!("Directory Schema would create {} files:\n", count);
 
     for file in files {
         let (name, content) = if config.no_color {

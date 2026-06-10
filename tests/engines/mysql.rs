@@ -33,11 +33,13 @@ static MYSQL_TEST_LIMIT: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Se
 async fn shared_mysql_server() -> &'static SharedMysqlServer {
     MYSQL_SERVER
         .get_or_init(|| async {
-            let container = MysqlContainer::default()
-                .with_name("mysql")
-                .with_reuse(ReuseDirective::Always)
+            let image = MysqlContainer::default()
                 .with_tag("8.0.34")
-                .with_startup_timeout(Duration::from_secs(120))
+                .with_container_name("shki-mysql-tests-v2")
+                .with_reuse(ReuseDirective::Always)
+                .with_startup_timeout(Duration::from_secs(120));
+
+            let container = image
                 .start()
                 .await
                 .expect("failed to start shared mysql test container");

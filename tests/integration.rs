@@ -326,11 +326,7 @@ async fn scenario_cli_migrate_steps_applies_limited_pending<T: TestBackend>(ctx:
 
     run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Migrate {
             mode: Some(ApplyMigrationMode::Steps { num: 1 }),
             migrations: Default::default(),
@@ -362,11 +358,7 @@ async fn scenario_cli_migrate_to_applies_through_named_pending<T: TestBackend>(c
 
     run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Migrate {
             mode: Some(ApplyMigrationMode::To {
                 name: "0002_create_posts".to_string(),
@@ -398,11 +390,7 @@ async fn scenario_cli_migrate_to_unknown_fails_without_applying<T: TestBackend>(
 
     let error = run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Migrate {
             mode: Some(ApplyMigrationMode::To {
                 name: "9999_missing".to_string(),
@@ -430,11 +418,7 @@ async fn scenario_cli_migrate_dry_run_does_not_modify_database<T: TestBackend>(c
 
     run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Migrate {
             mode: None,
             migrations: Default::default(),
@@ -462,11 +446,7 @@ async fn scenario_cli_status_does_not_create_migration_table<T: TestBackend>(ctx
 
     run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Status {
             migrations: Default::default(),
         },
@@ -485,11 +465,7 @@ async fn scenario_cli_create_records_custom_migration_in_journal<T: TestBackend>
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Create {
             migrations: Default::default(),
             name: "Add audit table".to_string(),
@@ -521,11 +497,7 @@ async fn scenario_cli_drop_removes_pending_custom_migration<T: TestBackend>(ctx:
 
     run(shki::Cli {
         config: config_path.clone(),
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Create {
             migrations: Default::default(),
             name: "Add audit table".to_string(),
@@ -546,11 +518,7 @@ async fn scenario_cli_drop_removes_pending_custom_migration<T: TestBackend>(ctx:
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Drop {
             migration: Some("add-audit-table".to_string()),
         },
@@ -587,11 +555,7 @@ async fn scenario_cli_drop_refuses_applied_migration<T: TestBackend>(ctx: T) {
 
     let error = run(Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Drop {
             migration: Some("create_applied_users".to_string()),
         },
@@ -630,7 +594,7 @@ async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
         },
         command: Commands::Diff {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
         },
@@ -645,6 +609,7 @@ async fn cli_diff_compiles_declarative_schema_and_previews_changes() {
         .count();
     assert_eq!(migration_files, 0, "diff preview must not write migrations");
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -668,7 +633,7 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
         },
         command: Commands::Generate {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
             migrations: Default::default(),
@@ -710,6 +675,7 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
     assert_eq!(entry.kind, MigrationKind::Schema);
     assert!(!entry.checksum.is_empty());
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -751,7 +717,7 @@ async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
         },
         command: Commands::Generate {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
             migrations: Default::default(),
@@ -778,6 +744,7 @@ async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
             .exists()
     );
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -887,7 +854,7 @@ CREATE TABLE "{table_name}" (
         },
         command: Commands::Generate {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
             migrations: Default::default(),
@@ -914,6 +881,7 @@ CREATE TABLE "{table_name}" (
     let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
     assert_eq!(journal.entries.len(), 1);
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -962,11 +930,7 @@ async fn scenario_cli_dump_json_introspects_schema<T: TestBackend>(ctx: T) {
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Dump {
             format: SchemaExportFormat::Json,
             output: Some(output_path.clone()),
@@ -1023,11 +987,7 @@ async fn scenario_cli_dump_sql_writes_declarative_schema<T: TestBackend>(ctx: T)
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Dump {
             format: SchemaExportFormat::Sql,
             output: Some(output_path.clone()),
@@ -1065,11 +1025,7 @@ async fn scenario_cli_dump_dirs_writes_directory_schema<T: TestBackend>(ctx: T) 
 
     run(shki::Cli {
         config: config_path.clone(),
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Dump {
             format: SchemaExportFormat::Sql,
             output: Some(output_dir.clone()),
@@ -1099,11 +1055,7 @@ async fn scenario_cli_dump_dirs_writes_directory_schema<T: TestBackend>(ctx: T) 
 
     let collision = run(shki::Cli {
         config: config_path.clone(),
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Dump {
             format: SchemaExportFormat::Sql,
             output: Some(output_dir.clone()),
@@ -1117,11 +1069,7 @@ async fn scenario_cli_dump_dirs_writes_directory_schema<T: TestBackend>(ctx: T) 
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(ctx.dialect()),
-            database_url: Some(ctx.database_url()),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Dump {
             format: SchemaExportFormat::Sql,
             output: Some(output_dir),
@@ -1608,7 +1556,7 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
         },
         command: Commands::Codegen {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
             codegen: shki::CodegenArgs {
@@ -1635,6 +1583,7 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
     assert!(user.contains("interface"));
     assert!(user.contains("email"));
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -2043,7 +1992,7 @@ async fn cli_drop_removes_pending_schema_migration_snapshot_and_journal_entry() 
         },
         command: Commands::Generate {
             shadow: shki::ShadowArgs {
-                shadow_database_url: Some(shadow.database_url),
+                shadow_database_url: Some(shadow.database_url.clone()),
                 ..Default::default()
             },
             migrations: Default::default(),
@@ -2087,6 +2036,7 @@ async fn cli_drop_removes_pending_schema_migration_snapshot_and_journal_entry() 
     let journal: Journal = serde_json::from_str(&journal_json).expect("journal should parse");
     assert!(journal.entries.is_empty());
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -2107,7 +2057,7 @@ async fn compiler_turns_declarative_schema_sql_into_snapshot() {
         dialect: shki::schema::SqlDialect::Postgres,
         schema: schema_path,
         database_url: Some(ctx.database_url()),
-        shadow_database_url: Some(shadow.database_url),
+        shadow_database_url: Some(shadow.database_url.clone()),
         ..Config::default()
     };
 
@@ -2128,6 +2078,7 @@ async fn compiler_turns_declarative_schema_sql_into_snapshot() {
     assert!(table.columns.contains_key("name"));
     assert!(!table.columns.get("name").expect("name column").nullable);
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }
 
@@ -2152,7 +2103,7 @@ async fn compiler_consumes_directory_schema_with_i_includes() {
         dialect: shki::schema::SqlDialect::Postgres,
         schema: schema_dir,
         database_url: Some(ctx.database_url()),
-        shadow_database_url: Some(shadow.database_url),
+        shadow_database_url: Some(shadow.database_url.clone()),
         ..Config::default()
     };
 
@@ -2164,5 +2115,6 @@ async fn compiler_consumes_directory_schema_with_i_includes() {
 
     assert!(snapshot.tables().keys().any(|id| id.name == table_name));
 
+    shadow.cleanup().await;
     ctx.cleanup().await;
 }

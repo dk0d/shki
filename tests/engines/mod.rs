@@ -109,11 +109,7 @@ database_url = "{}"
     fn migrate_cli(&self, config_path: PathBuf) -> Cli {
         Cli {
             config: config_path,
-            common: CommonArgs {
-                dialect: Some(self.dialect()),
-                database_url: Some(self.database_url()),
-                ..CommonArgs::default()
-            },
+            common: self.common_args(),
             command: Commands::Migrate {
                 migrations: Default::default(),
                 mode: None,
@@ -125,16 +121,20 @@ database_url = "{}"
     fn down_cli(&self, config_path: PathBuf, count: Option<usize>, dry_run: bool) -> Cli {
         Cli {
             config: config_path,
-            common: CommonArgs {
-                dialect: Some(self.dialect()),
-                database_url: Some(self.database_url()),
-                ..CommonArgs::default()
-            },
+            common: self.common_args(),
             command: Commands::Down {
                 migrations: Default::default(),
                 count,
                 dry_run,
             },
+        }
+    }
+
+    fn common_args(&self) -> CommonArgs {
+        CommonArgs {
+            dialect: Some(self.dialect()),
+            database_url: Some(self.database_url()),
+            ..CommonArgs::default()
         }
     }
 

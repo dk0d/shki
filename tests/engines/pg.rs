@@ -5,8 +5,10 @@ use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
 use testcontainers::ImageExt;
+use testcontainers::ReuseDirective;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres as PostgresContainer;
+use tokio::sync::OnceCell;
 
 use super::{TestBackend, cleanup_postgres_schema};
 use shki::engines::Engine;
@@ -17,40 +19,104 @@ use shki::schema::SqlDialect;
 
 use crate::common::{connect_with_retries, unique_suffix};
 
+struct SharedPostgresServer {
+    _container: ContainerAsync<PostgresContainer>,
+    admin_url: String,
+}
+
+static POSTGRES_SERVER: OnceCell<SharedPostgresServer> = OnceCell::const_new();
+
+async fn shared_postgres_server() -> &'static SharedPostgresServer {
+    POSTGRES_SERVER
+        .get_or_init(|| async {
+            let image = PostgresContainer::default()
+                .with_db_name("postgres")
+                .with_user("postgres")
+                .with_password("postgres")
+                .with_tag("16-alpine")
+                .with_container_name("shki-postgres-tests-v2")
+                .with_reuse(ReuseDirective::Always);
+
+            let container = image
+                .start()
+                .await
+                .expect("failed to start shared postgres test container");
+
+            let host = container
+                .get_host()
+                .await
+                .expect("failed to get postgres test container host");
+            let port = container
+                .get_host_port_ipv4(5432)
+                .await
+                .expect("failed to get postgres test container port");
+
+            SharedPostgresServer {
+                admin_url: format!("postgresql://postgres:postgres@{host}:{port}/postgres"),
+                _container: container,
+            }
+        })
+        .await
+}
+
 pub struct TestDatabase {
-    pub _container: ContainerAsync<PostgresContainer>,
     pub database_url: String,
+    database_name: String,
 }
 
 impl TestDatabase {
     pub async fn start() -> Self {
-        let container = PostgresContainer::default()
-            .with_db_name("postgres")
-            .with_user("postgres")
-            .with_password("postgres")
-            .with_tag("16-alpine")
-            .start()
-            .await
-            .expect("failed to start postgres test container");
+        let server = shared_postgres_server().await;
+        let database_name = format!("shki_shadow_{}", unique_suffix());
+        let admin_pool = connect_with_retries("Postgres admin", || {
+            PgPoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(Duration::from_secs(10))
+                .connect(&server.admin_url)
+        })
+        .await;
 
-        let host = container
-            .get_host()
+        admin_pool
+            .execute(format!("CREATE DATABASE \"{}\"", database_name).as_str())
             .await
-            .expect("failed to get postgres test container host");
-        let port = container
-            .get_host_port_ipv4(5432)
-            .await
-            .expect("failed to get postgres test container port");
+            .expect("failed to create postgres shadow database");
 
         Self {
-            database_url: format!("postgresql://postgres:postgres@{host}:{port}/postgres"),
-            _container: container,
+            database_url: server
+                .admin_url
+                .strip_suffix("/postgres")
+                .expect("postgres admin URL should include database path")
+                .to_string()
+                + &format!("/{database_name}"),
+            database_name,
         }
+    }
+
+    pub async fn cleanup(self) {
+        let server = shared_postgres_server().await;
+        let admin_pool = connect_with_retries("Postgres admin", || {
+            PgPoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(Duration::from_secs(10))
+                .connect(&server.admin_url)
+        })
+        .await;
+
+        admin_pool
+            .execute(
+                format!(
+                    "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+                    self.database_name
+                )
+                .as_str(),
+            )
+            .await
+            .expect("failed to drop postgres shadow database");
     }
 }
 
 pub struct PgTestContext {
-    pub _database: TestDatabase,
+    pub database_url: String,
     pub pg_pool: Pool<Postgres>,
     pub schema_name: String,
     pub temp_dir: TempDir,
@@ -60,13 +126,13 @@ pub struct PgTestContext {
 
 impl PgTestContext {
     pub async fn new(name: &str) -> Self {
-        let database = TestDatabase::start().await;
-        let url = database.database_url.clone();
+        let server = shared_postgres_server().await;
+        let database_url = server.admin_url.clone();
         let pg_pool = connect_with_retries("Postgres", || {
             PgPoolOptions::new()
                 .max_connections(5)
                 .acquire_timeout(Duration::from_secs(10))
-                .connect(&url)
+                .connect(&database_url)
         })
         .await;
         let schema_name = format!("{}_{}", name, unique_suffix());
@@ -84,7 +150,7 @@ impl PgTestContext {
         std::fs::create_dir_all(&migrations_dir).expect("failed to create migrations dir");
 
         Self {
-            _database: database,
+            database_url,
             pg_pool,
             schema_name,
             temp_dir,
@@ -108,7 +174,7 @@ impl TestBackend for PgTestContext {
     }
 
     fn database_url(&self) -> String {
-        self._database.database_url.clone()
+        self.database_url.clone()
     }
 
     fn migration_schema(&self) -> Option<&str> {
