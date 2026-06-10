@@ -1,6 +1,6 @@
 [package]
 name = "shki"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 description = "Declarative database schema management and migration tool in Rust"
 license = "MIT"
