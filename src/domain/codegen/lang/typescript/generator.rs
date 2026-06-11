@@ -2,7 +2,7 @@
 //!
 //! Generates TypeScript interfaces and enums from database schema snapshots.
 
-use heck::{ToLowerCamelCase, ToUpperCamelCase};
+use heck::ToUpperCamelCase;
 use indexmap::IndexMap;
 
 use crate::codegen::CodegenConfig;
@@ -60,7 +60,7 @@ pub struct TypeScriptInterface {
 /// A property in a TypeScript interface
 #[derive(Debug, Clone)]
 pub struct TypeScriptProperty {
-    /// TypeScript property name (camelCase)
+    /// TypeScript property name (matches the database column name)
     pub name: String,
     /// Original column name
     pub db_name: String,
@@ -205,7 +205,7 @@ impl TypeScriptGenerator {
         enums: &IndexMap<Iden, DbEnum>,
         config: &CodegenConfig,
     ) -> TypeScriptProperty {
-        let property_name = col.name.to_lower_camel_case();
+        let property_name = col.name.clone();
         let ts_type = self.sql_type_to_typescript(&col.data_type, enums, config);
 
         TypeScriptProperty {
@@ -569,6 +569,36 @@ mod tests {
         assert!(output.contains("email: string;"));
         assert!(output.contains("createdAt?: Date | null;"));
         assert!(output.contains("/** Column: created_at */"));
+    }
+
+    #[test]
+    fn test_generate_interface_preserves_column_name_casing() {
+        let mut table = Table::new("accounts");
+        table.column(Column::new("UserID", DataType::Integer).not_null());
+        table.column(Column::new(
+            "created_at",
+            DataType::Timestamp {
+                precision: None,
+                with_timezone: false,
+            },
+        ));
+        table.column(Column::new("DisplayName", DataType::Text));
+
+        let generator = TypeScriptGenerator::default();
+        let ts_interface = generator.build_interface(
+            &Iden::new("accounts", None),
+            &table,
+            &IndexMap::new(),
+            &CodegenConfig::default(),
+        );
+
+        let output = ts_interface.to_string();
+        assert!(output.contains("UserID: number;"));
+        assert!(output.contains("created_at?: Date | null;"));
+        assert!(output.contains("DisplayName?: string | null;"));
+        assert!(!output.contains("userId"));
+        assert!(!output.contains("createdAt"));
+        assert!(!output.contains("displayName"));
     }
 
     #[test]
