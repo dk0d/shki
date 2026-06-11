@@ -8,6 +8,7 @@ use heck::ToSnakeCase;
 
 use crate::Result;
 use crate::codegen::CodegenConfig;
+use crate::codegen::generator::apply_name_pattern;
 use crate::codegen::writer::CodeWriter;
 
 use super::{GeneratedRust, RustStruct};
@@ -266,10 +267,8 @@ impl CodeWriter for RustWriter {
         let mut written_files = Vec::new();
 
         for type_info in &types {
-            let impl_name = config
-                .impl_file_name
-                .clone()
-                .unwrap_or_else(|| format!("impl_{}", type_info.module_name));
+            let pattern = Some(config.impl_pattern.clone().unwrap_or("{}_impl".to_string()));
+            let impl_name = apply_name_pattern(&type_info.module_name, pattern.as_deref());
 
             let module_dir = output_dir.join(&type_info.module_name);
 

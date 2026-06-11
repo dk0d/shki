@@ -65,9 +65,9 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub exclude_tables: Vec<String>,
 
-    /// The name to use for the `impl_[model].rs` file in module output mode
+    /// The pattern to use for  building impl file in modules format: defaults to `impl_{}.rs`
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub impl_file_name: Option<String>,
+    pub impl_pattern: Option<String>,
 }
 
 /// Output mode for generated code
@@ -161,7 +161,7 @@ impl Default for CodegenConfig {
             sqlx: true,
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
-            impl_file_name: None,
+            impl_pattern: None,
         }
     }
 }

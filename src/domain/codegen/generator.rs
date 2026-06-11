@@ -144,7 +144,7 @@ pub trait CodeGenerator: Default {
     }
 }
 
-fn apply_name_pattern(base_name: &str, pattern: Option<&str>) -> String {
+pub fn apply_name_pattern(base_name: &str, pattern: Option<&str>) -> String {
     pattern
         .map(|pattern| pattern.replace("{}", base_name))
         .unwrap_or_else(|| base_name.to_string())
