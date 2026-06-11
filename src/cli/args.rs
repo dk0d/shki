@@ -317,16 +317,13 @@ pub enum Commands {
         /// Migration name/suffix for the generated initial migration (defaults to 'bootstrap')
         name: Option<String>,
 
-        // /// Legacy migration table(s) to exclude and optionally drop
-        // #[arg(long = "legacy-table")]
-        // legacy_tables: Vec<String>,
-
-        // /// Drop provided legacy migration table(s) from the database
-        // #[arg(long, default_value_t = false)]
-        // drop_legacy_tables: bool,
         /// Do not record the generated bootstrap migration as already applied
         #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
         no_mark_applied: bool,
+
+        /// Only mark bootstrap as applied. Will only succeed if no schema changes.
+        #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
+        mark_only: bool,
 
         /// Show what would be generated without writing files or changing DB
         #[arg(long, short)]
