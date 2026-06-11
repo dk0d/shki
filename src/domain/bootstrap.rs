@@ -17,10 +17,10 @@ use super::diff::SchemaDiff;
 
 fn print_applied(name: &str) {
     println!(
-        "{} Applied: {} {}",
+        "\n{} {} {}",
         "✔".green(),
         name,
-        "marked as already applied".dimmed()
+        "marked as applied".dimmed()
     );
 }
 
