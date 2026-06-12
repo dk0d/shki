@@ -18,11 +18,54 @@ pub struct SqlRenderer {
 pub struct SqlStmtPart(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SqlStmt(String);
+pub struct SqlStmt {
+    sql: String,
+    object_type: SqlObjectType,
+    operation: SqlOperation,
+    identity: Option<Iden>,
+    depends_on: Vec<Iden>,
+    ordinal: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SqlObjectType {
+    Schema,
+    DefaultPrivilege,
+    Extension,
+    Type,
+    Function,
+    Procedure,
+    Aggregate,
+    Sequence,
+    Table,
+    View,
+    MaterializedView,
+    Index,
+    Trigger,
+    Policy,
+    Column,
+    Rls,
+    Privilege,
+    ColumnPrivilege,
+    RevokedDefaultPrivilege,
+    #[default]
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SqlOperation {
+    Create,
+    Alter,
+    Drop,
+    Rename,
+    Comment,
+    #[default]
+    Raw,
+}
 
 impl AsRef<str> for SqlStmt {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.sql
     }
 }
 
@@ -72,7 +115,7 @@ impl std::fmt::Display for SqlStmtPart {
 
 impl std::fmt::Display for SqlStmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{};", self.0.trim_end_matches(';'))
+        write!(f, "{};", self.sql.trim_end_matches(';'))
     }
 }
 
@@ -84,7 +127,49 @@ impl SqlStmtPart {
 
 impl SqlStmt {
     pub fn as_sql(&self) -> &str {
-        &self.0
+        &self.sql
+    }
+
+    pub fn object_type(&self) -> SqlObjectType {
+        self.object_type
+    }
+
+    pub fn operation(&self) -> SqlOperation {
+        self.operation
+    }
+
+    pub fn identity(&self) -> Option<&Iden> {
+        self.identity.as_ref()
+    }
+
+    pub fn depends_on(&self) -> &[Iden] {
+        &self.depends_on
+    }
+
+    pub fn ordinal(&self) -> usize {
+        self.ordinal
+    }
+
+    pub fn with_planning(
+        mut self,
+        object_type: SqlObjectType,
+        operation: SqlOperation,
+        ordinal: usize,
+    ) -> Self {
+        self.object_type = object_type;
+        self.operation = operation;
+        self.ordinal = ordinal;
+        self
+    }
+
+    pub fn with_identity(mut self, identity: Iden) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    pub fn with_dependencies(mut self, depends_on: Vec<Iden>) -> Self {
+        self.depends_on = depends_on;
+        self
     }
 }
 
@@ -136,13 +221,27 @@ impl From<&str> for SqlStmtPart {
 
 impl From<String> for SqlStmt {
     fn from(v: String) -> Self {
-        Self(v.trim_end_matches(';').to_string())
+        Self {
+            sql: v.trim_end_matches(';').to_string(),
+            object_type: SqlObjectType::Other,
+            operation: SqlOperation::Raw,
+            identity: None,
+            depends_on: Vec::new(),
+            ordinal: 0,
+        }
     }
 }
 
 impl From<&str> for SqlStmt {
     fn from(v: &str) -> Self {
-        Self(v.trim_end_matches(';').to_string())
+        Self {
+            sql: v.trim_end_matches(';').to_string(),
+            object_type: SqlObjectType::Other,
+            operation: SqlOperation::Raw,
+            identity: None,
+            depends_on: Vec::new(),
+            ordinal: 0,
+        }
     }
 }
 
