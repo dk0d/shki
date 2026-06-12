@@ -22,8 +22,8 @@ impl ToSql for DiffStatement {
             DiffStatement::DropEnum { name, schema, .. } => {
                 Ok(drop_enum(dialect, name, schema).into())
             }
-            DiffStatement::RenameEnum { from, to, schema } => {
-                Ok(rename_enum(dialect, from, to, schema).into())
+            DiffStatement::RenameType { from, to, schema } => {
+                Ok(rename_type(dialect, from, to, schema).into())
             }
             DiffStatement::AddEnumValue {
                 enum_name,
@@ -61,6 +61,12 @@ impl ToSql for DiffStatement {
                 description,
                 ..
             } => Ok(alter_enum_description(dialect, name, schema, description).into()),
+            DiffStatement::CreateCompositeType { composite_type } => {
+                Ok(create_composite_type(dialect, composite_type))
+            }
+            DiffStatement::DropCompositeType { name, schema, .. } => {
+                Ok(drop_type(dialect, name, schema).into())
+            }
             DiffStatement::CreateSequence { sequence } => {
                 Ok(create_sequence(dialect, sequence).into())
             }

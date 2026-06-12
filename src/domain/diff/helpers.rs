@@ -4,7 +4,9 @@ use std::hash::Hash;
 use indexmap::IndexMap;
 
 use crate::models::iden::Iden;
-use crate::schema::{Column, Constraint, DbEnum, Index, Sequence, SqlDialect, Table, View};
+use crate::schema::{
+    Column, CompositeType, Constraint, DbEnum, Index, Sequence, SqlDialect, Table, View,
+};
 
 use super::rename::{RenameId, RenameKind, RenameScenario};
 use super::{ColumnChange, DiffStatement, EnumValuePosition, SequenceChange};
@@ -100,6 +102,64 @@ pub(super) fn diff_enums(
                 });
             }
         },
+        statements,
+    );
+}
+
+pub(super) fn detect_type_renames(
+    from: &IndexMap<Iden, DbEnum>,
+    to: &IndexMap<Iden, DbEnum>,
+    from_composites: &IndexMap<Iden, CompositeType>,
+    to_composites: &IndexMap<Iden, CompositeType>,
+) -> Vec<RenameScenario> {
+    let mut dropped = from
+        .iter()
+        .filter(|(name, _)| !to.contains_key(*name))
+        .map(|(id, db_enum)| (db_enum.name.clone(), RenameId::type_(id.clone())))
+        .collect::<IndexMap<_, _>>();
+    dropped.extend(
+        from_composites
+            .iter()
+            .filter(|(name, _)| !to_composites.contains_key(*name))
+            .map(|(id, composite)| (composite.name.clone(), RenameId::type_(id.clone()))),
+    );
+
+    let mut created = to
+        .iter()
+        .filter(|(name, _)| !from.contains_key(*name))
+        .map(|(id, db_enum)| (db_enum.name.clone(), RenameId::type_(id.clone())))
+        .collect::<IndexMap<_, _>>();
+    created.extend(
+        to_composites
+            .iter()
+            .filter(|(name, _)| !from_composites.contains_key(*name))
+            .map(|(id, composite)| (composite.name.clone(), RenameId::type_(id.clone()))),
+    );
+
+    build_scenario(RenameKind::Type, None, created, dropped)
+}
+
+pub(super) fn diff_composite_types(
+    from: &IndexMap<Iden, CompositeType>,
+    to: &IndexMap<Iden, CompositeType>,
+    statements: &mut Vec<DiffStatement>,
+) {
+    diff_index_map_entries(
+        from,
+        to,
+        |statements, _, composite_to| {
+            statements.push(DiffStatement::CreateCompositeType {
+                composite_type: composite_to.clone(),
+            });
+        },
+        |statements, _, composite_from| {
+            statements.push(DiffStatement::DropCompositeType {
+                name: composite_from.name.clone(),
+                schema: composite_from.schema.clone(),
+                prev: composite_from.clone(),
+            });
+        },
+        |_, _, _, _| {},
         statements,
     );
 }

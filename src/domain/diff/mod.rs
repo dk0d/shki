@@ -183,6 +183,13 @@ pub fn diff_snapshots(from: &Snapshot, to: &Snapshot) -> Result<SchemaDiff> {
     // Diff enums
     helpers::diff_enums(&from.enums(), &to.enums(), &mut statements);
 
+    // Diff composite types
+    helpers::diff_composite_types(
+        &from.composite_types(),
+        &to.composite_types(),
+        &mut statements,
+    );
+
     // Diff sequences
     helpers::diff_sequences(&from.sequences(), &to.sequences(), &mut statements);
 
@@ -192,7 +199,13 @@ pub fn diff_snapshots(from: &Snapshot, to: &Snapshot) -> Result<SchemaDiff> {
     // Diff views
     helpers::diff_views(&from.views(), &to.views(), &mut statements);
 
-    let mut rename_scenarios = helpers::detect_table_renames(&from_tables, &to_tables);
+    let mut rename_scenarios = helpers::detect_type_renames(
+        &from.enums(),
+        &to.enums(),
+        &from.composite_types(),
+        &to.composite_types(),
+    );
+    rename_scenarios.extend(helpers::detect_table_renames(&from_tables, &to_tables));
 
     // detect column renames where the table names haven't changed,
     // need to do another pass
@@ -242,9 +255,11 @@ mod tests {
     use crate::models::iden::Iden;
     use crate::schema::DataType;
     use crate::schema::{
-        Column, Constraint, ForeignKeyConstraint, Index, PrimaryKeyConstraint, SqlDialect, Table,
+        Column, CompositeType, CompositeTypeColumn, Constraint, DbEnum, ForeignKeyConstraint,
+        Index, PrimaryKeyConstraint, SqlDialect, Table,
     };
     use crate::snapshots::Snapshot;
+    use indexmap::IndexMap;
     use tempfile::TempDir;
 
     #[test]
@@ -515,6 +530,105 @@ mod tests {
                 && index_table == "item"
                 && schema.as_deref() == Some("public")
                 && index.name == "ix_item_created_at"
+        ));
+    }
+
+    #[test]
+    fn exposes_and_applies_enum_rename_candidate() {
+        let mut from_enums = IndexMap::new();
+        from_enums.insert(
+            Iden::new("eventstatus", Some("public".to_string())),
+            DbEnum::with_values("eventstatus", vec!["UNPUBLISHED", "PUBLISHED", "FAILED"])
+                .in_schema("public"),
+        );
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        from.set_enums(from_enums);
+
+        let mut to_enums = IndexMap::new();
+        to_enums.insert(
+            Iden::new("event_status", Some("public".to_string())),
+            DbEnum::with_values("event_status", vec!["UNPUBLISHED", "PUBLISHED", "FAILED"])
+                .in_schema("public"),
+        );
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        to.set_enums(to_enums);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert!(diff.rename_scenarios.iter().any(|scenario| {
+            scenario.kind == RenameKind::Type
+                && scenario.dropped.contains_key("eventstatus")
+                && scenario.created.contains_key("event_status")
+        }));
+
+        let diff = diff
+            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::type_(
+                Iden::new("eventstatus", Some("public".to_string())),
+                Iden::new("event_status", Some("public".to_string())),
+            ))])
+            .expect("rename decision should apply");
+
+        assert_eq!(diff.statements.len(), 1);
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::RenameType { from, to, schema }
+                if from == "eventstatus" && to == "event_status" && schema.as_deref() == Some("public")
+        ));
+    }
+
+    #[test]
+    fn exposes_and_applies_composite_type_rename_candidate() {
+        let columns = vec![CompositeTypeColumn {
+            name: "lat".to_string(),
+            data_type: DataType::DoublePrecision,
+        }];
+
+        let mut from_composites = IndexMap::new();
+        from_composites.insert(
+            Iden::new("geo_point", Some("public".to_string())),
+            CompositeType {
+                name: "geo_point".to_string(),
+                schema: Some("public".to_string()),
+                columns: columns.clone(),
+                description: None,
+            },
+        );
+        let mut from = Snapshot::new(SqlDialect::Postgres);
+        from.set_composite_types(from_composites);
+
+        let mut to_composites = IndexMap::new();
+        to_composites.insert(
+            Iden::new("coordinate", Some("public".to_string())),
+            CompositeType {
+                name: "coordinate".to_string(),
+                schema: Some("public".to_string()),
+                columns,
+                description: None,
+            },
+        );
+        let mut to = Snapshot::new(SqlDialect::Postgres);
+        to.set_composite_types(to_composites);
+
+        let diff = diff_snapshots(&from, &to).expect("snapshot diff should succeed");
+
+        assert!(diff.rename_scenarios.iter().any(|scenario| {
+            scenario.kind == RenameKind::Type
+                && scenario.dropped.contains_key("geo_point")
+                && scenario.created.contains_key("coordinate")
+        }));
+
+        let diff = diff
+            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::type_(
+                Iden::new("geo_point", Some("public".to_string())),
+                Iden::new("coordinate", Some("public".to_string())),
+            ))])
+            .expect("rename decision should apply");
+
+        assert_eq!(diff.statements.len(), 1);
+        assert!(matches!(
+            &diff.statements[0],
+            DiffStatement::RenameType { from, to, schema }
+                if from == "geo_point" && to == "coordinate" && schema.as_deref() == Some("public")
         ));
     }
 

@@ -92,8 +92,11 @@ impl SchemaDiff {
             })
             .collect::<Vec<_>>();
         renames.sort_by_key(|rename| match rename.source.kind {
-            RenameKind::Table => 0,
-            _ => 1,
+            RenameKind::Type => 0,
+            RenameKind::Table => 1,
+            RenameKind::Column => 2,
+            RenameKind::Index => 3,
+            RenameKind::Constraint => 4,
         });
 
         let mut statements = self.statements.clone();
@@ -179,6 +182,7 @@ impl SchemaDiff {
                 s,
                 DiffStatement::DropSchema { .. }
                     | DiffStatement::DropEnum { .. }
+                    | DiffStatement::DropCompositeType { .. }
                     | DiffStatement::DropSequence { .. }
                     | DiffStatement::DropTable { .. }
                     | DiffStatement::DropColumn { .. }
@@ -211,9 +215,17 @@ impl SchemaDiff {
                     &mut summary.enums_dropped,
                     qualified_name(schema, name),
                 ),
-                DiffStatement::RenameEnum { from, to, schema } => DiffSummary::push_unique(
+                DiffStatement::RenameType { from, to, schema } => DiffSummary::push_unique(
                     &mut summary.enums_renamed,
                     renamed_name(schema, from, to),
+                ),
+                DiffStatement::CreateCompositeType { composite_type } => DiffSummary::push_unique(
+                    &mut summary.enums_created,
+                    qualified_name(&composite_type.schema, &composite_type.name),
+                ),
+                DiffStatement::DropCompositeType { name, schema, .. } => DiffSummary::push_unique(
+                    &mut summary.enums_dropped,
+                    qualified_name(schema, name),
                 ),
                 DiffStatement::AddEnumValue {
                     enum_name,
@@ -438,7 +450,7 @@ pub enum DiffStatement {
         schema: Option<String>,
         prev: DbEnum,
     },
-    RenameEnum {
+    RenameType {
         from: String,
         to: String,
         schema: Option<String>,
@@ -478,6 +490,14 @@ pub enum DiffStatement {
         schema: Option<String>,
         description: Option<String>,
         prev_description: Option<String>,
+    },
+    CreateCompositeType {
+        composite_type: CompositeType,
+    },
+    DropCompositeType {
+        name: String,
+        schema: Option<String>,
+        prev: CompositeType,
     },
 
     // Sequence operations
@@ -728,7 +748,7 @@ impl DiffStatement {
                 values: prev.values.clone(),
                 description: prev.description.clone(),
             }),
-            DiffStatement::RenameEnum { from, to, schema } => Some(DiffStatement::RenameEnum {
+            DiffStatement::RenameType { from, to, schema } => Some(DiffStatement::RenameType {
                 from: to.clone(),
                 to: from.clone(),
                 schema: schema.clone(),
@@ -795,6 +815,18 @@ impl DiffStatement {
                 description: prev_description.clone(),
                 prev_description: description.clone(),
             }),
+            DiffStatement::CreateCompositeType { composite_type } => {
+                Some(DiffStatement::DropCompositeType {
+                    name: composite_type.name.clone(),
+                    schema: composite_type.schema.clone(),
+                    prev: composite_type.clone(),
+                })
+            }
+            DiffStatement::DropCompositeType { prev, .. } => {
+                Some(DiffStatement::CreateCompositeType {
+                    composite_type: prev.clone(),
+                })
+            }
             DiffStatement::CreateSequence { sequence } => Some(DiffStatement::DropSequence {
                 name: sequence.name.clone(),
                 schema: sequence.schema.clone(),
@@ -1057,6 +1089,13 @@ fn replacement_for_rename(
     use crate::errors::ShkiError;
 
     let (mut removals, additions) = match rename.source.kind {
+        RenameKind::Type => (
+            vec![
+                find_statement(statements, |stmt| matches_drop_type(stmt, &rename.source))?,
+                find_statement(statements, |stmt| matches_create_type(stmt, &rename.target))?,
+            ],
+            vec![rename_statement(rename)?],
+        ),
         RenameKind::Table => {
             let drop_idx =
                 find_statement(statements, |stmt| matches_drop_table(stmt, &rename.source))?;
@@ -1229,6 +1268,11 @@ fn named_constraints_by_name(constraints: &[Constraint]) -> IndexMap<String, &Co
 
 fn rename_statement(rename: &RenameMap) -> crate::Result<DiffStatement> {
     match rename.source.kind {
+        RenameKind::Type => Ok(DiffStatement::RenameType {
+            from: rename.source.name.clone(),
+            to: rename.target.name.clone(),
+            schema: rename.source.table.schema.clone(),
+        }),
         RenameKind::Table => Ok(DiffStatement::RenameTable {
             from: rename.source.name.clone(),
             to: rename.target.name.clone(),
@@ -1253,6 +1297,15 @@ fn rename_statement(rename: &RenameMap) -> crate::Result<DiffStatement> {
             to: rename.target.name.clone(),
         }),
     }
+}
+
+fn matches_drop_type(stmt: &DiffStatement, id: &RenameId) -> bool {
+    matches!(stmt, DiffStatement::DropEnum { name, schema, .. } | DiffStatement::DropCompositeType { name, schema, .. } if name == &id.name && schema == &id.table.schema)
+}
+
+fn matches_create_type(stmt: &DiffStatement, id: &RenameId) -> bool {
+    matches!(stmt, DiffStatement::CreateEnum { name, schema, .. } if name == &id.name && schema == &id.table.schema)
+        || matches!(stmt, DiffStatement::CreateCompositeType { composite_type } if composite_type.name == id.name && composite_type.schema == id.table.schema)
 }
 
 fn matches_drop_table(stmt: &DiffStatement, id: &RenameId) -> bool {

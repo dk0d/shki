@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RenameKind {
+    Type,
     Table,
     Column,
     Index,
@@ -13,6 +14,7 @@ pub enum RenameKind {
 impl std::fmt::Display for RenameKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RenameKind::Type => write!(f, "type"),
             RenameKind::Table => write!(f, "table"),
             RenameKind::Column => write!(f, "column"),
             RenameKind::Index => write!(f, "index"),
@@ -45,6 +47,14 @@ impl RenameId {
             kind: RenameKind::Table,
             table: table.clone(),
             name: table.name,
+        }
+    }
+
+    pub fn type_(name: Iden) -> Self {
+        Self {
+            kind: RenameKind::Type,
+            table: name.clone(),
+            name: name.name,
         }
     }
 
@@ -102,6 +112,10 @@ pub struct RenameMap {
 }
 
 impl RenameMap {
+    pub fn type_(source: Iden, target: Iden) -> Self {
+        Self::new(RenameId::type_(source), RenameId::type_(target))
+    }
+
     pub fn table(source: Iden, target: Iden) -> Self {
         Self::new(RenameId::table(source), RenameId::table(target))
     }

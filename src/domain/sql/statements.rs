@@ -112,7 +112,44 @@ pub fn drop_enum(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> S
     ))
 }
 
-pub fn rename_enum(dialect: &SqlDialect, from: &str, to: &str, schema: &Option<String>) -> SqlStmt {
+pub fn create_composite_type(dialect: &SqlDialect, composite_type: &CompositeType) -> SqlOutput {
+    let renderer = get_renderer(dialect);
+    let columns = composite_type
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "{} {}",
+                renderer.quote_identifier(&column.name),
+                column.data_type.to_postgres_sql()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let qualified = renderer.qualified_name(&composite_type.name, &composite_type.schema);
+    let mut result =
+        vec![renderer.statement(format!("CREATE TYPE {} AS ({})", qualified, columns))];
+
+    if let Some(description) = &composite_type.description {
+        result.push(renderer.statement(format!(
+            "COMMENT ON TYPE {} IS '{}'",
+            qualified,
+            description.replace('\'', "''")
+        )));
+    }
+
+    result.into()
+}
+
+pub fn drop_type(dialect: &SqlDialect, name: &str, schema: &Option<String>) -> SqlStmt {
+    let renderer = get_renderer(dialect);
+    renderer.statement(format!(
+        "DROP TYPE {}",
+        renderer.qualified_name(name, schema)
+    ))
+}
+
+pub fn rename_type(dialect: &SqlDialect, from: &str, to: &str, schema: &Option<String>) -> SqlStmt {
     let renderer = get_renderer(dialect);
     let qualified = renderer.qualified_name(from, schema);
     renderer.statement(format!(
