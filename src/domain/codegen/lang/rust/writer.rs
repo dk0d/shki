@@ -68,18 +68,14 @@ impl RustWriter {
         output.push('\n');
 
         for entry in mod_entries {
-            writeln!(output, "mod {};", entry.module_name)
+            writeln!(output, "pub mod {};", entry.module_name)
                 .expect("writing to string should not fail");
         }
         output.push('\n');
 
         for entry in mod_entries {
-            writeln!(
-                output,
-                "pub use {}::{};",
-                entry.module_name, entry.type_name
-            )
-            .expect("writing to string should not fail");
+            writeln!(output, "pub use {}::*;", entry.module_name)
+                .expect("writing to string should not fail");
         }
 
         output
