@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 pub mod cli;
+
 pub use cli::*;
 pub mod config;
 pub mod domain;

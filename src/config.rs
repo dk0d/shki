@@ -7,7 +7,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{
     CodegenArgs, CommonArgs, MigrationArgs, ShadowArgs, ShkiError, codegen::CodegenConfig,
@@ -325,16 +325,20 @@ impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
+        let root = if let Some(path) = resolve_project_root(path) {
+            path
+        } else {
+            &std::env::current_dir().expect("working dir")
+        };
+        let path = &root.join("shki.toml");
         let explicit = Self::explicit_config(path)?;
         let config: Config = Self::base_figment(path)
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         let mut config = config.infer_dialect();
-        if explicit.root.is_none()
-            && let Some(parent) = path.parent()
-        {
-            config.root = parent.to_path_buf();
+        if explicit.root.is_none() {
+            config.root = root.to_path_buf();
         }
         if let Some(migrations_dir) = &args.migrations_dir {
             config.migrations_dir = migrations_dir.clone();
@@ -459,11 +463,100 @@ impl Config {
     // }
 }
 
+fn resolve_project_root(starting_path: &Path) -> Option<&Path> {
+    if starting_path.is_file()
+        && starting_path
+            .file_name()
+            .is_some_and(|p| p.to_string_lossy() == "shki.toml")
+        && starting_path.exists()
+    {
+        return starting_path.parent();
+    }
+
+    let mut search_dir = if starting_path.is_file() {
+        starting_path.ancestors().nth(2)
+    } else {
+        starting_path.ancestors().nth(1)
+    };
+
+    while let Some(path) = search_dir {
+        let candidate = path.join("shki.toml");
+        if candidate.exists() {
+            return Some(path);
+        }
+        // if git directoy found, we are in a git repo, and don't want to keep searching
+        if path.join(".git").exists() {
+            return Some(path);
+        }
+        search_dir = path.parent();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::create_dir_all;
     use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    #[test]
+    fn test_resolve_project_config_file() {
+        let root = TempDir::new().expect("failed temp dir create");
+        let target_config = root.path().join("shki.toml");
+        std::fs::write(&target_config, "# config").expect("write to file");
+
+        // exact start
+        let exact_start = target_config.clone();
+
+        let found = resolve_project_root(&exact_start);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap(), target_config.parent().unwrap());
+
+        // from cwd
+        let good_starting = root
+            .path()
+            .join("some")
+            .join("deeply")
+            .join("nested")
+            .join("place");
+
+        create_dir_all(&good_starting).expect("make directory");
+
+        let found = resolve_project_root(&good_starting);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap(), target_config.parent().unwrap());
+
+        // from not found file
+        let file_starting = root
+            .path()
+            .join("some")
+            .join("deeply")
+            .join("nested")
+            .join("other.toml");
+        let found = resolve_project_root(&file_starting);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap(), target_config.parent().unwrap());
+    }
+
+    #[test]
+    fn test_resolve_project_config_file_exit_at_git() {
+        let root = TempDir::new().expect("failed temp dir create");
+
+        // from cwd
+        let good_starting = root
+            .path()
+            .join("some")
+            .join(".git")
+            .join("nested")
+            .join("place");
+
+        create_dir_all(&good_starting).expect("make directory");
+
+        let found = resolve_project_root(&good_starting);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap(), root.path().join("some"))
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
