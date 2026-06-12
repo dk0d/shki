@@ -1493,7 +1493,7 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
     assert!(user.contains("pub struct User"));
     assert!(user.contains("use super::user_status::UserStatus;"));
     assert!(status.contains("pub enum UserStatus"));
-    assert!(root_mod.contains("pub use user::User;"));
+    assert!(root_mod.contains("pub use user::*;"));
 }
 
 #[tokio::test]
