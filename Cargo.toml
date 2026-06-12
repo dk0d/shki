@@ -80,6 +80,9 @@ testcontainers-modules = { version = "0.15.0", features = [
   "postgres",
 ] }
 
+# pinned to prevent a trait impl conflict that shows up in 0.3.48
+time = '0.3.47'
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
