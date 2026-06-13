@@ -15,6 +15,8 @@ use crate::{
 };
 use clap::ValueEnum;
 
+const PROJECT_ROOT_MARKERS: [&str; 2] = ["shki.toml", ".git"];
+
 pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -325,20 +327,17 @@ impl Config {
     /// Load configuration from a file
     pub fn load(path: &std::path::Path, args: &CommonArgs) -> crate::Result<Self> {
         dotenvy::dotenv().ok();
-        let root = if let Some(path) = resolve_project_root(path) {
-            path
-        } else {
-            &std::env::current_dir().expect("working dir")
-        };
-        let path = &root.join("shki.toml");
-        let explicit = Self::explicit_config(path)?;
-        let config: Config = Self::base_figment(path)
+        let cwd = std::env::current_dir().expect("working dir");
+        let root = resolve_project_root(path, &cwd);
+        let path = root.join("shki.toml");
+        let explicit = Self::explicit_config(&path)?;
+        let config: Config = Self::base_figment(&path)
             .merge(Serialized::defaults(args))
             .extract()
             .map_err(|e| ShkiError::config(format!("Failed to load config: {}", e)))?;
         let mut config = config.infer_dialect();
         if explicit.root.is_none() {
-            config.root = root.to_path_buf();
+            config.root = root;
         }
         if let Some(migrations_dir) = &args.migrations_dir {
             config.migrations_dir = migrations_dir.clone();
@@ -463,34 +462,51 @@ impl Config {
     // }
 }
 
-fn resolve_project_root(starting_path: &Path) -> Option<&Path> {
+fn resolve_project_root(starting_path: &Path, default_root: &Path) -> PathBuf {
+    let default = std::fs::canonicalize(default_root).expect("default");
+    let starting_path = std::fs::canonicalize(starting_path).unwrap_or(default.clone());
+
     if starting_path.is_file()
         && starting_path
             .file_name()
             .is_some_and(|p| p.to_string_lossy() == "shki.toml")
         && starting_path.exists()
+        && let Some(parent) = starting_path.parent()
     {
-        return starting_path.parent();
+        return parent.to_path_buf();
     }
 
-    let mut search_dir = if starting_path.is_file() {
+    let starting_path = starting_path.as_path();
+
+    let parent = if starting_path.is_file() {
         starting_path.ancestors().nth(2)
-    } else {
+    } else if starting_path.is_dir() {
         starting_path.ancestors().nth(1)
+    } else {
+        Some(starting_path)
     };
+    dbg!(parent);
+
+    let mut search_dir = if let Some(path) = parent
+        && path.to_string_lossy() != ""
+    {
+        Some(path)
+    } else {
+        Some(default.as_path())
+    };
+    dbg!(search_dir);
 
     while let Some(path) = search_dir {
-        let candidate = path.join("shki.toml");
-        if candidate.exists() {
-            return Some(path);
-        }
-        // if git directoy found, we are in a git repo, and don't want to keep searching
-        if path.join(".git").exists() {
-            return Some(path);
+        if PROJECT_ROOT_MARKERS
+            .iter()
+            .find(|n| path.join(n).exists())
+            .is_some()
+        {
+            return path.to_path_buf();
         }
         search_dir = path.parent();
     }
-    None
+    default_root.to_path_buf()
 }
 
 #[cfg(test)]
@@ -505,15 +521,7 @@ mod tests {
         let root = TempDir::new().expect("failed temp dir create");
         let target_config = root.path().join("shki.toml");
         std::fs::write(&target_config, "# config").expect("write to file");
-
-        // exact start
-        let exact_start = target_config.clone();
-
-        let found = resolve_project_root(&exact_start);
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), target_config.parent().unwrap());
-
-        // from cwd
+        // cwd
         let good_starting = root
             .path()
             .join("some")
@@ -522,10 +530,15 @@ mod tests {
             .join("place");
 
         create_dir_all(&good_starting).expect("make directory");
+        let expected = std::fs::canonicalize(root.path()).unwrap();
 
-        let found = resolve_project_root(&good_starting);
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), target_config.parent().unwrap());
+        let found = resolve_project_root(&good_starting, &good_starting);
+        assert_eq!(found, expected);
+
+        // exact start
+        let exact_start = target_config.clone();
+        let found = resolve_project_root(&exact_start, root.path());
+        assert_eq!(found, expected);
 
         // from not found file
         let file_starting = root
@@ -534,28 +547,34 @@ mod tests {
             .join("deeply")
             .join("nested")
             .join("other.toml");
-        let found = resolve_project_root(&file_starting);
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), target_config.parent().unwrap());
+        let found = resolve_project_root(&file_starting, file_starting.parent().unwrap());
+        assert_eq!(found, expected);
     }
 
     #[test]
     fn test_resolve_project_config_file_exit_at_git() {
         let root = TempDir::new().expect("failed temp dir create");
-
-        // from cwd
         let good_starting = root
             .path()
             .join("some")
             .join(".git")
             .join("nested")
             .join("place");
-
         create_dir_all(&good_starting).expect("make directory");
+        let expected = std::fs::canonicalize(root.path().join("some")).unwrap();
+        let found = resolve_project_root(&good_starting, &good_starting);
+        assert_eq!(found, expected)
+    }
 
-        let found = resolve_project_root(&good_starting);
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), root.path().join("some"))
+    #[test]
+    fn test_resolve_project_config_file_empty() {
+        let root = TempDir::new().expect("failed temp dir create");
+        let target = root.path().join("some");
+        let good_starting = target.join(".git").join("nested").join("place");
+        create_dir_all(&good_starting).expect("make directory");
+        let expected = std::fs::canonicalize(target).unwrap();
+        let found = resolve_project_root(&PathBuf::new(), &good_starting);
+        assert_eq!(found, expected)
     }
 
     fn env_lock() -> &'static Mutex<()> {
@@ -729,7 +748,6 @@ out = "db/migrations"
     fn load_defaults_root_to_config_file_parent() {
         let temp_dir = TempDir::new().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("shki.toml");
-
         std::fs::write(
             &config_path,
             r#"
@@ -738,13 +756,12 @@ database_url = "sqlite://test.db"
 "#,
         )
         .expect("failed to write config");
-
         let config =
             Config::load(&config_path, &CommonArgs::default()).expect("config should load");
-
-        assert_eq!(config.root, temp_dir.path());
-        assert_eq!(config.schema_path(), temp_dir.path().join("schema"));
-        assert_eq!(config.out_dir(), temp_dir.path().join("migrations"));
+        let expected = std::fs::canonicalize(temp_dir.path()).expect("temp dir path");
+        assert_eq!(config.root, expected);
+        assert_eq!(config.schema_path(), expected.join("schema"));
+        assert_eq!(config.out_dir(), expected.join("migrations"));
     }
 
     #[test]

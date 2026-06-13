@@ -163,6 +163,7 @@ mod tests {
 
         let config = Config::load(&target_dir.join("shki.toml"), &CommonArgs::default())
             .expect("generated config should load");
+        let target_dir = std::fs::canonicalize(target_dir).unwrap();
         assert_eq!(config.schema_path(), target_dir.join("schema"));
         assert_eq!(config.out_dir(), target_dir.join("migrations"));
     }
