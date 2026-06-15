@@ -485,7 +485,6 @@ fn resolve_project_root(starting_path: &Path, default_root: &Path) -> PathBuf {
     } else {
         Some(starting_path)
     };
-    dbg!(parent);
 
     let mut search_dir = if let Some(path) = parent
         && path.to_string_lossy() != ""
@@ -494,7 +493,6 @@ fn resolve_project_root(starting_path: &Path, default_root: &Path) -> PathBuf {
     } else {
         Some(default.as_path())
     };
-    dbg!(search_dir);
 
     while let Some(path) = search_dir {
         if PROJECT_ROOT_MARKERS
