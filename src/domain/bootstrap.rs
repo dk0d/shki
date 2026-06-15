@@ -33,11 +33,7 @@ pub async fn cmd_bootstrap(
     force: bool,
     schema: &Option<String>,
 ) -> Result<()> {
-    if let Some(url) = config.database_url.as_ref() {
-        println!("\n{} {}\n", "URL".bold(), url.bright_green());
-    } else {
-        println!("{}", "No database url found".bright_yellow());
-    }
+    config.display_sanitized_db_url();
 
     println!("{}", "Bootstrapping from database shape...\n".cyan());
 

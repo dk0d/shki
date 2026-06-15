@@ -7,11 +7,8 @@ use super::migrate::manager::MigrationManager;
 
 /// Show migration status
 pub async fn cmd_status(config: &Config) -> Result<()> {
-    if let Some(url) = config.database_url.as_ref() {
-        println!("\n{} {}\n", "URL".bold(), url.bright_green());
-    } else {
-        println!("{}", "No database url found".bright_yellow());
-    }
+    config.display_sanitized_db_url();
+
     let migration_manager = MigrationManager::from_config(config).await?;
 
     display_migrations(&migration_manager, config).await?;

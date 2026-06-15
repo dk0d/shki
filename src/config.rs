@@ -6,6 +6,7 @@ use figment::{
     Figment,
     providers::{Env, Format, Serialized, Toml},
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,7 @@ use crate::{
     models::iden::Iden, schema::SqlDialect, utils::resolve_path,
 };
 use clap::ValueEnum;
+use colored::Colorize;
 
 const PROJECT_ROOT_MARKERS: [&str; 2] = ["shki.toml", ".git"];
 
@@ -313,6 +315,12 @@ fn default_schema_path() -> PathBuf {
     PathBuf::from("schema")
 }
 
+fn sanitize_db_url(url: &str) -> String {
+    let pattern = Regex::new(r":([^:@]+)@").unwrap();
+    let masked_url = pattern.replace(url, ":********@");
+    format!("{}", masked_url)
+}
+
 impl Config {
     fn infer_dialect_from_url(url: &str) -> Option<SqlDialect> {
         let scheme = url.split(':').next()?.to_ascii_lowercase();
@@ -321,6 +329,15 @@ impl Config {
             "mysql" => Some(SqlDialect::Mysql),
             "sqlite" => Some(SqlDialect::Sqlite),
             _ => None,
+        }
+    }
+
+    pub fn display_sanitized_db_url(&self) {
+        if let Some(url) = self.database_url.as_ref() {
+            let sanitized_url = sanitize_db_url(url);
+            println!("\n{} {}\n", "URL".bold(), sanitized_url.bright_green());
+        } else {
+            println!("{}", "No database url found".bright_yellow());
         }
     }
 
@@ -513,6 +530,13 @@ mod tests {
     use std::fs::create_dir_all;
     use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    #[test]
+    fn test_db_url_is_sanitized() {
+        let url = "postgresql://pg:must_not_be_shown@localhost:5432/app".to_string();
+        let sanitized = sanitize_db_url(&url);
+        assert!(sanitized.find("must_not_be_shown").is_none())
+    }
 
     #[test]
     fn test_resolve_project_config_file() {

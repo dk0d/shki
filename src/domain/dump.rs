@@ -48,11 +48,7 @@ pub async fn export_live_schema(
     schema: &Option<String>,
     workflow_name: &str,
 ) -> Result<()> {
-    if let Some(url) = config.database_url.as_ref() {
-        println!("\n{} {}\n", "URL".bold(), url.bright_green());
-    } else {
-        println!("{}", "No database url found".bright_yellow());
-    }
+    config.display_sanitized_db_url();
 
     println!(
         "{}",
