@@ -1491,7 +1491,10 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
         std::fs::read_to_string(output_dir.join("mod.rs")).expect("root module should be written");
 
     assert!(user.contains("pub struct User"));
-    assert!(user.contains("use super::user_status::UserStatus;"));
+    // In nested-modules format the struct lives at `user/user.rs`, so a sibling
+    // type is two levels up and reached through the top-level re-export.
+    assert!(user.contains("use super::super::UserStatus;"));
+    assert!(!user.contains("use super::user_status::UserStatus;"));
     assert!(status.contains("pub enum UserStatus"));
     assert!(root_mod.contains("pub use user::*;"));
 }

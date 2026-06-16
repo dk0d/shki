@@ -13,7 +13,7 @@ use quote::quote;
 use crate::codegen::CodegenConfig;
 use crate::codegen::generator::CodeGenerator;
 use crate::models::iden::Iden;
-use crate::schema::{Column, DataType, DbEnum, Table};
+use crate::schema::{Column, CompositeType, DataType, DbEnum, Table};
 use crate::snapshots::Snapshot;
 
 /// A generated Rust enum
@@ -161,7 +161,29 @@ impl CodeGenerator for RustGenerator {
         snapshot: &Snapshot,
         config: &CodegenConfig,
     ) -> Self::TableDef {
-        self.build_struct(name, table_snapshot, &snapshot.enums(), config)
+        self.build_struct(
+            name,
+            table_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
+    }
+
+    fn generate_composite_type(
+        &self,
+        name: &Iden,
+        composite_snapshot: &CompositeType,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_composite_struct(
+            name,
+            composite_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
     }
 
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef) {
@@ -207,6 +229,7 @@ impl RustGenerator {
         name: &Iden,
         table: &Table,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> RustStruct {
         let rust_name = self.transform_struct_name(&name.name, config);
@@ -214,7 +237,7 @@ impl RustGenerator {
         let fields = table
             .columns
             .values()
-            .map(|col| self.generate_field(col, enums, config))
+            .map(|col| self.generate_field(col, enums, composites, config))
             .collect();
 
         RustStruct {
@@ -228,15 +251,55 @@ impl RustGenerator {
         }
     }
 
+    /// Generate a Rust struct from a composite type snapshot.
+    ///
+    /// Composite type attributes are not tracked as nullable in the schema
+    /// model, so generated fields are emitted as non-optional.
+    fn build_composite_struct(
+        &self,
+        name: &Iden,
+        composite: &CompositeType,
+        enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
+        config: &CodegenConfig,
+    ) -> RustStruct {
+        let rust_name = self.transform_composite_name(&name.name, config);
+
+        let fields = composite
+            .columns
+            .iter()
+            .map(|col| RustField {
+                name: make_safe_field_name(&col.name),
+                db_name: col.name.clone(),
+                rust_type: self.sql_type_to_rust(&col.data_type, false, enums, composites, config),
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                comment: None,
+            })
+            .collect();
+
+        RustStruct {
+            name: rust_name,
+            table_name: name.to_string(),
+            fields,
+            derives: config.struct_derives.clone(),
+            attributes: config.struct_attributes.clone(),
+            serde: config.serde,
+            comment: composite.description.clone(),
+        }
+    }
+
     /// Generate a Rust field from a column snapshot
     fn generate_field(
         &self,
         col: &Column,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> RustField {
         let field_name = make_safe_field_name(&col.name);
-        let rust_type = self.sql_type_to_rust(&col.data_type, col.nullable, enums, config);
+        let rust_type = self.sql_type_to_rust(&col.data_type, col.nullable, enums, composites, config);
 
         RustField {
             name: field_name,
@@ -254,6 +317,7 @@ impl RustGenerator {
         sql_type: &DataType,
         nullable: bool,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> String {
         if let Some(override_type) = self.overridden_type(sql_type, config) {
@@ -321,16 +385,16 @@ impl RustGenerator {
             }
 
             DataType::Array { element_type } => {
-                let inner = self.sql_type_to_rust(element_type, false, enums, config);
+                let inner = self.sql_type_to_rust(element_type, false, enums, composites, config);
                 format!("Vec<{}>", inner)
             }
 
             DataType::Enum { name, schema } => self
-                .enum_type_name(name, schema, enums, config)
+                .custom_type_name(name, schema, enums, composites, config)
                 .unwrap_or_else(|| "String".to_string()),
 
             DataType::Custom { name, schema } => self
-                .enum_type_name(name, schema, enums, config)
+                .custom_type_name(name, schema, enums, composites, config)
                 .unwrap_or_else(|| "String".to_string()),
 
             DataType::Int4Range
@@ -551,16 +615,17 @@ mod tests {
     #[test]
     fn test_sql_type_to_rust() {
         let enums = IndexMap::new();
+        let composites = IndexMap::new();
         let config = CodegenConfig::default();
 
         let generator = RustGenerator;
 
         assert_eq!(
-            generator.sql_type_to_rust(&DataType::Integer, false, &enums, &config),
+            generator.sql_type_to_rust(&DataType::Integer, false, &enums, &composites, &config),
             "i32"
         );
         assert_eq!(
-            generator.sql_type_to_rust(&DataType::Text, true, &enums, &config),
+            generator.sql_type_to_rust(&DataType::Text, true, &enums, &composites, &config),
             "Option<String>"
         );
         assert_eq!(
@@ -571,12 +636,13 @@ mod tests {
                 },
                 false,
                 &enums,
+                &composites,
                 &config,
             ),
             "chrono::DateTime<chrono::Utc>"
         );
         assert_eq!(
-            generator.sql_type_to_rust(&DataType::Uuid, false, &enums, &config),
+            generator.sql_type_to_rust(&DataType::Uuid, false, &enums, &composites, &config),
             "uuid::Uuid"
         );
     }
@@ -584,11 +650,12 @@ mod tests {
     #[test]
     fn test_sql_type_to_rust_uses_overrides_before_nullability() {
         let enums = IndexMap::new();
+        let composites = IndexMap::new();
         let config = CodegenConfig::default().type_override("jsonb", "MyJson");
         let generator = RustGenerator;
 
         assert_eq!(
-            generator.sql_type_to_rust(&DataType::JsonB, true, &enums, &config),
+            generator.sql_type_to_rust(&DataType::JsonB, true, &enums, &composites, &config),
             "Option<MyJson>"
         );
     }
@@ -600,6 +667,7 @@ mod tests {
             Iden::new("user_status", Some("public".to_string())),
             DbEnum::with_values("user_status", vec!["active", "inactive"]),
         );
+        let composites = IndexMap::new();
         let config = CodegenConfig::default();
         let generator = RustGenerator;
 
@@ -611,6 +679,7 @@ mod tests {
                 },
                 false,
                 &enums,
+                &composites,
                 &config,
             ),
             "UserStatus"
@@ -623,10 +692,97 @@ mod tests {
                 },
                 false,
                 &enums,
+                &composites,
                 &config,
             ),
             "String"
         );
+    }
+
+    #[test]
+    fn test_sql_type_to_rust_resolves_composite_types() {
+        use crate::schema::CompositeType;
+
+        let enums = IndexMap::new();
+        let mut composites = IndexMap::new();
+        composites.insert(
+            Iden::new("address", Some("public".to_string())),
+            CompositeType {
+                name: "address".to_string(),
+                schema: Some("public".to_string()),
+                columns: vec![],
+                description: None,
+            },
+        );
+        let config = CodegenConfig::default();
+        let generator = RustGenerator;
+
+        // A column whose custom type names a generated composite type resolves
+        // to that struct rather than falling back to `String`.
+        assert_eq!(
+            generator.sql_type_to_rust(
+                &DataType::Custom {
+                    name: "address".to_string(),
+                    schema: Some("public".to_string()),
+                },
+                true,
+                &enums,
+                &composites,
+                &config,
+            ),
+            "Option<Address>"
+        );
+
+        // Postgres reports a column's user-defined type unqualified, so an
+        // unqualified reference must still resolve to the schema-qualified type.
+        assert_eq!(
+            generator.sql_type_to_rust(
+                &DataType::Custom {
+                    name: "address".to_string(),
+                    schema: None,
+                },
+                false,
+                &enums,
+                &composites,
+                &config,
+            ),
+            "Address"
+        );
+    }
+
+    #[test]
+    fn test_build_composite_struct_emits_fields() {
+        use crate::schema::{CompositeType, CompositeTypeColumn};
+
+        let composite = CompositeType {
+            name: "address".to_string(),
+            schema: Some("public".to_string()),
+            columns: vec![
+                CompositeTypeColumn {
+                    name: "street".to_string(),
+                    data_type: DataType::Text,
+                },
+                CompositeTypeColumn {
+                    name: "zip".to_string(),
+                    data_type: DataType::Integer,
+                },
+            ],
+            description: None,
+        };
+
+        let generator = RustGenerator;
+        let rust_struct = generator.build_composite_struct(
+            &Iden::new("address", Some("public".to_string())),
+            &composite,
+            &IndexMap::new(),
+            &IndexMap::new(),
+            &CodegenConfig::default(),
+        );
+
+        let output = rust_struct.to_string_pretty();
+        assert!(output.contains("pub struct Address"));
+        assert!(output.contains("pub street: String"));
+        assert!(output.contains("pub zip: i32"));
     }
 
     #[test]

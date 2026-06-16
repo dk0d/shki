@@ -7,7 +7,7 @@ use heck::ToUpperCamelCase;
 use indexmap::IndexMap;
 
 use crate::models::iden::Iden;
-use crate::schema::{DataType, DbEnum, Table};
+use crate::schema::{CompositeType, DataType, DbEnum, Table};
 use crate::snapshots::Snapshot;
 
 use super::CodegenConfig;
@@ -51,6 +51,18 @@ pub trait CodeGenerator: Default {
         config: &CodegenConfig,
     ) -> Self::TableDef;
 
+    /// Build one struct/message definition from a composite type.
+    ///
+    /// Composite types map onto the same target representation as tables
+    /// (a struct/interface/message), so they reuse [`Self::TableDef`].
+    fn generate_composite_type(
+        &self,
+        name: &Iden,
+        composite_snapshot: &CompositeType,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef;
+
     /// Insert a generated enum into output
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef);
 
@@ -61,11 +73,17 @@ pub trait CodeGenerator: Default {
     fn generate(&self, snapshot: &Snapshot, config: &CodegenConfig) -> Self::Output {
         let mut output = self.init_output(config);
         let enums = snapshot.enums();
+        let composite_types = snapshot.composite_types();
         let tables = snapshot.tables();
 
         for (name, enum_snapshot) in &enums {
             let generated_enum = self.generate_enum(name, enum_snapshot, config);
             self.insert_enum(&mut output, name, generated_enum);
+        }
+
+        for (name, composite_snapshot) in &composite_types {
+            let generated = self.generate_composite_type(name, composite_snapshot, snapshot, config);
+            self.insert_table(&mut output, name, generated);
         }
 
         for (table, table_snapshot) in &tables {
@@ -106,9 +124,35 @@ pub trait CodeGenerator: Default {
         enums: &IndexMap<Iden, DbEnum>,
         config: &CodegenConfig,
     ) -> Option<String> {
-        enums
-            .contains_key(&Iden::new(name, schema.clone()))
+        matches_object(enums.keys(), name, schema)
             .then(|| self.transform_enum_name(name, config))
+    }
+
+    /// Resolve a column's custom type against the composite types being
+    /// generated, returning the generated struct/message name if it matches.
+    fn composite_type_name(
+        &self,
+        name: &str,
+        schema: &Option<String>,
+        composites: &IndexMap<Iden, CompositeType>,
+        config: &CodegenConfig,
+    ) -> Option<String> {
+        matches_object(composites.keys(), name, schema)
+            .then(|| self.transform_composite_name(name, config))
+    }
+
+    /// Resolve a custom column type to the generated enum or composite type
+    /// name, if either is being generated.
+    fn custom_type_name(
+        &self,
+        name: &str,
+        schema: &Option<String>,
+        enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
+        config: &CodegenConfig,
+    ) -> Option<String> {
+        self.enum_type_name(name, schema, enums, config)
+            .or_else(|| self.composite_type_name(name, schema, composites, config))
     }
 
     /// Transform a table name into a struct/message name.
@@ -142,6 +186,37 @@ pub trait CodeGenerator: Default {
 
         apply_name_pattern(&base_name, config.enum_pattern.as_deref())
     }
+
+    /// Transform a database composite type name into a language struct name.
+    ///
+    /// Composite types are type definitions rather than collections, so the
+    /// name is not singularized. An explicit `struct_renames` entry takes
+    /// precedence (composite types share the struct namespace), and the
+    /// `struct_pattern` is applied so generated structs stay consistent.
+    fn transform_composite_name(&self, name: &str, config: &CodegenConfig) -> String {
+        let base_name = config
+            .struct_renames
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_upper_camel_case());
+
+        apply_name_pattern(&base_name, config.struct_pattern.as_deref())
+    }
+}
+
+/// Check whether a generated object (enum or composite type) matches a column's
+/// referenced type name.
+///
+/// Postgres column introspection reports a user-defined type by its unqualified
+/// `udt_name`, so the referencing column's type often carries no schema. When
+/// the reference is unqualified we match on name alone; when it is schema
+/// qualified we require the schema to match as well.
+fn matches_object<'a>(
+    mut keys: impl Iterator<Item = &'a Iden>,
+    name: &str,
+    schema: &Option<String>,
+) -> bool {
+    keys.any(|key| key.name == name && (schema.is_none() || &key.schema == schema))
 }
 
 pub fn apply_name_pattern(base_name: &str, pattern: Option<&str>) -> String {
@@ -183,6 +258,15 @@ mod tests {
             &self,
             _name: &Iden,
             _table_snapshot: &Table,
+            _snapshot: &Snapshot,
+            _config: &CodegenConfig,
+        ) -> Self::TableDef {
+        }
+
+        fn generate_composite_type(
+            &self,
+            _name: &Iden,
+            _composite_snapshot: &CompositeType,
             _snapshot: &Snapshot,
             _config: &CodegenConfig,
         ) -> Self::TableDef {

@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use crate::codegen::CodegenConfig;
 use crate::codegen::generator::CodeGenerator;
 use crate::models::iden::Iden;
-use crate::schema::{Column, DataType, DbEnum, Table};
+use crate::schema::{Column, CompositeType, DataType, DbEnum, Table};
 use crate::snapshots::Snapshot;
 
 /// Generated TypeScript code
@@ -134,7 +134,29 @@ impl CodeGenerator for TypeScriptGenerator {
         snapshot: &Snapshot,
         config: &CodegenConfig,
     ) -> Self::TableDef {
-        self.build_interface(name, table_snapshot, &snapshot.enums(), config)
+        self.build_interface(
+            name,
+            table_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
+    }
+
+    fn generate_composite_type(
+        &self,
+        name: &Iden,
+        composite_snapshot: &CompositeType,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_composite_interface(
+            name,
+            composite_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
     }
 
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef) {
@@ -179,6 +201,7 @@ impl TypeScriptGenerator {
         name: &Iden,
         table: &Table,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> TypeScriptInterface {
         let ts_name = self.transform_struct_name(&name.name, config);
@@ -186,7 +209,7 @@ impl TypeScriptGenerator {
         let properties = table
             .columns
             .values()
-            .map(|col| self.generate_property(col, enums, config))
+            .map(|col| self.generate_property(col, enums, composites, config))
             .collect();
 
         TypeScriptInterface {
@@ -198,15 +221,51 @@ impl TypeScriptGenerator {
         }
     }
 
+    /// Generate a TypeScript interface from a composite type snapshot.
+    ///
+    /// Composite type attributes are not tracked as nullable in the schema
+    /// model, so generated properties are emitted as non-optional.
+    fn build_composite_interface(
+        &self,
+        name: &Iden,
+        composite: &CompositeType,
+        enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
+        config: &CodegenConfig,
+    ) -> TypeScriptInterface {
+        let ts_name = self.transform_composite_name(&name.name, config);
+
+        let properties = composite
+            .columns
+            .iter()
+            .map(|col| TypeScriptProperty {
+                name: col.name.clone(),
+                db_name: col.name.clone(),
+                ts_type: self.sql_type_to_typescript(&col.data_type, enums, composites, config),
+                nullable: false,
+                comment: None,
+            })
+            .collect();
+
+        TypeScriptInterface {
+            name: ts_name,
+            table_name: name.to_string(),
+            properties,
+            comment: composite.description.clone(),
+            flavor: self.flavor,
+        }
+    }
+
     /// Generate a TypeScript property from a column snapshot
     fn generate_property(
         &self,
         col: &Column,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> TypeScriptProperty {
         let property_name = col.name.clone();
-        let ts_type = self.sql_type_to_typescript(&col.data_type, enums, config);
+        let ts_type = self.sql_type_to_typescript(&col.data_type, enums, composites, config);
 
         TypeScriptProperty {
             name: property_name,
@@ -222,6 +281,7 @@ impl TypeScriptGenerator {
         &self,
         sql_type: &DataType,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> String {
         if let Some(override_type) = self.overridden_type(sql_type, config) {
@@ -291,16 +351,16 @@ impl TypeScriptGenerator {
             DataType::Array { element_type } => {
                 format!(
                     "{}[]",
-                    self.sql_type_to_typescript(element_type, enums, config)
+                    self.sql_type_to_typescript(element_type, enums, composites, config)
                 )
             }
 
             DataType::Enum { name, schema } => self
-                .enum_type_name(name, schema, enums, config)
+                .custom_type_name(name, schema, enums, composites, config)
                 .unwrap_or_else(|| "string".to_string()),
 
             DataType::Custom { name, schema } => self
-                .enum_type_name(name, schema, enums, config)
+                .custom_type_name(name, schema, enums, composites, config)
                 .unwrap_or_else(|| "unknown".to_string()),
 
             DataType::Int4Range
@@ -397,30 +457,31 @@ mod tests {
     #[test]
     fn test_sql_type_to_typescript() {
         let enums = IndexMap::new();
+        let composites = IndexMap::new();
         let config = CodegenConfig::default();
 
         let generator = TypeScriptGenerator::default();
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::Integer, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::Integer, &enums, &composites, &config),
             "number"
         );
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::BigInt, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::BigInt, &enums, &composites, &config),
             "number"
         );
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::Text, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::Text, &enums, &composites, &config),
             "string"
         );
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::VarChar { length: None }, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::VarChar { length: None }, &enums, &composites, &config),
             "string"
         );
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::Boolean, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::Boolean, &enums, &composites, &config),
             "boolean"
         );
 
@@ -431,18 +492,19 @@ mod tests {
                     with_timezone: true,
                 },
                 &enums,
+                &composites,
                 &config,
             ),
             "Date"
         );
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::Uuid, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::Uuid, &enums, &composites, &config),
             "string"
         );
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::JsonB, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::JsonB, &enums, &composites, &config),
             "unknown"
         );
 
@@ -452,6 +514,7 @@ mod tests {
                     element_type: Box::new(DataType::Integer),
                 },
                 &enums,
+                &composites,
                 &config,
             ),
             "number[]"
@@ -462,6 +525,7 @@ mod tests {
                     element_type: Box::new(DataType::Text),
                 },
                 &enums,
+                &composites,
                 &config,
             ),
             "string[]"
@@ -475,11 +539,12 @@ mod tests {
             Iden::new("user_status", Some("public".to_string())),
             DbEnum::with_values("user_status", vec!["active", "inactive"]),
         );
+        let composites = IndexMap::new();
         let config = CodegenConfig::default().type_override("jsonb", "JsonValue");
         let generator = TypeScriptGenerator::default();
 
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::JsonB, &enums, &config),
+            generator.sql_type_to_typescript(&DataType::JsonB, &enums, &composites, &config),
             "JsonValue"
         );
         assert_eq!(
@@ -489,6 +554,7 @@ mod tests {
                     schema: Some("public".to_string()),
                 },
                 &enums,
+                &composites,
                 &config,
             ),
             "UserStatus"
@@ -500,9 +566,40 @@ mod tests {
                     schema: None,
                 },
                 &enums,
+                &composites,
                 &config,
             ),
             "unknown"
+        );
+    }
+
+    #[test]
+    fn test_sql_type_to_typescript_resolves_composite_types() {
+        let enums = IndexMap::new();
+        let mut composites = IndexMap::new();
+        composites.insert(
+            Iden::new("address", Some("public".to_string())),
+            CompositeType {
+                name: "address".to_string(),
+                schema: Some("public".to_string()),
+                columns: vec![],
+                description: None,
+            },
+        );
+        let config = CodegenConfig::default();
+        let generator = TypeScriptGenerator::default();
+
+        assert_eq!(
+            generator.sql_type_to_typescript(
+                &DataType::Custom {
+                    name: "address".to_string(),
+                    schema: Some("public".to_string()),
+                },
+                &enums,
+                &composites,
+                &config,
+            ),
+            "Address"
         );
     }
 
@@ -588,6 +685,7 @@ mod tests {
         let ts_interface = generator.build_interface(
             &Iden::new("accounts", None),
             &table,
+            &IndexMap::new(),
             &IndexMap::new(),
             &CodegenConfig::default(),
         );

@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use heck::ToSnakeCase;
 
 use crate::Result;
-use crate::codegen::CodegenConfig;
 use crate::codegen::generator::apply_name_pattern;
 use crate::codegen::writer::CodeWriter;
+use crate::codegen::{CodegenConfig, OutputMode};
 
 use super::{GeneratedRust, RustStruct};
 
@@ -81,19 +81,44 @@ impl RustWriter {
         output
     }
 
+    /// Build the `use` path for a sibling generated type.
+    ///
+    /// File organization differs by output mode, so the relative path to a
+    /// sibling type does too:
+    /// - `Module`: types are flat files under one module
+    ///   (`out/<type>.rs`), so a sibling is `super::<module>::<Type>`.
+    /// - `Modules`: each type lives in its own nested module
+    ///   (`out/<type>/<type>.rs`), so a sibling is two levels up and reached
+    ///   through the top-level re-export: `super::super::<Type>`.
+    fn type_import(&self, type_name: &str, mode: OutputMode) -> String {
+        match mode {
+            OutputMode::Modules => format!("use super::super::{};", type_name),
+            _ => format!("use super::{}::{};", type_name.to_snake_case(), type_name),
+        }
+    }
+
     /// Collect imports needed for a struct
     fn collect_struct_imports(
         &self,
         rust_struct: &RustStruct,
         code: &GeneratedRust,
+        mode: OutputMode,
     ) -> Vec<String> {
         let mut imports = BTreeSet::new();
 
         for field in &rust_struct.fields {
             for rust_enum in code.enums.values() {
                 if field.rust_type.contains(&rust_enum.name) {
-                    let module_name = rust_enum.name.to_snake_case();
-                    imports.insert(format!("use super::{}::{};", module_name, rust_enum.name));
+                    imports.insert(self.type_import(&rust_enum.name, mode));
+                }
+            }
+
+            // Structs may reference other generated structs (e.g. a column
+            // whose type is a composite type). Import those too, skipping the
+            // struct's own module.
+            for other in code.structs.values() {
+                if other.name != rust_struct.name && field.rust_type.contains(&other.name) {
+                    imports.insert(self.type_import(&other.name, mode));
                 }
             }
 
@@ -144,7 +169,11 @@ impl RustWriter {
         Ok(())
     }
 
-    fn collect_generated_items(&self, code: &GeneratedRust) -> Vec<GeneratedItem> {
+    fn collect_generated_items(
+        &self,
+        code: &GeneratedRust,
+        mode: OutputMode,
+    ) -> Vec<GeneratedItem> {
         code.enums
             .values()
             .map(|e| {
@@ -159,7 +188,7 @@ impl RustWriter {
                 GeneratedItem::new(
                     s.name.to_snake_case(),
                     s.name.clone(),
-                    self.collect_struct_imports(s, code),
+                    self.collect_struct_imports(s, code, mode),
                     s.to_string_pretty(),
                 )
             }))
@@ -230,7 +259,7 @@ impl CodeWriter for RustWriter {
     ) -> Result<Vec<PathBuf>> {
         self.ensure_output_dir(output_dir)?;
 
-        let items = self.collect_generated_items(code);
+        let items = self.collect_generated_items(code, OutputMode::Module);
         let mut written_files = Vec::new();
         let mut mod_entries = Vec::new();
 
@@ -258,7 +287,7 @@ impl CodeWriter for RustWriter {
     ) -> Result<Vec<PathBuf>> {
         self.ensure_output_dir(output_dir)?;
 
-        let types = self.collect_generated_items(code);
+        let types = self.collect_generated_items(code, OutputMode::Modules);
 
         let mut written_files = Vec::new();
 
@@ -302,7 +331,9 @@ impl CodeWriter for RustWriter {
         output.push('\n');
         output.push_str(&self.format_imports(&code.required_imports()));
 
-        for item in self.collect_generated_items(code) {
+        // Single-file output keeps every type in one file, so per-item
+        // cross-module imports are unused here; the mode only affects them.
+        for item in self.collect_generated_items(code, OutputMode::File) {
             writeln!(output, "{}", item.content).expect("writing to string should not fail");
         }
 
@@ -315,5 +346,182 @@ impl CodeWriter for RustWriter {
 
     fn default_filename(&self) -> &str {
         "models"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{RustEnum, RustField};
+    use super::*;
+
+    fn field(name: &str, rust_type: &str) -> RustField {
+        RustField {
+            name: name.to_string(),
+            db_name: name.to_string(),
+            rust_type: rust_type.to_string(),
+            nullable: false,
+            primary_key: false,
+            unique: false,
+            comment: None,
+        }
+    }
+
+    fn rust_struct(name: &str, fields: Vec<RustField>) -> RustStruct {
+        RustStruct {
+            name: name.to_string(),
+            table_name: name.to_string(),
+            fields,
+            derives: vec![],
+            attributes: vec![],
+            serde: false,
+            comment: None,
+        }
+    }
+
+    fn rust_enum(name: &str) -> RustEnum {
+        RustEnum {
+            name: name.to_string(),
+            db_name: name.to_string(),
+            variants: vec![],
+            derives: vec![],
+            attributes: vec![],
+            serde: false,
+            comment: None,
+        }
+    }
+
+    /// Build a `GeneratedRust` with an enum, a composite-derived struct, and a
+    /// table struct whose fields reference both plus external crates.
+    fn sample_code() -> (GeneratedRust, RustStruct) {
+        let mut code = GeneratedRust::default();
+        code.enums
+            .insert("user_status".to_string(), rust_enum("UserStatus"));
+        code.structs.insert(
+            "addresses".to_string(),
+            rust_struct("Address", vec![field("street", "String")]),
+        );
+
+        let user = rust_struct(
+            "User",
+            vec![
+                field("id", "uuid::Uuid"),
+                field("status", "UserStatus"),
+                field("home_address", "Option<Address>"),
+                field("created_at", "chrono::DateTime<chrono::Utc>"),
+                field("data", "serde_json::Value"),
+                field("name", "String"),
+            ],
+        );
+        code.structs.insert("users".to_string(), user.clone());
+
+        (code, user)
+    }
+
+    #[test]
+    fn module_format_imports_reference_siblings_one_level_up() {
+        let (code, user) = sample_code();
+        let imports = RustWriter::new().collect_struct_imports(&user, &code, OutputMode::Module);
+
+        assert!(imports.contains(&"use super::user_status::UserStatus;".to_string()));
+        assert!(imports.contains(&"use super::address::Address;".to_string()));
+        assert!(imports.contains(&"use chrono;".to_string()));
+        assert!(imports.contains(&"use uuid;".to_string()));
+        assert!(imports.contains(&"use serde_json;".to_string()));
+    }
+
+    #[test]
+    fn modules_format_imports_reference_siblings_two_levels_up() {
+        // In `Modules` format each type lives in its own nested module
+        // (`out/<type>/<type>.rs`), so a sibling is reached via
+        // `super::super::<Type>`, not `super::<module>::<Type>`.
+        let (code, user) = sample_code();
+        let imports = RustWriter::new().collect_struct_imports(&user, &code, OutputMode::Modules);
+
+        assert!(imports.contains(&"use super::super::UserStatus;".to_string()));
+        assert!(imports.contains(&"use super::super::Address;".to_string()));
+        // External crate imports are unaffected by the module layout.
+        assert!(imports.contains(&"use chrono;".to_string()));
+        assert!(imports.contains(&"use uuid;".to_string()));
+        assert!(!imports.iter().any(|i| i.contains("super::address")));
+    }
+
+    #[test]
+    fn collect_struct_imports_skips_plain_scalar_fields() {
+        let (code, _) = sample_code();
+        // The composite struct only has a `String` field, so it needs no imports.
+        let address = &code.structs["addresses"];
+        let imports = RustWriter::new().collect_struct_imports(address, &code, OutputMode::Module);
+
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn collect_struct_imports_does_not_import_self() {
+        // A composite/struct that references itself must not emit a `use super`
+        // import for its own module, in either module layout.
+        let mut code = GeneratedRust::default();
+        let node = rust_struct(
+            "Node",
+            vec![field("parent", "Option<Node>"), field("label", "String")],
+        );
+        code.structs.insert("nodes".to_string(), node.clone());
+
+        for mode in [OutputMode::Module, OutputMode::Modules] {
+            let imports = RustWriter::new().collect_struct_imports(&node, &code, mode);
+            assert!(imports.is_empty(), "self-import leaked in {mode:?} mode");
+        }
+    }
+
+    #[test]
+    fn single_module_imports_are_emitted_in_generated_files() {
+        // End-to-end through the single-module writer: the file for the `User`
+        // struct must carry the one-level `use super::...` imports.
+        let (code, _) = sample_code();
+        let dir =
+            std::env::temp_dir().join(format!("shki_writer_module_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let written = RustWriter::new()
+            .write_single_module(&code, &dir, &CodegenConfig::default())
+            .expect("module generation should succeed");
+
+        let user_file = written
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("user.rs"))
+            .expect("user.rs should be generated");
+        let contents = fs::read_to_string(user_file).expect("user.rs should be readable");
+
+        assert!(contents.contains("use super::user_status::UserStatus;"));
+        assert!(contents.contains("use super::address::Address;"));
+        assert!(contents.contains("use uuid;"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn modules_imports_are_emitted_in_generated_files() {
+        // End-to-end through the nested-modules writer: the file for the `User`
+        // struct lives at `<dir>/user/user.rs` and must reach siblings via
+        // `super::super::<Type>`.
+        let (code, _) = sample_code();
+        let dir =
+            std::env::temp_dir().join(format!("shki_writer_modules_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let written = RustWriter::new()
+            .write_modules(&code, &dir, &CodegenConfig::default())
+            .expect("modules generation should succeed");
+
+        let user_file = written
+            .iter()
+            .find(|p| p.ends_with("user/user.rs"))
+            .expect("user/user.rs should be generated");
+        let contents = fs::read_to_string(user_file).expect("user/user.rs should be readable");
+
+        assert!(contents.contains("use super::super::UserStatus;"));
+        assert!(contents.contains("use super::super::Address;"));
+        assert!(!contents.contains("use super::address::Address;"));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

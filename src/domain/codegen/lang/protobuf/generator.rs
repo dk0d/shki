@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use crate::codegen::CodegenConfig;
 use crate::codegen::generator::CodeGenerator;
 use crate::models::iden::Iden;
-use crate::schema::{Column, DataType, DbEnum, Table};
+use crate::schema::{Column, CompositeType, DataType, DbEnum, Table};
 use crate::snapshots::Snapshot;
 
 /// Generated Protocol Buffer code
@@ -118,7 +118,29 @@ impl CodeGenerator for ProtobufGenerator {
         snapshot: &Snapshot,
         config: &CodegenConfig,
     ) -> Self::TableDef {
-        self.build_message(name, table_snapshot, &snapshot.enums(), config)
+        self.build_message(
+            name,
+            table_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
+    }
+
+    fn generate_composite_type(
+        &self,
+        name: &Iden,
+        composite_snapshot: &CompositeType,
+        snapshot: &Snapshot,
+        config: &CodegenConfig,
+    ) -> Self::TableDef {
+        self.build_composite_message(
+            name,
+            composite_snapshot,
+            &snapshot.enums(),
+            &snapshot.composite_types(),
+            config,
+        )
     }
 
     fn insert_enum(&self, output: &mut Self::Output, name: &Iden, def: Self::EnumDef) {
@@ -172,6 +194,7 @@ impl ProtobufGenerator {
         name: &Iden,
         table: &Table,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> ProtoMessage {
         let proto_name = self.transform_struct_name(&name.name, config);
@@ -180,7 +203,7 @@ impl ProtobufGenerator {
             .columns
             .values()
             .enumerate()
-            .map(|(i, col)| self.generate_field(col, i + 1, enums, config))
+            .map(|(i, col)| self.generate_field(col, i + 1, enums, composites, config))
             .collect();
 
         ProtoMessage {
@@ -188,6 +211,44 @@ impl ProtobufGenerator {
             table_name: name.to_string(),
             fields,
             comment: table.comment.clone(),
+        }
+    }
+
+    /// Generate a Protocol Buffer message from a composite type snapshot.
+    fn build_composite_message(
+        &self,
+        name: &Iden,
+        composite: &CompositeType,
+        enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
+        config: &CodegenConfig,
+    ) -> ProtoMessage {
+        let proto_name = self.transform_composite_name(&name.name, config);
+
+        let fields = composite
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| {
+                let (proto_type, repeated) =
+                    self.sql_type_to_proto(&col.data_type, enums, composites, config);
+                ProtoField {
+                    name: col.name.to_snake_case(),
+                    db_name: col.name.clone(),
+                    proto_type,
+                    number: (i + 1) as i32,
+                    optional: false,
+                    repeated,
+                    comment: None,
+                }
+            })
+            .collect();
+
+        ProtoMessage {
+            name: proto_name,
+            table_name: name.to_string(),
+            fields,
+            comment: composite.description.clone(),
         }
     }
 
@@ -218,10 +279,12 @@ impl ProtobufGenerator {
         col: &Column,
         field_number: usize,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> ProtoField {
         let field_name = col.name.to_snake_case();
-        let (proto_type, repeated) = self.sql_type_to_proto(&col.data_type, enums, config);
+        let (proto_type, repeated) =
+            self.sql_type_to_proto(&col.data_type, enums, composites, config);
 
         ProtoField {
             name: field_name,
@@ -238,6 +301,7 @@ impl ProtobufGenerator {
         &self,
         sql_type: &DataType,
         enums: &IndexMap<Iden, DbEnum>,
+        composites: &IndexMap<Iden, CompositeType>,
         config: &CodegenConfig,
     ) -> (String, bool) {
         if let Some(override_type) = self.overridden_type(sql_type, config) {
@@ -303,20 +367,20 @@ impl ProtobufGenerator {
             DataType::Interval => ("google.protobuf.Duration".to_string(), false),
 
             DataType::Array { element_type } => {
-                let (inner_type, _) = self.sql_type_to_proto(element_type, enums, config);
+                let (inner_type, _) = self.sql_type_to_proto(element_type, enums, composites, config);
                 (inner_type, true)
             }
 
             DataType::Enum { name, schema } => {
                 let proto_type = self
-                    .enum_type_name(name, schema, enums, config)
+                    .custom_type_name(name, schema, enums, composites, config)
                     .unwrap_or_else(|| "string".to_string());
                 (proto_type, false)
             }
 
             DataType::Custom { name, schema } => {
                 let proto_type = self
-                    .enum_type_name(name, schema, enums, config)
+                    .custom_type_name(name, schema, enums, composites, config)
                     .unwrap_or_else(|| "string".to_string());
                 (proto_type, false)
             }
@@ -450,19 +514,20 @@ mod tests {
     #[test]
     fn test_sql_type_to_proto() {
         let enums = IndexMap::new();
+        let composites = IndexMap::new();
         let config = CodegenConfig::default();
 
         let generator = ProtobufGenerator;
 
-        let (t, r) = generator.sql_type_to_proto(&DataType::Integer, &enums, &config);
+        let (t, r) = generator.sql_type_to_proto(&DataType::Integer, &enums, &composites, &config);
         assert_eq!(t, "int32");
         assert!(!r);
 
-        let (t, r) = generator.sql_type_to_proto(&DataType::BigInt, &enums, &config);
+        let (t, r) = generator.sql_type_to_proto(&DataType::BigInt, &enums, &composites, &config);
         assert_eq!(t, "int64");
         assert!(!r);
 
-        let (t, r) = generator.sql_type_to_proto(&DataType::Text, &enums, &config);
+        let (t, r) = generator.sql_type_to_proto(&DataType::Text, &enums, &composites, &config);
         assert_eq!(t, "string");
         assert!(!r);
 
@@ -472,6 +537,7 @@ mod tests {
                 with_timezone: true,
             },
             &enums,
+            &composites,
             &config,
         );
         assert_eq!(t, "google.protobuf.Timestamp");
@@ -482,6 +548,7 @@ mod tests {
                 element_type: Box::new(DataType::Integer),
             },
             &enums,
+            &composites,
             &config,
         );
         assert_eq!(t, "int32");
@@ -495,11 +562,13 @@ mod tests {
             Iden::new("user_status", Some("public".to_string())),
             DbEnum::with_values("user_status", vec!["active", "inactive"]),
         );
+        let composites = IndexMap::new();
         let config = CodegenConfig::default().type_override("jsonb", "JsonValue");
 
         let generator = ProtobufGenerator;
 
-        let (proto_type, repeated) = generator.sql_type_to_proto(&DataType::JsonB, &enums, &config);
+        let (proto_type, repeated) =
+            generator.sql_type_to_proto(&DataType::JsonB, &enums, &composites, &config);
         assert_eq!(proto_type, "JsonValue");
         assert!(!repeated);
 
@@ -509,9 +578,39 @@ mod tests {
                 schema: Some("public".to_string()),
             },
             &enums,
+            &composites,
             &config,
         );
         assert_eq!(proto_type, "UserStatus");
+        assert!(!repeated);
+    }
+
+    #[test]
+    fn test_sql_type_to_proto_resolves_composite_types() {
+        let enums = IndexMap::new();
+        let mut composites = IndexMap::new();
+        composites.insert(
+            Iden::new("address", Some("public".to_string())),
+            CompositeType {
+                name: "address".to_string(),
+                schema: Some("public".to_string()),
+                columns: vec![],
+                description: None,
+            },
+        );
+        let config = CodegenConfig::default();
+        let generator = ProtobufGenerator;
+
+        let (proto_type, repeated) = generator.sql_type_to_proto(
+            &DataType::Custom {
+                name: "address".to_string(),
+                schema: Some("public".to_string()),
+            },
+            &enums,
+            &composites,
+            &config,
+        );
+        assert_eq!(proto_type, "Address");
         assert!(!repeated);
     }
 
