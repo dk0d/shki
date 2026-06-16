@@ -10,6 +10,7 @@ use crate::Result;
 use crate::codegen::generator::apply_name_pattern;
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{CodegenConfig, OutputMode};
+use crate::display::preview::PreviewFile;
 
 use super::{GeneratedRust, RustStruct};
 
@@ -246,7 +247,7 @@ impl CodeWriter for RustWriter {
 
         let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
-        write!(file, "{}", self.format_preview(code))?;
+        write!(file, "{}", self.single_file_contents(code))?;
 
         Ok(vec![file_path])
     }
@@ -324,7 +325,7 @@ impl CodeWriter for RustWriter {
         Ok(written_files)
     }
 
-    fn format_preview(&self, code: &Self::GeneratedCode) -> String {
+    fn single_file_contents(&self, code: &Self::GeneratedCode) -> String {
         let mut output = String::new();
 
         writeln!(output, "{}", Self::HEADER).expect("writing to string should not fail");
@@ -338,6 +339,69 @@ impl CodeWriter for RustWriter {
         }
 
         output
+    }
+
+    fn preview_files(
+        &self,
+        code: &Self::GeneratedCode,
+        config: &CodegenConfig,
+    ) -> Vec<PreviewFile> {
+        let ext = self.file_extension();
+
+        match config.format {
+            OutputMode::File => vec![PreviewFile::new(
+                format!("{}.{}", self.default_filename(), ext),
+                self.single_file_contents(code),
+            )],
+            OutputMode::Module => {
+                let items = self.collect_generated_items(code, OutputMode::Module);
+                let mut files: Vec<PreviewFile> = items
+                    .iter()
+                    .map(|item| {
+                        PreviewFile::new(
+                            format!("{}.{}", item.module_name, ext),
+                            self.format_type_file(&item.imports, &item.content),
+                        )
+                    })
+                    .collect();
+
+                let mod_entries: Vec<ModuleEntry> = items
+                    .iter()
+                    .map(|item| ModuleEntry::new(&item.module_name, &item.type_name))
+                    .collect();
+                files.push(PreviewFile::new(
+                    "mod.rs",
+                    self.format_mod_file(&mod_entries),
+                ));
+                files
+            }
+            OutputMode::Modules => {
+                let items = self.collect_generated_items(code, OutputMode::Modules);
+                let mut files: Vec<PreviewFile> = items
+                    .iter()
+                    .map(|item| {
+                        PreviewFile::new(
+                            format!("{0}/{0}.{1}", item.module_name, ext),
+                            self.format_type_file(&item.imports, &item.content),
+                        )
+                    })
+                    .collect();
+
+                let mod_entries: Vec<ModuleEntry> = items
+                    .iter()
+                    .map(|item| ModuleEntry::new(&item.module_name, &item.type_name))
+                    .collect();
+                files.push(PreviewFile::new(
+                    "mod.rs",
+                    self.format_mod_file(&mod_entries),
+                ));
+                files
+            }
+        }
+    }
+
+    fn syntax_language(&self) -> &str {
+        "rust"
     }
 
     fn file_extension(&self) -> &str {
@@ -523,5 +587,47 @@ mod tests {
         assert!(!contents.contains("use super::address::Address;"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_file_mode_renders_a_single_labeled_file() {
+        let (code, _) = sample_code();
+        let config = CodegenConfig::default(); // defaults to OutputMode::File
+        let preview = RustWriter::new().format_preview(&code, &config, true);
+
+        assert!(preview.contains("1 file(s):"));
+        assert!(preview.contains("models.rs"));
+        assert!(preview.contains("pub struct User"));
+        // Single-file output is not split, so there is no mod.rs entry.
+        assert!(!preview.contains("mod.rs"));
+    }
+
+    #[test]
+    fn preview_module_mode_renders_separate_flat_files() {
+        let (code, _) = sample_code();
+        let config = CodegenConfig::default().mode(Some(OutputMode::Module));
+        let preview = RustWriter::new().format_preview(&code, &config, true);
+
+        // One file per type plus the module root, each under its own path label.
+        assert!(preview.contains("user.rs"));
+        assert!(preview.contains("address.rs"));
+        assert!(preview.contains("user_status.rs"));
+        assert!(preview.contains("mod.rs"));
+        // Flat layout reaches siblings one level up.
+        assert!(preview.contains("use super::address::Address;"));
+    }
+
+    #[test]
+    fn preview_modules_mode_renders_nested_files_with_two_level_imports() {
+        let (code, _) = sample_code();
+        let config = CodegenConfig::default().mode(Some(OutputMode::Modules));
+        let preview = RustWriter::new().format_preview(&code, &config, true);
+
+        assert!(preview.contains("user/user.rs"));
+        assert!(preview.contains("address/address.rs"));
+        assert!(preview.contains("mod.rs"));
+        // Nested layout reaches siblings two levels up via the root re-export.
+        assert!(preview.contains("use super::super::Address;"));
+        assert!(!preview.contains("use super::address::Address;"));
     }
 }

@@ -50,7 +50,7 @@ pub struct CodegenConfig {
     pub type_overrides: IndexMap<String, String>,
 
     /// Whether to add serde derives and rename attributes
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub serde: bool,
 
     /// Whether to generate sqlx::FromRow derive
@@ -68,6 +68,9 @@ pub struct CodegenConfig {
     /// The pattern to use for  building impl file in modules format: defaults to `impl_{}.rs`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub impl_pattern: Option<String>,
+
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
+    pub preview: bool,
 }
 
 /// Output mode for generated code
@@ -162,6 +165,7 @@ impl Default for CodegenConfig {
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
             impl_pattern: None,
+            preview: false,
         }
     }
 }

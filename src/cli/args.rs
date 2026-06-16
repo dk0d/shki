@@ -124,6 +124,10 @@ pub struct CodegenArgs {
     /// Disable sqlx derives
     #[arg(long = "no-sqlx", action = ArgAction::SetTrue)]
     pub no_sqlx: bool,
+
+    /// Preview the output without writing anything
+    #[arg(long, action = ArgAction::SetFalse)]
+    pub preview: bool,
 }
 
 impl CodegenArgs {

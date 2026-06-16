@@ -9,8 +9,9 @@ use std::{fs, io::Write as _};
 use heck::ToSnakeCase;
 
 use crate::Result;
-use crate::codegen::CodegenConfig;
 use crate::codegen::writer::CodeWriter;
+use crate::codegen::{CodegenConfig, OutputMode};
+use crate::display::preview::PreviewFile;
 
 use super::{GeneratedTypeScript, TypeScriptInterface, TypescriptFlavor};
 
@@ -195,7 +196,7 @@ impl CodeWriter for TypeScriptWriter {
 
         let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
-        write!(file, "{}", self.format_preview(code))?;
+        write!(file, "{}", self.single_file_contents(code))?;
 
         println!("Generated TypeScript types: {}", file_path.display());
 
@@ -246,7 +247,7 @@ impl CodeWriter for TypeScriptWriter {
         self.write_single_module(code, output_dir, config)
     }
 
-    fn format_preview(&self, code: &Self::GeneratedCode) -> String {
+    fn single_file_contents(&self, code: &Self::GeneratedCode) -> String {
         let mut output = String::new();
 
         writeln!(output, "{}", Self::HEADER).expect("writing to string should not fail");
@@ -257,6 +258,49 @@ impl CodeWriter for TypeScriptWriter {
         }
 
         output
+    }
+
+    fn preview_files(
+        &self,
+        code: &Self::GeneratedCode,
+        config: &CodegenConfig,
+    ) -> Vec<PreviewFile> {
+        let ext = self.file_extension();
+
+        // TypeScript only distinguishes single-file from a flat module
+        // directory (nested `Modules` is treated as a single module), so any
+        // non-`File` mode previews the per-type files plus the `index.ts`.
+        if config.format == OutputMode::File {
+            return vec![PreviewFile::new(
+                format!("{}.{}", self.default_filename(), ext),
+                self.single_file_contents(code),
+            )];
+        }
+
+        let items = self.collect_generated_items(code);
+        let mut files: Vec<PreviewFile> = items
+            .iter()
+            .map(|item| {
+                PreviewFile::new(
+                    format!("{}.{}", item.module_name, ext),
+                    self.format_type_file(&item.imports, &item.content),
+                )
+            })
+            .collect();
+
+        let exports: Vec<ExportEntry> = items
+            .iter()
+            .map(|item| ExportEntry::new(&item.module_name, &item.type_name))
+            .collect();
+        files.push(PreviewFile::new(
+            "index.ts",
+            self.format_index_file(&exports),
+        ));
+        files
+    }
+
+    fn syntax_language(&self) -> &str {
+        "typescript"
     }
 
     fn file_extension(&self) -> &str {
@@ -387,5 +431,29 @@ mod tests {
         assert!(contents.contains("import { Address } from './address';"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_file_mode_renders_a_single_labeled_file() {
+        let (code, _) = sample_code();
+        let config = CodegenConfig::default(); // defaults to OutputMode::File
+        let preview = TypeScriptWriter.format_preview(&code, &config, true);
+
+        assert!(preview.contains("1 file(s):"));
+        assert!(preview.contains("models.ts"));
+        assert!(preview.contains("interface User"));
+        assert!(!preview.contains("index.ts"));
+    }
+
+    #[test]
+    fn preview_module_mode_renders_separate_files_with_index() {
+        let (code, _) = sample_code();
+        let config = CodegenConfig::default().mode(Some(OutputMode::Module));
+        let preview = TypeScriptWriter.format_preview(&code, &config, true);
+
+        assert!(preview.contains("user.ts"));
+        assert!(preview.contains("address.ts"));
+        assert!(preview.contains("index.ts"));
+        assert!(preview.contains("import { Address } from './address';"));
     }
 }

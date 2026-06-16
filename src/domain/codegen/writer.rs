@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::display::preview::{PreviewFile, render_preview};
 use crate::{Result, ShkiError};
 
 use super::config::{CodegenConfig, OutputMode};
@@ -60,8 +61,32 @@ pub trait CodeWriter {
         self.write_single_module(code, output_dir, config)
     }
 
-    /// Format generated code as a string for preview/stdout
-    fn format_preview(&self, code: &Self::GeneratedCode) -> String;
+    /// Raw contents of the single-file output, exactly as written to disk in
+    /// [`OutputMode::File`]. Used both for writing and as the File-mode preview.
+    fn single_file_contents(&self, code: &Self::GeneratedCode) -> String;
+
+    /// The files this writer would produce for `config.format`, used to build a
+    /// preview that reflects the real on-disk layout.
+    fn preview_files(&self, code: &Self::GeneratedCode, config: &CodegenConfig)
+    -> Vec<PreviewFile>;
+
+    /// The `bat` language token used to syntax-highlight previews.
+    fn syntax_language(&self) -> &str;
+
+    /// Format generated code as a string for preview/stdout, highlighting each
+    /// file and reflecting whether output is split across separate files.
+    fn format_preview(
+        &self,
+        code: &Self::GeneratedCode,
+        config: &CodegenConfig,
+        no_color: bool,
+    ) -> String {
+        render_preview(
+            &self.preview_files(code, config),
+            self.syntax_language(),
+            no_color,
+        )
+    }
 
     /// Get the file extension for this language (without dot)
     fn file_extension(&self) -> &str;

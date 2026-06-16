@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -5,8 +6,9 @@ use std::path::{Path, PathBuf};
 use heck::ToSnakeCase;
 
 use crate::Result;
-use crate::codegen::CodegenConfig;
 use crate::codegen::writer::CodeWriter;
+use crate::codegen::{CodegenConfig, OutputMode};
+use crate::display::preview::PreviewFile;
 
 use super::{GeneratedProto, ProtoMessage};
 
@@ -48,29 +50,55 @@ impl ProtobufWriter {
         imports
     }
 
-    fn write_type_file(
-        file_path: &Path,
+    /// Build the contents of a per-type `.proto` file: header, syntax/package
+    /// preamble, imports, then the type definition.
+    fn format_type_file(
         package: &str,
         imports: &[String],
         content: &impl std::fmt::Display,
-    ) -> Result<()> {
-        let mut file = fs::File::create(file_path)?;
+    ) -> String {
+        let mut output = String::new();
 
-        writeln!(file, "{}", Self::HEADER)?;
-        writeln!(file)?;
-        writeln!(file, "syntax = \"proto3\";\n")?;
-        writeln!(file, "package {};\n", package)?;
+        writeln!(output, "{}", Self::HEADER).expect("writing to string should not fail");
+        writeln!(output).expect("writing to string should not fail");
+        writeln!(output, "syntax = \"proto3\";\n").expect("writing to string should not fail");
+        writeln!(output, "package {};\n", package).expect("writing to string should not fail");
 
         if !imports.is_empty() {
             for import in imports {
-                writeln!(file, "import \"{}\";", import)?;
+                writeln!(output, "import \"{}\";", import)
+                    .expect("writing to string should not fail");
             }
-            writeln!(file)?;
+            writeln!(output).expect("writing to string should not fail");
         }
 
-        write!(file, "{}", content)?;
+        write!(output, "{}", content).expect("writing to string should not fail");
 
-        Ok(())
+        output
+    }
+
+    /// The per-type files this writer produces in module modes (one file per
+    /// enum and message), used for both writing and previewing.
+    fn type_files(&self, code: &GeneratedProto) -> Vec<PreviewFile> {
+        let ext = self.file_extension();
+        let mut files = Vec::new();
+
+        for proto_enum in code.enums.values() {
+            files.push(PreviewFile::new(
+                format!("{}.{}", proto_enum.name.to_snake_case(), ext),
+                Self::format_type_file(&code.package, &[], proto_enum),
+            ));
+        }
+
+        for proto_message in code.messages.values() {
+            let imports = Self::collect_message_imports(proto_message, code);
+            files.push(PreviewFile::new(
+                format!("{}.{}", proto_message.name.to_snake_case(), ext),
+                Self::format_type_file(&code.package, &imports, proto_message),
+            ));
+        }
+
+        files
     }
 }
 
@@ -87,10 +115,7 @@ impl CodeWriter for ProtobufWriter {
 
         let file_path = self.output_file_path(output_dir);
         let mut file = fs::File::create(&file_path)?;
-
-        writeln!(file, "{}", Self::HEADER)?;
-        writeln!(file)?;
-        write!(file, "{}", code)?;
+        write!(file, "{}", self.single_file_contents(code))?;
 
         println!(
             "Generated Protocol Buffer definitions: {}",
@@ -110,24 +135,10 @@ impl CodeWriter for ProtobufWriter {
 
         let mut written_files = Vec::new();
 
-        for proto_enum in code.enums.values() {
-            let file_path = output_dir.join(format!(
-                "{}.{}",
-                proto_enum.name.to_snake_case(),
-                self.file_extension()
-            ));
-            Self::write_type_file(&file_path, &code.package, &[], proto_enum)?;
-            written_files.push(file_path);
-        }
-
-        for proto_message in code.messages.values() {
-            let file_path = output_dir.join(format!(
-                "{}.{}",
-                proto_message.name.to_snake_case(),
-                self.file_extension()
-            ));
-            let imports = Self::collect_message_imports(proto_message, code);
-            Self::write_type_file(&file_path, &code.package, &imports, proto_message)?;
+        for file in self.type_files(code) {
+            let file_path = output_dir.join(&file.path);
+            let mut handle = fs::File::create(&file_path)?;
+            write!(handle, "{}", file.content)?;
             written_files.push(file_path);
         }
 
@@ -140,8 +151,26 @@ impl CodeWriter for ProtobufWriter {
         Ok(written_files)
     }
 
-    fn format_preview(&self, code: &Self::GeneratedCode) -> String {
+    fn single_file_contents(&self, code: &Self::GeneratedCode) -> String {
         format!("{}\n\n{}", Self::HEADER, code)
+    }
+
+    fn preview_files(
+        &self,
+        code: &Self::GeneratedCode,
+        config: &CodegenConfig,
+    ) -> Vec<PreviewFile> {
+        match config.format {
+            OutputMode::File => vec![PreviewFile::new(
+                format!("{}.{}", self.default_filename(), self.file_extension()),
+                self.single_file_contents(code),
+            )],
+            OutputMode::Module | OutputMode::Modules => self.type_files(code),
+        }
+    }
+
+    fn syntax_language(&self) -> &str {
+        "protobuf"
     }
 
     fn file_extension(&self) -> &str {
@@ -150,5 +179,52 @@ impl CodeWriter for ProtobufWriter {
 
     fn default_filename(&self) -> &str {
         "schema"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::ProtobufGenerator;
+    use super::*;
+    use crate::codegen::generator::CodeGenerator;
+    use crate::models::iden::Iden;
+    use crate::schema::{Column, DataType, SqlDialect, Table};
+    use crate::snapshots::Snapshot;
+
+    fn sample_code() -> GeneratedProto {
+        let mut users = Table::new("users");
+        users.column(Column::new("id", DataType::Integer).not_null());
+        let mut orders = Table::new("orders");
+        orders.column(Column::new("id", DataType::Integer).not_null());
+
+        let mut snapshot = Snapshot::new(SqlDialect::Postgres);
+        snapshot.insert_table(Iden::new("users", None), users);
+        snapshot.insert_table(Iden::new("orders", None), orders);
+
+        ProtobufGenerator::new().generate(&snapshot, &CodegenConfig::default())
+    }
+
+    #[test]
+    fn preview_file_mode_renders_a_single_labeled_file() {
+        let code = sample_code();
+        let config = CodegenConfig::default(); // defaults to OutputMode::File
+        let preview = ProtobufWriter.format_preview(&code, &config, true);
+
+        assert!(preview.contains("1 file(s):"));
+        assert!(preview.contains("schema.proto"));
+        assert!(preview.contains("message User"));
+        assert!(preview.contains("message Order"));
+    }
+
+    #[test]
+    fn preview_module_mode_renders_one_file_per_message() {
+        let code = sample_code();
+        let config = CodegenConfig::default().mode(Some(OutputMode::Module));
+        let preview = ProtobufWriter.format_preview(&code, &config, true);
+
+        // Each message lands in its own labeled file, each a full proto file.
+        assert!(preview.contains("user.proto"));
+        assert!(preview.contains("order.proto"));
+        assert_eq!(preview.matches("syntax = \"proto3\";").count(), 2);
     }
 }

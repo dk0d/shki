@@ -23,7 +23,8 @@ fn run_codegen<G, W>(
     writer: W,
     snapshot: &Snapshot,
     config: &CodegenConfig,
-    verbose: bool,
+    preview: bool,
+    no_color: bool,
 ) -> Result<()>
 where
     G: CodeGenerator,
@@ -31,8 +32,9 @@ where
 {
     let generated = generator.generate(snapshot, config);
 
-    if verbose {
-        println!("{}", writer.format_preview(&generated));
+    if preview {
+        println!("{}", writer.format_preview(&generated, config, no_color));
+        return Ok(());
     }
 
     if config.output.is_none() {
@@ -65,21 +67,24 @@ pub async fn cmd_codegen(
             RustWriter,
             &snapshot,
             gen_config,
-            config.verbose,
+            config.codegen.preview,
+            config.no_color,
         ),
         CodegenLanguage::Protobuf => run_codegen(
             ProtobufGenerator::new(),
             ProtobufWriter,
             &snapshot,
             gen_config,
-            config.verbose,
+            config.codegen.preview,
+            config.no_color,
         ),
         CodegenLanguage::Typescript { flavor } => run_codegen(
             TypeScriptGenerator::new(flavor),
             TypeScriptWriter,
             &snapshot,
             gen_config,
-            config.verbose,
+            config.codegen.preview,
+            config.no_color,
         ),
     }
 }

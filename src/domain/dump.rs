@@ -20,6 +20,8 @@ use colored::Colorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+use super::display::preview::{PreviewFile, render_preview};
+
 #[derive(Debug, clap::ValueEnum, Default, Clone, Serialize)]
 #[value(rename_all = "lowercase")]
 pub enum SchemaExportFormat {
@@ -129,45 +131,14 @@ pub fn write_directory_schema(snapshot: &Snapshot, output: &Path, force: bool) -
 }
 
 pub fn render_directory_schema_preview(config: &Config, snapshot: &Snapshot) -> Result<String> {
-    let files = directory_schema_files(snapshot)?;
-    let count = files.len().to_string();
-    let count = if config.no_color {
-        count
-    } else {
-        count.cyan().to_string()
-    };
-    let mut output = format!("Directory Schema would create {} files:\n", count);
-
-    for file in files {
-        let (name, content) = if config.no_color {
-            (format!("-- {}", file.path.to_string_lossy()), file.content)
-        } else {
-            let content = {
-                let mut buffer = String::new();
-                let res = bat::PrettyPrinter::new()
-                    .input_from_bytes(file.content.as_bytes())
-                    .language("sql")
-                    .print_with_writer(Some(&mut buffer));
-                match res {
-                    Ok(ok) => {
-                        if ok {
-                            buffer
-                        } else {
-                            file.content
-                        }
-                    }
-                    Err(_) => file.content,
-                }
-            };
-
-            (
-                format!("{} {}", "--".dimmed(), file.path.to_string_lossy().dimmed()),
-                content,
-            )
-        };
-        output.push_str(&format!("\n{}\n{}", name, content));
-    }
-
+    let files: Vec<PreviewFile> = directory_schema_files(snapshot)?
+        .into_iter()
+        .map(|f| PreviewFile {
+            path: f.path.to_string_lossy().to_string(),
+            content: f.content,
+        })
+        .collect();
+    let output = render_preview(&files, "sql", config.no_color);
     Ok(output)
 }
 
@@ -955,10 +926,10 @@ mod tests {
         )
         .expect("Directory Schema preview should render");
 
-        assert!(preview.contains("Directory Schema would create 2 files:"));
-        assert!(preview.contains("-- main.sql"));
+        assert!(preview.contains("2 file(s):"));
+        assert!(preview.contains("main.sql"));
         assert!(preview.contains("\\i public/tables/users.sql"));
-        assert!(preview.contains("-- public/tables/users.sql"));
+        assert!(preview.contains("public/tables/users.sql"));
         assert!(preview.contains("CREATE TABLE \"public\".\"users\""));
     }
 
