@@ -1,7 +1,10 @@
+//! Create a baseline migration to start authoring migrations from an exising database.
+//!
+//! Use [`crate::adopt`] to apply the baseline and any new migrations on top.
 use colored::Colorize;
 
 use crate::config::Config;
-use crate::diff::{diff_preview, diff_snapshots, load_latest_snapshot};
+use crate::diff::diff_snapshots;
 use crate::dump::{render_directory_schema_preview, write_directory_schema};
 use crate::engines::Engine;
 use crate::generate::write_schema_migration;
@@ -15,58 +18,38 @@ use crate::{Result, ShkiError};
 
 use super::diff::SchemaDiff;
 
-fn print_applied(name: &str) {
-    println!(
-        "\n{} {} {}",
-        "✔".green(),
-        name,
-        "marked as applied".dimmed()
-    );
-}
-
+/// Author an initial baseline migration from an existing database.
+///
+/// This introspects a reference database (typically dev/staging) and writes the
+/// baseline artifacts — Directory Schema, initial migration SQL, Snapshot JSON, and
+/// Journal entry — that get committed to the repository. It never mutates the target
+/// database. Adopting a live environment against these artifacts is the job of the
+/// `adopt` command, and fresh environments simply run the baseline via `migrate`.
 pub async fn cmd_bootstrap(
     config: &Config,
     name: Option<&str>,
-    mark_applied: bool,
-    mark_only: bool,
     dry_run: bool,
     force: bool,
     schema: &Option<String>,
 ) -> Result<()> {
     config.display_sanitized_db_url();
 
-    println!("{}", "Bootstrapping from database shape...\n".cyan());
+    println!("{}", "Authoring baseline from database shape...\n".cyan());
 
     let engine = Engine::from_config(config).await?;
     let snapshot = engine.introspect(config, schema).await?;
 
     let manager = MigrationManager::from_config(config).await?;
 
-    let plan = plan_bootstrap(config, &manager, &snapshot, mark_only, name, force)?;
+    let plan = plan_bootstrap(config, &manager, &snapshot, name, force)?;
 
     if dry_run {
         println!("Initial migration: {}", plan.migration_name);
         println!("Schema path:       {}", config.schema_path().display());
         println!("Migration path:    {}", plan.up_path.display());
         println!("Snapshot path:     {}", plan.snapshot_path.display());
-        println!("Mark applied:      {}", mark_applied);
         println!();
         println!("{}", render_directory_schema_preview(config, &snapshot)?);
-        return Ok(());
-    }
-
-    if mark_only {
-        let latest_snapshot = load_latest_snapshot(config)?;
-        let diff = diff_snapshots(&latest_snapshot, &snapshot)?;
-        if !diff.is_empty() {
-            let preview = diff_preview(config, &diff)?;
-            println!("{}", &preview);
-            return Err(ShkiError::migration(
-                "Schema changes found, cannot mark applied",
-            ));
-        }
-        manager.mark_migration_applied(&plan.up_path).await?;
-        print_applied(&latest_snapshot.migration.expect("must have info").name);
         return Ok(());
     }
 
@@ -77,10 +60,6 @@ pub async fn cmd_bootstrap(
     }
 
     let result = write_bootstrap_artifacts(config, &manager, plan, snapshot, force)?;
-
-    if mark_applied {
-        manager.mark_migration_applied(&result.up_path).await?;
-    }
 
     println!(
         "{} {}",
@@ -94,9 +73,11 @@ pub async fn cmd_bootstrap(
     );
     println!("\nUp:       {}", result.up_path.display());
     println!("Snapshot: {}", result.snapshot_path.display());
-    if mark_applied {
-        print_applied(&result.migration_name);
-    }
+    println!(
+        "\n{}",
+        "Commit these artifacts. Adopt an existing database with `shki adopt`, or run `shki migrate` on a fresh one."
+            .dimmed()
+    );
 
     Ok(())
 }
@@ -121,11 +102,10 @@ fn plan_bootstrap(
     config: &Config,
     manager: &MigrationManager,
     snapshot: &Snapshot,
-    mark_only: bool,
     name: Option<&str>,
     force: bool,
 ) -> Result<BootstrapPlan> {
-    if !force && !manager.list_up_migrations()?.is_empty() && !mark_only {
+    if !force && !manager.list_up_migrations()?.is_empty() {
         return Err(ShkiError::migration(
             "bootstrap requires an empty migrations directory; use --force to append a bootstrap migration",
         ));
@@ -133,12 +113,8 @@ fn plan_bootstrap(
     let empty = Snapshot::new(config.dialect);
     let diff = diff_snapshots(&empty, snapshot)?;
 
-    let migration_name = if mark_only {
-        latest_schema_migration_name(manager)?
-    } else {
-        let suffix = sanitize_migration_name(name.unwrap_or("bootstrap"));
-        manager.next_migration_name(Some(&suffix))?
-    };
+    let suffix = sanitize_migration_name(name.unwrap_or("bootstrap"));
+    let migration_name = manager.next_migration_name(Some(&suffix))?;
     let up_path = manager.out_dir.join(format!("{}.sql", migration_name));
     let snapshot_path = manager
         .meta_dir()
@@ -150,21 +126,6 @@ fn plan_bootstrap(
         snapshot_path,
         diff,
     })
-}
-
-fn latest_schema_migration_name(manager: &MigrationManager) -> Result<String> {
-    manager
-        .load_journal()?
-        .entries
-        .iter()
-        .rev()
-        .find(|entry| entry.kind == MigrationKind::Schema)
-        .map(|entry| entry.migration.clone())
-        .ok_or_else(|| {
-            ShkiError::migration(
-                "bootstrap --mark-only requires an existing schema migration in the journal",
-            )
-        })
 }
 
 fn write_bootstrap_artifacts(
@@ -238,8 +199,8 @@ mod tests {
         let snapshot = test_snapshot();
         let force = false;
         let name = "initial";
-        let plan = plan_bootstrap(&config, &manager, &snapshot, false, Some(name), force)
-            .expect("planned");
+        let plan =
+            plan_bootstrap(&config, &manager, &snapshot, Some(name), force).expect("planned");
         let result = write_bootstrap_artifacts(&config, &manager, plan, snapshot, force)
             .expect("bootstrap artifacts should write");
 
@@ -270,26 +231,8 @@ mod tests {
         let snapshot = test_snapshot();
         let force = false;
         let name = "inital";
-        let error = plan_bootstrap(&config, &manager, &snapshot, false, Some(name), force)
+        let error = plan_bootstrap(&config, &manager, &snapshot, Some(name), force)
             .expect_err("planned error");
         assert!(error.to_string().contains("empty migrations directory"));
-    }
-
-    #[test]
-    fn mark_only_uses_latest_schema_migration_from_journal() {
-        let temp = TempDir::new().expect("temp dir");
-        let config = test_config(temp.path());
-        let manager = test_manager(&config);
-        let snapshot = test_snapshot();
-        let plan = plan_bootstrap(&config, &manager, &snapshot, false, Some("initial"), false)
-            .expect("planned");
-        let result = write_bootstrap_artifacts(&config, &manager, plan, snapshot.clone(), false)
-            .expect("bootstrap artifacts should write");
-
-        let mark_only_plan = plan_bootstrap(&config, &manager, &snapshot, true, None, false)
-            .expect("mark-only plan should use existing migration");
-
-        assert_eq!(mark_only_plan.migration_name, result.migration_name);
-        assert_eq!(mark_only_plan.up_path, result.up_path);
     }
 }

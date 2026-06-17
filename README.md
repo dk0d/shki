@@ -3,7 +3,7 @@
 </div>
 
 > [!WARNING]
-> `shki` is still a work in progress. Declarative Schema support is active, but some deeper diff/render coverage and adoption workflows are still being built.
+> `shki` is still a work in progress. Declarative Schema support is active, but some deeper diff/render coverage and validation workflows are still being built.
 
 # shki
 
@@ -157,20 +157,22 @@ Command-scoped options:
 - `migrate` accepts `--dry` and optional mode subcommands: `all`, `steps <NUM>`, and `to <NAME>`.
 - `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, `--serde`, `--sqlx`, and `--no-sqlx`.
 
-| Command                    | Alias  | Purpose                                                                                                              |
-| -------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| `config`                   | `conf` | Print the effective configuration                                                                                    |
-| `init [path]`              | `i`    | Initialize a project directory with config, schema, migrations metadata, and Postgres editor config where applicable |
-| `dump`                     | -      | Export live database shape as SQL, JSON, or Directory Schema                                                         |
-| `diff`                     | -      | Compile Declarative Schema and preview the Migration Plan                                                            |
-| `generate <name>`          | `gen`  | Generate schema-derived migration artifacts and a Snapshot                                                           |
-| `generate <name> --custom` | `gen`  | Create a Custom Migration                                                                                            |
-| `create <name>`            | `new`  | Create a Custom Migration for manual SQL editing                                                                     |
-| `migrate [mode]`           | `up`   | Apply all pending migrations, a limited number of pending migrations, or through a named pending migration           |
-| `status`                   | `s`    | Show migration status and checksum issues                                                                            |
-| `down [count]`             | -      | Apply Down Migrations for local rollback                                                                             |
-| `codegen`                  | `code` | Generate Rust, TypeScript, or Protobuf code from schema shape                                                        |
-| `drop [migration]`         | -      | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                |
+| Command                    | Alias      | Purpose                                                                                                                    |
+| -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `config`                   | `conf`     | Print the effective configuration                                                                                          |
+| `init [path]`              | `i`        | Initialize a project directory with config, schema, migrations metadata, and Postgres editor config where applicable       |
+| `dump`                     | -          | Export live database shape as SQL, JSON, or Directory Schema                                                               |
+| `diff`                     | -          | Compile Declarative Schema and preview the Migration Plan                                                                  |
+| `generate <name>`          | `gen`      | Generate schema-derived migration artifacts and a Snapshot                                                                 |
+| `generate <name> --custom` | `gen`      | Create a Custom Migration                                                                                                  |
+| `create <name>`            | `new`      | Create a Custom Migration for manual SQL editing                                                                           |
+| `migrate [mode]`           | `up`       | Apply all pending migrations, a limited number of pending migrations, or through a named pending migration                 |
+| `bootstrap [name]`         | `strap`    | Author an initial baseline migration from an existing database (writes artifacts only; never touches the target DB)        |
+| `adopt [name]`             | `baseline` | Adopt an existing database at a committed baseline (validate, mark applied without executing), then apply newer migrations |
+| `status`                   | `s`        | Show migration status and checksum issues                                                                                  |
+| `down [count]`             | -          | Apply Down Migrations for local rollback                                                                                   |
+| `codegen`                  | `code`     | Generate Rust, TypeScript, or Protobuf code from schema shape                                                              |
+| `drop [migration]`         | -          | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                      |
 
 ## Usage Patterns
 
@@ -257,6 +259,35 @@ Preview what would be applied without changing the database:
 shki migrate --dry
 shki migrate --dry steps 1
 ```
+
+### Adopt An Existing Database
+
+When a project already has a live database that predates `shki`, capture its shape
+once as a baseline and commit the artifacts:
+
+```bash
+shki bootstrap            # introspect a dev/staging database, write the baseline
+```
+
+`bootstrap` only authors files — the initial migration, its Snapshot, the Directory
+Schema, and the Journal entry. It never writes to the database. After this you no
+longer need the original database; keep evolving the schema with `generate`/`create`.
+
+Deploying to environments then depends on the target's state:
+
+```bash
+# Existing environment (already has the baseline schema):
+shki adopt                # validate live shape == baseline, mark baseline applied, apply newer migrations
+
+# Brand-new / empty environment:
+shki migrate              # runs the baseline like any other migration, then the rest
+```
+
+`adopt` introspects the target, refuses if the live shape drifts from the committed
+baseline Snapshot (override with `--force`), records the baseline as applied _without
+executing_ it, and then applies any newer migrations. Use `--mark-only` to stop after
+marking, `--dry-run` to preview, or pass a migration name to adopt up to a specific
+point. `adopt` is idempotent — re-running it only applies what is still pending.
 
 ### Roll Back During Development
 
@@ -446,11 +477,11 @@ Implemented or active:
 - `dump` for SQL, JSON, and Directory Schema export.
 - `drop` for removing local migration artifacts and Journal entries.
 - Migration runner, status, checksum validation, and Down Migrations.
+- `bootstrap` to author a baseline from an existing database, and `adopt` to validate and adopt an existing environment against it.
 - Code generation from current Declarative Schema or Snapshot JSON for Rust, TypeScript, and Protobuf.
 
 Still in progress:
 
-- Bootstrap workflows for adopting an existing database.
 - Validation workflows for comparing Declarative Schema, Snapshot history, migration artifacts, and live database shape.
 - Full diff/render semantics for every PostgreSQL Catalog object represented by Dump.
 - Declarative Schema generation for MySQL and SQLite.

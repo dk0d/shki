@@ -84,23 +84,24 @@ pub async fn run(cli: Cli) -> Result<()> {
         Commands::Bootstrap {
             migrations,
             name,
-            no_mark_applied,
-            mark_only,
             dry_run,
             force,
             schema,
         } => {
             let config = config.with_migration_args(&migrations)?;
-            bootstrap::cmd_bootstrap(
-                &config,
-                name.as_deref(),
-                !no_mark_applied,
-                mark_only,
-                dry_run,
-                force,
-                &schema,
-            )
-            .await
+            bootstrap::cmd_bootstrap(&config, name.as_deref(), dry_run, force, &schema).await
+        }
+
+        Commands::Adopt {
+            migrations,
+            name,
+            mark_only,
+            force,
+            dry_run,
+            schema,
+        } => {
+            let config = config.with_migration_args(&migrations)?;
+            adopt::cmd_adopt(&config, name.as_deref(), mark_only, force, dry_run, &schema).await
         }
 
         Commands::Diff { shadow } => {

@@ -1,3 +1,4 @@
+pub mod adopt;
 pub mod bootstrap;
 pub mod codegen;
 pub mod compiler;

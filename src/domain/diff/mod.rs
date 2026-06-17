@@ -42,9 +42,15 @@ pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
         return Ok(Snapshot::new(config.dialect));
     };
 
-    let snapshot_path = manager
-        .meta_dir()
-        .join(format!("{}.snapshot.json", entry.migration));
+    load_snapshot_by_name(config, &entry.migration)
+}
+
+/// Load the committed Snapshot recorded for a specific migration name.
+pub fn load_snapshot_by_name(config: &Config, migration: &str) -> Result<Snapshot> {
+    let snapshot_path = config
+        .out_dir()
+        .join("_meta")
+        .join(format!("{}.snapshot.json", migration));
     let content = std::fs::read_to_string(&snapshot_path).map_err(|err| {
         ShkiError::schema(format!(
             "Failed to read baseline Snapshot {}: {}",

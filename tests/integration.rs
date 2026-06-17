@@ -2106,3 +2106,243 @@ async fn compiler_consumes_directory_schema_with_i_includes() {
     shadow.cleanup().await;
     ctx.cleanup().await;
 }
+
+// --- Bootstrap (authoring) and Adopt (environment adoption) ---------------
+
+fn seed_table_sql(schema: &str, table: &str) -> String {
+    format!("CREATE TABLE \"{schema}\".\"{table}\" (id integer primary key, name varchar(255) not null);")
+}
+
+#[tokio::test]
+async fn postgres_bootstrap_authors_baseline_without_touching_db() {
+    let ctx = PgTestContext::setup("bootstrap_author").await;
+    let config_path = ctx.write_config();
+    let schema = ctx.migration_schema().expect("schema").to_string();
+    let users = ctx.unique_name("users");
+
+    ctx.pg_pool
+        .execute(AssertSqlSafe(seed_table_sql(&schema, &users)))
+        .await
+        .expect("failed to seed existing schema");
+
+    run(shki::Cli {
+        config: config_path,
+        common: ctx.common_args(),
+        command: Commands::Bootstrap {
+            migrations: Default::default(),
+            name: None,
+            dry_run: false,
+            force: false,
+            schema: Some(schema.clone()),
+        },
+    })
+    .await
+    .expect("bootstrap should author baseline artifacts");
+
+    // Artifacts written.
+    let up_path = ctx.migrations_dir().join("0000_bootstrap.sql");
+    let snapshot_path = ctx
+        .migrations_dir()
+        .join("_meta")
+        .join("0000_bootstrap.snapshot.json");
+    assert!(up_path.exists(), "baseline migration should be written");
+    assert!(snapshot_path.exists(), "baseline snapshot should be written");
+    let up_sql = std::fs::read_to_string(&up_path).expect("read baseline migration");
+    assert!(up_sql.contains("CREATE TABLE"));
+    assert!(up_sql.contains(&users));
+
+    let manager = ctx.manager();
+    let journal = manager.load_journal().expect("journal should load");
+    assert_eq!(journal.entries.len(), 1);
+    assert_eq!(journal.entries[0].migration, "0000_bootstrap");
+    assert_eq!(journal.entries[0].kind, MigrationKind::Schema);
+
+    // Bootstrap must not touch the target database.
+    assert!(
+        !ctx.migration_table_exists(&manager).await,
+        "bootstrap should not create the migrations table"
+    );
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_adopt_marks_baseline_and_applies_newer_migration() {
+    let ctx = PgTestContext::setup("adopt_marks_baseline").await;
+    let config_path = ctx.write_config();
+    let schema = ctx.migration_schema().expect("schema").to_string();
+    let users = ctx.unique_name("users");
+    let posts = ctx.unique_name("posts");
+
+    ctx.pg_pool
+        .execute(AssertSqlSafe(seed_table_sql(&schema, &users)))
+        .await
+        .expect("failed to seed existing schema");
+
+    // Author the baseline from the existing database.
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: ctx.common_args(),
+        command: Commands::Bootstrap {
+            migrations: Default::default(),
+            name: None,
+            dry_run: false,
+            force: false,
+            schema: Some(schema.clone()),
+        },
+    })
+    .await
+    .expect("bootstrap should author baseline");
+
+    // A newer shki migration is created after the baseline.
+    ctx.write_migration(
+        "0001_create_posts.sql",
+        &format!("CREATE TABLE \"{schema}\".\"{posts}\" (id integer primary key);"),
+    );
+
+    // Adopt the existing database: validate, mark baseline applied, apply the rest.
+    run(shki::Cli {
+        config: config_path,
+        common: ctx.common_args(),
+        command: Commands::Adopt {
+            migrations: Default::default(),
+            name: None,
+            mark_only: false,
+            force: false,
+            dry_run: false,
+            schema: Some(schema.clone()),
+        },
+    })
+    .await
+    .expect("adopt should validate, mark baseline, and apply newer migration");
+
+    let manager = ctx.manager();
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0000_bootstrap".to_string(), "0001_create_posts".to_string()]
+    );
+    // Baseline table was never re-run, and the newer migration created its table.
+    assert!(ctx.table_exists(&users).await);
+    assert!(ctx.table_exists(&posts).await);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_adopt_refuses_on_drift_then_succeeds_with_force() {
+    let ctx = PgTestContext::setup("adopt_drift").await;
+    let config_path = ctx.write_config();
+    let schema = ctx.migration_schema().expect("schema").to_string();
+    let users = ctx.unique_name("users");
+    let drift = ctx.unique_name("drift");
+
+    ctx.pg_pool
+        .execute(AssertSqlSafe(seed_table_sql(&schema, &users)))
+        .await
+        .expect("failed to seed existing schema");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: ctx.common_args(),
+        command: Commands::Bootstrap {
+            migrations: Default::default(),
+            name: None,
+            dry_run: false,
+            force: false,
+            schema: Some(schema.clone()),
+        },
+    })
+    .await
+    .expect("bootstrap should author baseline");
+
+    // Introduce drift: the live database now has a table the baseline doesn't.
+    ctx.pg_pool
+        .execute(AssertSqlSafe(format!(
+            "CREATE TABLE \"{schema}\".\"{drift}\" (id integer primary key);"
+        )))
+        .await
+        .expect("failed to introduce drift");
+
+    let adopt_cli = |force: bool| shki::Cli {
+        config: config_path.clone(),
+        common: ctx.common_args(),
+        command: Commands::Adopt {
+            migrations: Default::default(),
+            name: None,
+            mark_only: false,
+            force,
+            dry_run: false,
+            schema: Some(schema.clone()),
+        },
+    };
+
+    let error = run(adopt_cli(false))
+        .await
+        .expect_err("adopt should refuse when the live database drifts from the baseline");
+    assert!(error.to_string().contains("differs from"));
+
+    let manager = ctx.manager();
+    assert!(
+        !ctx.migration_table_exists(&manager).await,
+        "a refused adopt should not record anything"
+    );
+
+    run(adopt_cli(true))
+        .await
+        .expect("adopt --force should proceed despite drift");
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0000_bootstrap".to_string()]
+    );
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_fresh_environment_runs_baseline_via_migrate() {
+    let ctx = PgTestContext::setup("fresh_env_migrate").await;
+    let config_path = ctx.write_config();
+    let schema = ctx.migration_schema().expect("schema").to_string();
+    let users = ctx.unique_name("users");
+
+    ctx.pg_pool
+        .execute(AssertSqlSafe(seed_table_sql(&schema, &users)))
+        .await
+        .expect("failed to seed existing schema");
+
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: ctx.common_args(),
+        command: Commands::Bootstrap {
+            migrations: Default::default(),
+            name: None,
+            dry_run: false,
+            force: false,
+            schema: Some(schema.clone()),
+        },
+    })
+    .await
+    .expect("bootstrap should author baseline");
+
+    // Simulate a fresh environment: drop the table so the baseline must recreate it.
+    ctx.pg_pool
+        .execute(AssertSqlSafe(format!("DROP TABLE \"{schema}\".\"{users}\";")))
+        .await
+        .expect("failed to reset to a fresh environment");
+    assert!(!ctx.table_exists(&users).await);
+
+    // On a fresh database the baseline runs like any migration. The baseline's
+    // `CREATE SCHEMA IF NOT EXISTS` tolerates the schema the migrations table lives in.
+    run(ctx.migrate_cli(config_path))
+        .await
+        .expect("migrate should run the baseline on a fresh database");
+
+    let manager = ctx.manager();
+    assert!(ctx.table_exists(&users).await);
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0000_bootstrap".to_string()]
+    );
+
+    ctx.cleanup().await;
+}

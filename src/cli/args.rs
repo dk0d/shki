@@ -312,7 +312,7 @@ pub enum Commands {
         schema: Option<String>,
     },
 
-    /// Bootstrap shki from an existing database state
+    /// Author an initial baseline migration from an existing database
     #[command(visible_alias = "strap")]
     Bootstrap {
         #[command(flatten)]
@@ -320,14 +320,6 @@ pub enum Commands {
 
         /// Migration name/suffix for the generated initial migration (defaults to 'bootstrap')
         name: Option<String>,
-
-        /// Do not record the generated bootstrap migration as already applied
-        #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
-        no_mark_applied: bool,
-
-        /// Only mark bootstrap as applied. Will only succeed if no schema changes.
-        #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
-        mark_only: bool,
 
         /// Show what would be generated without writing files or changing DB
         #[arg(long, short)]
@@ -338,6 +330,32 @@ pub enum Commands {
         force: bool,
 
         /// Schema to bootstrap (Postgres, defaults to public)
+        #[arg(long)]
+        schema: Option<String>,
+    },
+
+    /// Adopt an existing database at a committed baseline, then apply newer migrations
+    #[command(visible_alias = "baseline")]
+    Adopt {
+        #[command(flatten)]
+        migrations: MigrationArgs,
+
+        /// Migration to adopt up to (defaults to the earliest schema migration)
+        name: Option<String>,
+
+        /// Mark the baseline applied but do not apply newer pending migrations
+        #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
+        mark_only: bool,
+
+        /// Mark applied even if the live database differs from the baseline snapshot
+        #[arg(long, default_value_t = false)]
+        force: bool,
+
+        /// Show what would be validated, marked, and applied without changing anything
+        #[arg(long, short)]
+        dry_run: bool,
+
+        /// Schema to introspect for validation (Postgres, defaults to public)
         #[arg(long)]
         schema: Option<String>,
     },

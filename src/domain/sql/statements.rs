@@ -52,7 +52,10 @@ pub fn qualified_name(
 
 pub fn create_schema(dialect: &SqlDialect, name: &str) -> SqlStmt {
     let renderer = get_renderer(dialect);
-    renderer.statement(format!("CREATE SCHEMA {}", renderer.quote_identifier(name)))
+    renderer.statement(format!(
+        "CREATE SCHEMA IF NOT EXISTS {}",
+        renderer.quote_identifier(name)
+    ))
 }
 
 pub fn drop_schema(dialect: &SqlDialect, name: &str, cascade: bool) -> SqlStmt {
