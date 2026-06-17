@@ -43,6 +43,12 @@ sqlx = { version = "0.9.0", features = [
   "ipnet",
   "json",
 ] }
+# `offline` (a sqlx-core/sqlx-postgres feature, not exposed by the sqlx facade)
+# enables Executor::describe, used by query codegen to type queries against the
+# compiled Shadow Database. Declared directly so the feature unifies across the
+# build; APIs are still used via the `sqlx` re-exports.
+sqlx-core = { version = "0.9.0", features = ["offline"] }
+sqlx-postgres = { version = "0.9.0", features = ["offline"] }
 tokio = { version = "1.49.0", features = ["full"] }
 uuid = { version = "1.20.0", features = ["v4", "v7", "serde"] }
 glob = "0.3.3"

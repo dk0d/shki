@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use heck::ToSnakeCase;
 
 use crate::Result;
-use crate::codegen::generator::apply_name_pattern;
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{CodegenConfig, OutputMode};
 use crate::display::preview::PreviewFile;
@@ -84,33 +83,23 @@ impl RustWriter {
 
     /// Build the `use` path for a sibling generated type.
     ///
-    /// File organization differs by output mode, so the relative path to a
-    /// sibling type does too:
-    /// - `Module`: types are flat files under one module
-    ///   (`out/<type>.rs`), so a sibling is `super::<module>::<Type>`.
-    /// - `Modules`: each type lives in its own nested module
-    ///   (`out/<type>/<type>.rs`), so a sibling is two levels up and reached
-    ///   through the top-level re-export: `super::super::<Type>`.
-    fn type_import(&self, type_name: &str, mode: OutputMode) -> String {
-        match mode {
-            OutputMode::Modules => format!("use super::super::{};", type_name),
-            _ => format!("use super::{}::{};", type_name.to_snake_case(), type_name),
-        }
+    /// In both `Module` and `Modules` layout each type's code lives in a module
+    /// named after the type, mounted as a direct child of the output root:
+    /// `out/<type>.rs` for `Module` and `out/<type>/mod.rs` for `Modules`. A
+    /// sibling is therefore always reached one level up via
+    /// `super::<module>::<Type>`.
+    fn type_import(&self, type_name: &str) -> String {
+        format!("use super::{}::{};", type_name.to_snake_case(), type_name)
     }
 
     /// Collect imports needed for a struct
-    fn collect_struct_imports(
-        &self,
-        rust_struct: &RustStruct,
-        code: &GeneratedRust,
-        mode: OutputMode,
-    ) -> Vec<String> {
+    fn collect_struct_imports(&self, rust_struct: &RustStruct, code: &GeneratedRust) -> Vec<String> {
         let mut imports = BTreeSet::new();
 
         for field in &rust_struct.fields {
             for rust_enum in code.enums.values() {
                 if field.rust_type.contains(&rust_enum.name) {
-                    imports.insert(self.type_import(&rust_enum.name, mode));
+                    imports.insert(self.type_import(&rust_enum.name));
                 }
             }
 
@@ -119,7 +108,7 @@ impl RustWriter {
             // struct's own module.
             for other in code.structs.values() {
                 if other.name != rust_struct.name && field.rust_type.contains(&other.name) {
-                    imports.insert(self.type_import(&other.name, mode));
+                    imports.insert(self.type_import(&other.name));
                 }
             }
 

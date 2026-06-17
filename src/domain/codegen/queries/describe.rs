@@ -1,0 +1,403 @@
+//! Type a query by describing it against the compiled Shadow Database.
+//!
+//! Postgres' describe output tells us each parameter's type and each result
+//! column's type, name, and (when it maps to a table column) its origin. We use
+//! the origin to look the column up in the [`Snapshot`] — the Declarative Schema
+//! is the source of truth for nullability and for resolving enum/custom types to
+//! their generated Rust types. See `docs/adr/0001-typed-query-codegen.md`.
+
+use std::collections::HashMap;
+
+use sqlx::{AssertSqlSafe, Column, Either, Executor, SqlSafeStr, TypeInfo};
+use sqlx::postgres::{PgTypeInfo, PgTypeKind};
+
+use crate::schema::{DataType, Table};
+use crate::snapshots::Snapshot;
+use crate::{Result, ShkiError};
+
+use super::parse::{Cardinality, QuerySpec};
+use super::rewrite::rewrite_named_params;
+
+/// How a parameter's value is supplied to the generated function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParamBinding {
+    /// A function argument. `Some(name)` for a named parameter (`$id`); `None`
+    /// for a positional `$n` parameter, which the generator names `argN`.
+    Arg(Option<String>),
+    /// Bound from the shared `Pagination` input's `limit` (batch limit/offset).
+    PageLimit,
+    /// Bound from the shared `Pagination` input's `offset` (batch limit/offset).
+    PageOffset,
+    /// Bound from the `CursorPagination` input's key at `key_index` (batch
+    /// keyset). `key_index` is the parameter's position in the `:keyset`
+    /// annotation, i.e. its slot in the cursor key tuple.
+    Cursor { key_index: usize },
+}
+
+/// A query parameter (`$1`, `$2`, ...) and how the generated function sources it.
+#[derive(Debug, Clone)]
+pub struct QueryParam {
+    pub data_type: DataType,
+    pub binding: ParamBinding,
+}
+
+/// One column of a query's result row.
+#[derive(Debug, Clone)]
+pub struct ResultColumn {
+    /// Output column name (becomes the row struct field name).
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
+}
+
+/// The shape of a query's result.
+#[derive(Debug, Clone)]
+pub enum QueryResult {
+    /// Every column originates from a single table and covers it exactly, so the
+    /// generated function reuses that table's schema struct. Carries the table's
+    /// database name; the generator resolves it to the generated struct name.
+    Reuse { table_name: String },
+    /// A bespoke result; the generator synthesizes a row struct.
+    Row { columns: Vec<ResultColumn> },
+    /// `:exec` — no row type, just an affected-row count.
+    Exec,
+}
+
+/// A query plus its resolved parameter and result types.
+#[derive(Debug, Clone)]
+pub struct DescribedQuery {
+    pub spec: QuerySpec,
+    /// The SQL the generated function executes: positional placeholders, with any
+    /// `$name` parameters rewritten to `$n`.
+    pub sql: String,
+    pub params: Vec<QueryParam>,
+    pub result: QueryResult,
+}
+
+/// Describe a single query against `pool` and resolve its types using `snapshot`.
+pub async fn describe_query(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    snapshot: &Snapshot,
+    spec: QuerySpec,
+) -> Result<DescribedQuery> {
+    let rewritten = rewrite_named_params(&spec.sql)?;
+    let is_batch = spec.cardinality == Cardinality::Batch;
+    let is_keyset = is_batch && !spec.keyset.is_empty();
+
+    // Resolve `:keyset` references to parameter indices and their cursor-key slot.
+    let keyset_pos = resolve_keyset(&spec.keyset, rewritten.names.as_deref(), &spec.name)?;
+
+    // A `:batch` query paginates by keyset (a `:keyset` annotation) or by
+    // limit/offset (a `$offset` placeholder). Require one of them.
+    if is_batch && !is_keyset {
+        let has_offset = rewritten
+            .names
+            .as_ref()
+            .is_some_and(|names| names.iter().any(|name| name == "offset"));
+        if !has_offset {
+            return Err(ShkiError::config(format!(
+                "query '{}' is :batch but paginates by neither limit/offset (no $offset \
+                 parameter) nor keyset (no :keyset annotation); add one",
+                spec.name
+            )));
+        }
+    }
+
+    let stmt = AssertSqlSafe(rewritten.sql.clone()).into_sql_str();
+    let described = pool.describe(stmt).await.map_err(|err| {
+        ShkiError::schema(format!(
+            "Failed to describe query '{}' from {}: {}",
+            spec.name,
+            spec.source_file.display(),
+            err
+        ))
+    })?;
+
+    let tables = table_index(snapshot);
+
+    let params: Vec<QueryParam> = match described.parameters {
+        Some(Either::Left(ref type_infos)) => type_infos
+            .iter()
+            .enumerate()
+            .map(|(idx, ti)| QueryParam {
+                data_type: pg_type_to_data_type(ti, snapshot),
+                binding: param_binding(rewritten.names.as_deref(), idx, is_batch, is_keyset, &keyset_pos),
+            })
+            .collect(),
+        // `Either::Right(n)` only reports a parameter count without types, which
+        // we cannot turn into typed arguments.
+        _ => Vec::new(),
+    };
+
+    // Every keyset reference must resolve to a real parameter.
+    if is_keyset {
+        let bound = params
+            .iter()
+            .filter(|param| matches!(param.binding, ParamBinding::Cursor { .. }))
+            .count();
+        if bound != spec.keyset.len() {
+            return Err(ShkiError::config(format!(
+                "the :keyset annotation for query '{}' references a parameter the query does not have",
+                spec.name
+            )));
+        }
+    }
+
+    let result = if spec.cardinality == Cardinality::Exec {
+        QueryResult::Exec
+    } else {
+        resolve_result(&described, snapshot, &tables)
+    };
+
+    Ok(DescribedQuery {
+        spec,
+        sql: rewritten.sql,
+        params,
+        result,
+    })
+}
+
+/// Resolve `:keyset` parameter references to a map of parameter index → cursor
+/// key slot (the reference's position in the annotation).
+fn resolve_keyset(
+    refs: &[String],
+    names: Option<&[String]>,
+    query: &str,
+) -> Result<HashMap<usize, usize>> {
+    let mut map = HashMap::new();
+    for (key_index, reference) in refs.iter().enumerate() {
+        let raw = reference.strip_prefix('$').ok_or_else(|| {
+            ShkiError::config(format!(
+                "keyset reference '{}' in query '{}' must start with $",
+                reference, query
+            ))
+        })?;
+
+        let param_index = if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_digit()) {
+            let n: usize = raw.parse().map_err(|_| {
+                ShkiError::config(format!("invalid keyset reference '{}'", reference))
+            })?;
+            if n == 0 {
+                return Err(ShkiError::config(
+                    "keyset reference '$0' is invalid; placeholders start at $1".to_string(),
+                ));
+            }
+            n - 1
+        } else {
+            let names = names.ok_or_else(|| {
+                ShkiError::config(format!(
+                    "keyset reference '{}' names a parameter, but query '{}' uses positional \
+                     placeholders",
+                    reference, query
+                ))
+            })?;
+            names.iter().position(|name| name == raw).ok_or_else(|| {
+                ShkiError::config(format!(
+                    "keyset reference '{}' does not match any parameter in query '{}'",
+                    reference, query
+                ))
+            })?
+        };
+        map.insert(param_index, key_index);
+    }
+    Ok(map)
+}
+
+/// Decide how the generated function sources parameter `idx`. Keyset parameters
+/// come from the `CursorPagination` cursor; in a limit/offset `:batch` query the
+/// `limit`/`offset` parameters come from the shared `Pagination` input;
+/// everything else is a function argument.
+fn param_binding(
+    names: Option<&[String]>,
+    idx: usize,
+    is_batch: bool,
+    is_keyset: bool,
+    keyset_pos: &HashMap<usize, usize>,
+) -> ParamBinding {
+    if let Some(&key_index) = keyset_pos.get(&idx) {
+        return ParamBinding::Cursor { key_index };
+    }
+    match names.and_then(|names| names.get(idx)) {
+        Some(name) if is_batch && !is_keyset && name == "limit" => ParamBinding::PageLimit,
+        Some(name) if is_batch && !is_keyset && name == "offset" => ParamBinding::PageOffset,
+        Some(name) => ParamBinding::Arg(Some(name.clone())),
+        None => ParamBinding::Arg(None),
+    }
+}
+
+/// Build a lookup from unqualified table name to its schema definition. Column
+/// origins from Postgres are unqualified, matching this key.
+fn table_index(snapshot: &Snapshot) -> HashMap<String, Table> {
+    snapshot
+        .tables()
+        .into_iter()
+        .map(|(iden, table)| (iden.name, table))
+        .collect()
+}
+
+fn resolve_result(
+    described: &sqlx::Describe<sqlx::Postgres>,
+    snapshot: &Snapshot,
+    tables: &HashMap<String, Table>,
+) -> QueryResult {
+    let columns: Vec<ResultColumn> = described
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(idx, column)| {
+            let describe_nullable = described.nullable.get(idx).copied().flatten().unwrap_or(true);
+
+            // Prefer the Declarative Schema's view of a column that traces back to
+            // a base table: it carries the authoritative nullability and resolves
+            // enum/custom types to their generated Rust types.
+            let from_schema = column
+                .origin()
+                .table_column()
+                .and_then(|tc| tables.get(&*tc.table).map(|table| (table, tc.name.to_string())))
+                .and_then(|(table, col_name)| table.columns.get(&col_name));
+
+            let (data_type, nullable) = match from_schema {
+                Some(schema_col) => (
+                    schema_col.data_type.clone(),
+                    // Nullable if the schema says so OR describe inferred it (e.g.
+                    // a NOT NULL column made nullable by an outer join).
+                    schema_col.nullable || describe_nullable,
+                ),
+                None => (
+                    pg_type_to_data_type(column.type_info(), snapshot),
+                    describe_nullable,
+                ),
+            };
+
+            ResultColumn {
+                name: column.name().to_string(),
+                data_type,
+                nullable,
+            }
+        })
+        .collect();
+
+    if let Some(table_name) = reusable_table(described, tables) {
+        QueryResult::Reuse { table_name }
+    } else {
+        QueryResult::Row { columns }
+    }
+}
+
+/// If every result column originates from the same table and together they cover
+/// that table's full column set, return the table name so the generated function
+/// can reuse the table's schema struct.
+fn reusable_table(
+    described: &sqlx::Describe<sqlx::Postgres>,
+    tables: &HashMap<String, Table>,
+) -> Option<String> {
+    let mut table_name: Option<String> = None;
+    let mut source_columns: Vec<String> = Vec::new();
+
+    for column in &described.columns {
+        let origin = column.origin();
+        let tc = origin.table_column()?;
+        match &table_name {
+            Some(name) if name != &*tc.table => return None,
+            None => table_name = Some(tc.table.to_string()),
+            _ => {}
+        }
+        source_columns.push(tc.name.to_string());
+    }
+
+    let name = table_name?;
+    let table = tables.get(&name)?;
+
+    let mut got: Vec<&str> = source_columns.iter().map(String::as_str).collect();
+    let mut want: Vec<&str> = table.columns.keys().map(String::as_str).collect();
+    got.sort_unstable();
+    got.dedup();
+    want.sort_unstable();
+
+    (got == want).then_some(name)
+}
+
+/// Map a Postgres type to shki's dialect-agnostic [`DataType`], resolving enums
+/// known to the schema so they reach their generated Rust type.
+fn pg_type_to_data_type(type_info: &PgTypeInfo, snapshot: &Snapshot) -> DataType {
+    match type_info.kind() {
+        PgTypeKind::Array(inner) => {
+            return DataType::Array {
+                element_type: Box::new(pg_type_to_data_type(inner, snapshot)),
+            };
+        }
+        PgTypeKind::Domain(inner) => return pg_type_to_data_type(inner, snapshot),
+        PgTypeKind::Enum(_) => {
+            return DataType::Enum {
+                name: type_info.name().to_string(),
+                schema: None,
+            };
+        }
+        _ => {}
+    }
+
+    scalar_from_name(type_info.name(), snapshot)
+}
+
+fn scalar_from_name(name: &str, snapshot: &Snapshot) -> DataType {
+    match name.to_uppercase().as_str() {
+        "BOOL" => DataType::Boolean,
+        "INT2" => DataType::SmallInt,
+        "INT4" => DataType::Integer,
+        "INT8" => DataType::BigInt,
+        "OID" => DataType::BigInt,
+        "FLOAT4" => DataType::Real,
+        "FLOAT8" => DataType::DoublePrecision,
+        "NUMERIC" | "MONEY" => DataType::Numeric {
+            precision: None,
+            scale: None,
+        },
+        "TEXT" | "NAME" | "BPCHAR" | "\"CHAR\"" => DataType::Text,
+        "VARCHAR" => DataType::VarChar { length: None },
+        "CHAR" => DataType::Char { length: None },
+        "CITEXT" => DataType::Citext,
+        "UUID" => DataType::Uuid,
+        "JSON" => DataType::Json,
+        "JSONB" => DataType::JsonB,
+        "DATE" => DataType::Date,
+        "TIME" => DataType::Time {
+            precision: None,
+            with_timezone: false,
+        },
+        "TIMETZ" => DataType::Time {
+            precision: None,
+            with_timezone: true,
+        },
+        "TIMESTAMP" => DataType::Timestamp {
+            precision: None,
+            with_timezone: false,
+        },
+        "TIMESTAMPTZ" => DataType::Timestamp {
+            precision: None,
+            with_timezone: true,
+        },
+        "INTERVAL" => DataType::Interval,
+        "BYTEA" => DataType::ByteA,
+        "INET" => DataType::Inet,
+        "CIDR" => DataType::Cidr,
+        "MACADDR" => DataType::MacAddr,
+        "MACADDR8" => DataType::MacAddr8,
+        other => {
+            // An unrecognized name may still be a schema enum (e.g. when describe
+            // reports it as a plain type). Otherwise fall back to a custom type,
+            // which the type mapper renders as `String`.
+            let lower = other.to_lowercase();
+            if snapshot.enums().keys().any(|iden| iden.name == lower) {
+                DataType::Enum {
+                    name: lower,
+                    schema: None,
+                }
+            } else {
+                DataType::Custom {
+                    name: lower,
+                    schema: None,
+                }
+            }
+        }
+    }
+}

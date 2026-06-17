@@ -267,6 +267,35 @@ async fn compile_with_pool(
     introspect_all_schemas(config, &engine).await
 }
 
+/// Compile the Declarative Schema into a shadow database, then hand the caller
+/// both the resulting [`Snapshot`] and a pool connected to the freshly compiled
+/// database so it can run further work against the live schema (e.g. describing
+/// queries for query codegen).
+///
+/// This mirrors [`compiler_from_config`]: it uses the external Shadow Database
+/// when `shadow_database_url` is configured, otherwise an embedded one.
+pub async fn with_compiled_shadow<T, F, Fut>(config: &Config, operation: F) -> Result<T>
+where
+    F: FnOnce(Snapshot, sqlx::Pool<sqlx::Postgres>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    ensure_postgres_compiler_config(config)?;
+    let schema = load_declarative_schema(config.schema_path())?;
+
+    if config.shadow_database_url.is_some() {
+        let compiler = ExternalShadowDBCompiler::from_config(config)?;
+        let pool = compiler.connect(config).await?;
+        let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
+        operation(snapshot, pool).await
+    } else {
+        with_embedded_shadow_pool(config, |pool| async move {
+            let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
+            operation(snapshot, pool).await
+        })
+        .await
+    }
+}
+
 async fn apply_declarative_schema_sql(
     pool: &sqlx::Pool<sqlx::Postgres>,
     schema_sql: &str,

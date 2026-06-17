@@ -110,6 +110,17 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Drop { migration } => drop_migration::cmd_drop(&config, &migration).await,
+        Commands::Queries {
+            shadow,
+            queries_dir,
+            output,
+            models_module,
+            preview,
+        } => {
+            let config = config.with_command_args(Some(&shadow), None, None)?;
+            codegen::queries::cmd_query_codegen(&config, queries_dir, output, models_module, preview)
+                .await
+        }
         Commands::Codegen {
             shadow,
             codegen: codegen_args,

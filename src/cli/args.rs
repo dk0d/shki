@@ -407,6 +407,29 @@ pub enum Commands {
         source: Option<PathBuf>,
     },
 
+    /// Generate type-safe query functions from annotated SQL files (PostgreSQL)
+    #[command(visible_alias = "q")]
+    Queries {
+        #[command(flatten)]
+        shadow: ShadowArgs,
+
+        /// Directory of annotated *.sql query files (default: <root>/queries)
+        #[arg(short = 'q', long = "queries")]
+        queries_dir: Option<PathBuf>,
+
+        /// Output file for generated Rust (prints to stdout if omitted)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Module path to import generated schema types from (e.g. `crate::models`)
+        #[arg(long = "models")]
+        models_module: Option<String>,
+
+        /// Preview the generated code without writing
+        #[arg(long)]
+        preview: bool,
+    },
+
     /// Drop a migration & snapshot (destructive)
     #[command()]
     Drop {
