@@ -83,23 +83,33 @@ impl RustWriter {
 
     /// Build the `use` path for a sibling generated type.
     ///
-    /// In both `Module` and `Modules` layout each type's code lives in a module
-    /// named after the type, mounted as a direct child of the output root:
-    /// `out/<type>.rs` for `Module` and `out/<type>/mod.rs` for `Modules`. A
-    /// sibling is therefore always reached one level up via
-    /// `super::<module>::<Type>`.
-    fn type_import(&self, type_name: &str) -> String {
-        format!("use super::{}::{};", type_name.to_snake_case(), type_name)
+    /// File organization differs by output mode, so the relative path to a
+    /// sibling type does too:
+    /// - `Module`: types are flat files under one module (`out/<type>.rs`), so a
+    ///   sibling is `super::<module>::<Type>`.
+    /// - `Modules`: each type's definition lives in a nested module
+    ///   (`out/<type>/_def.rs`), so a sibling is two levels up and reached
+    ///   through the top-level re-export: `super::super::<Type>`.
+    fn type_import(&self, type_name: &str, mode: OutputMode) -> String {
+        match mode {
+            OutputMode::Modules => format!("use super::super::{};", type_name),
+            _ => format!("use super::{}::{};", type_name.to_snake_case(), type_name),
+        }
     }
 
     /// Collect imports needed for a struct
-    fn collect_struct_imports(&self, rust_struct: &RustStruct, code: &GeneratedRust) -> Vec<String> {
+    fn collect_struct_imports(
+        &self,
+        rust_struct: &RustStruct,
+        code: &GeneratedRust,
+        mode: OutputMode,
+    ) -> Vec<String> {
         let mut imports = BTreeSet::new();
 
         for field in &rust_struct.fields {
             for rust_enum in code.enums.values() {
                 if field.rust_type.contains(&rust_enum.name) {
-                    imports.insert(self.type_import(&rust_enum.name));
+                    imports.insert(self.type_import(&rust_enum.name, mode));
                 }
             }
 
@@ -108,7 +118,7 @@ impl RustWriter {
             // struct's own module.
             for other in code.structs.values() {
                 if other.name != rust_struct.name && field.rust_type.contains(&other.name) {
-                    imports.insert(self.type_import(&other.name));
+                    imports.insert(self.type_import(&other.name, mode));
                 }
             }
 
@@ -126,37 +136,27 @@ impl RustWriter {
         imports.into_iter().collect()
     }
 
-    /// Create the module directory structure for Modules mode
-    fn ensure_module_structure(
-        &self,
-        module_dir: &Path,
-        module_name: &str,
-        type_name: &str,
-        impl_name: &str,
-    ) -> Result<()> {
-        fs::create_dir_all(module_dir)?;
-
-        let module_path = module_dir.join("mod.rs");
-        if !module_path.exists() {
-            let mut file = fs::File::create(&module_path)?;
-            write!(
-                file,
-                "{}\n\npub mod {};\npub use {}::*;\npub mod {};\npub use {}::*;\n",
-                Self::HEADER,
-                module_name,
-                module_name,
-                impl_name,
-                impl_name
-            )?;
-        }
-
-        let impl_path = module_dir.join(format!("{}.rs", impl_name));
-        if !impl_path.exists() {
-            let mut file = fs::File::create(&impl_path)?;
-            writeln!(file, "//! Implementation details for {}", type_name)?;
-        }
-
-        Ok(())
+    /// The per-type `mod.rs`: a thin, user-editable index that mounts the
+    /// generated `_def.rs` and re-exports it.
+    ///
+    /// This file is written only when absent, so hand-written code added here
+    /// (extra `impl` blocks, additional `mod` declarations, supporting types)
+    /// survives regeneration. The generated definition is isolated in `_def.rs`,
+    /// which is always overwritten. Splitting them this way also keeps the
+    /// directory name from being mirrored as a file name (clippy's
+    /// `module_inception`).
+    fn format_module_index(&self) -> String {
+        concat!(
+            "//! Generated once by shki - safe to edit.\n",
+            "//!\n",
+            "//! shki will not overwrite this file on regeneration. The generated\n",
+            "//! type lives in `_def.rs` and is re-exported below; add custom `impl`\n",
+            "//! blocks, extra modules, or supporting code here.\n",
+            "\n",
+            "mod _def;\n",
+            "pub use _def::*;\n",
+        )
+        .to_string()
     }
 
     fn collect_generated_items(
@@ -273,7 +273,7 @@ impl CodeWriter for RustWriter {
         &self,
         code: &Self::GeneratedCode,
         output_dir: &Path,
-        config: &CodegenConfig,
+        _config: &CodegenConfig,
     ) -> Result<Vec<PathBuf>> {
         self.ensure_output_dir(output_dir)?;
 
@@ -282,26 +282,24 @@ impl CodeWriter for RustWriter {
         let mut written_files = Vec::new();
 
         for type_info in &types {
-            let pattern = Some(config.impl_pattern.clone().unwrap_or("{}_impl".to_string()));
-            let impl_name = apply_name_pattern(&type_info.module_name, pattern.as_deref());
-
             let module_dir = output_dir.join(&type_info.module_name);
+            fs::create_dir_all(&module_dir)?;
 
-            self.ensure_module_structure(
-                &module_dir,
-                &type_info.module_name,
-                &type_info.type_name,
-                &impl_name,
-            )?;
+            // The generated type definition is isolated in _def.rs, which is
+            // always overwritten on regeneration.
+            let def_path = module_dir.join(format!("_def.{}", self.file_extension()));
+            self.write_type_file(&def_path, &type_info.imports, &type_info.content)?;
+            written_files.push(def_path);
 
-            let file_path = module_dir.join(format!(
-                "{}.{}",
-                type_info.module_name,
-                self.file_extension()
-            ));
-            self.write_type_file(&file_path, &type_info.imports, &type_info.content)?;
-
-            written_files.push(file_path);
+            // mod.rs is a thin, user-editable index that mounts _def.rs. It is
+            // written only when absent, so any custom code (or extra files added
+            // to this directory and wired up here) survives regeneration.
+            let mod_path = module_dir.join("mod.rs");
+            if !mod_path.exists() {
+                let mut mod_file = fs::File::create(&mod_path)?;
+                write!(mod_file, "{}", self.format_module_index())?;
+                written_files.push(mod_path);
+            }
         }
 
         let mod_defs = types
@@ -321,8 +319,8 @@ impl CodeWriter for RustWriter {
         output.push('\n');
         output.push_str(&self.format_imports(&code.required_imports()));
 
-        // Single-file output keeps every type in one file, so per-item
-        // cross-module imports are unused here; the mode only affects them.
+        // Single-file output keeps every type in one file, so the per-item
+        // cross-module imports are unused here.
         for item in self.collect_generated_items(code, OutputMode::File) {
             writeln!(output, "{}", item.content).expect("writing to string should not fail");
         }
@@ -368,11 +366,17 @@ impl CodeWriter for RustWriter {
                 let items = self.collect_generated_items(code, OutputMode::Modules);
                 let mut files: Vec<PreviewFile> = items
                     .iter()
-                    .map(|item| {
-                        PreviewFile::new(
-                            format!("{0}/{0}.{1}", item.module_name, ext),
-                            self.format_type_file(&item.imports, &item.content),
-                        )
+                    .flat_map(|item| {
+                        [
+                            PreviewFile::new(
+                                format!("{}/_def.{}", item.module_name, ext),
+                                self.format_type_file(&item.imports, &item.content),
+                            ),
+                            PreviewFile::new(
+                                format!("{}/mod.{}", item.module_name, ext),
+                                self.format_module_index(),
+                            ),
+                        ]
                     })
                     .collect();
 
@@ -472,6 +476,8 @@ mod tests {
 
     #[test]
     fn module_format_imports_reference_siblings_one_level_up() {
+        // Flat `Module` layout: each type is a file directly under the output
+        // root, so a sibling is reached via `super::<module>::<Type>`.
         let (code, user) = sample_code();
         let imports = RustWriter::new().collect_struct_imports(&user, &code, OutputMode::Module);
 
@@ -484,9 +490,9 @@ mod tests {
 
     #[test]
     fn modules_format_imports_reference_siblings_two_levels_up() {
-        // In `Modules` format each type lives in its own nested module
-        // (`out/<type>/<type>.rs`), so a sibling is reached via
-        // `super::super::<Type>`, not `super::<module>::<Type>`.
+        // Nested `Modules` layout: each type's definition lives in
+        // `out/<type>/_def.rs`, so a sibling is two levels up and reached through
+        // the top-level re-export: `super::super::<Type>`.
         let (code, user) = sample_code();
         let imports = RustWriter::new().collect_struct_imports(&user, &code, OutputMode::Modules);
 
@@ -503,7 +509,8 @@ mod tests {
         let (code, _) = sample_code();
         // The composite struct only has a `String` field, so it needs no imports.
         let address = &code.structs["addresses"];
-        let imports = RustWriter::new().collect_struct_imports(address, &code, OutputMode::Module);
+        let imports =
+            RustWriter::new().collect_struct_imports(address, &code, OutputMode::Module);
 
         assert!(imports.is_empty());
     }
@@ -553,9 +560,10 @@ mod tests {
 
     #[test]
     fn modules_imports_are_emitted_in_generated_files() {
-        // End-to-end through the nested-modules writer: the file for the `User`
-        // struct lives at `<dir>/user/user.rs` and must reach siblings via
-        // `super::super::<Type>`.
+        // End-to-end through the nested-modules writer: the `User` type's
+        // definition lives in `<dir>/user/_def.rs` and reaches sibling types two
+        // levels up via `super::super::<Type>`; `<dir>/user/mod.rs` is a thin
+        // index that mounts _def.rs.
         let (code, _) = sample_code();
         let dir =
             std::env::temp_dir().join(format!("shki_writer_modules_test_{}", std::process::id()));
@@ -565,15 +573,67 @@ mod tests {
             .write_modules(&code, &dir, &CodegenConfig::default())
             .expect("modules generation should succeed");
 
-        let user_file = written
+        let def_file = written
             .iter()
-            .find(|p| p.ends_with("user/user.rs"))
-            .expect("user/user.rs should be generated");
-        let contents = fs::read_to_string(user_file).expect("user/user.rs should be readable");
+            .find(|p| p.ends_with("user/_def.rs"))
+            .expect("user/_def.rs should be generated");
+        let def = fs::read_to_string(def_file).expect("user/_def.rs should be readable");
 
-        assert!(contents.contains("use super::super::UserStatus;"));
-        assert!(contents.contains("use super::super::Address;"));
-        assert!(!contents.contains("use super::address::Address;"));
+        assert!(def.contains("pub struct User"));
+        assert!(def.contains("use super::super::UserStatus;"));
+        assert!(def.contains("use super::super::Address;"));
+        assert!(!def.contains("use super::address::Address;"));
+        // The directory name is not mirrored as a file name.
+        assert!(!written.iter().any(|p| p.ends_with("user/user.rs")));
+
+        // mod.rs is the thin, user-editable index that mounts _def.rs.
+        let mod_file = written
+            .iter()
+            .find(|p| p.ends_with("user/mod.rs"))
+            .expect("user/mod.rs should be generated");
+        let mod_rs = fs::read_to_string(mod_file).expect("user/mod.rs should be readable");
+        assert!(mod_rs.contains("mod _def;"));
+        assert!(mod_rs.contains("pub use _def::*;"));
+        // The user-editable index carries no DO-NOT-EDIT header.
+        assert!(!mod_rs.contains("DO NOT EDIT"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn modules_mod_file_is_preserved_but_def_is_overwritten() {
+        // Regenerating must always refresh _def.rs but never clobber a
+        // hand-edited mod.rs.
+        let (code, _) = sample_code();
+        let dir = std::env::temp_dir()
+            .join(format!("shki_writer_modules_mod_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let writer = RustWriter::new();
+        writer
+            .write_modules(&code, &dir, &CodegenConfig::default())
+            .expect("first generation should succeed");
+
+        // Hand-edit mod.rs (e.g. add a custom impl block) and clobber _def.rs to
+        // prove it is regenerated.
+        let mod_path = dir.join("user/mod.rs");
+        let def_path = dir.join("user/_def.rs");
+        fs::write(
+            &mod_path,
+            "mod _def;\npub use _def::*;\nimpl User {\n    fn custom() {}\n}\n",
+        )
+        .expect("should be able to edit mod.rs");
+        fs::write(&def_path, "// stale\n").expect("should be able to clobber _def.rs");
+
+        writer
+            .write_modules(&code, &dir, &CodegenConfig::default())
+            .expect("second generation should succeed");
+
+        let mod_rs = fs::read_to_string(&mod_path).expect("mod.rs should still exist");
+        assert!(mod_rs.contains("fn custom()"), "custom mod.rs was clobbered");
+
+        let def = fs::read_to_string(&def_path).expect("_def.rs should still exist");
+        assert!(def.contains("pub struct User"), "_def.rs was not regenerated");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -607,14 +667,19 @@ mod tests {
     }
 
     #[test]
-    fn preview_modules_mode_renders_nested_files_with_two_level_imports() {
+    fn preview_modules_mode_renders_nested_def_and_mod_files() {
         let (code, _) = sample_code();
         let config = CodegenConfig::default().mode(Some(OutputMode::Modules));
         let preview = RustWriter::new().format_preview(&code, &config, true);
 
-        assert!(preview.contains("user/user.rs"));
-        assert!(preview.contains("address/address.rs"));
-        assert!(preview.contains("mod.rs"));
+        // The generated definition lives in each type's _def.rs, alongside a thin
+        // user-editable mod.rs that mounts it.
+        assert!(preview.contains("user/_def.rs"));
+        assert!(preview.contains("user/mod.rs"));
+        assert!(preview.contains("address/_def.rs"));
+        // The directory name is not mirrored as a file name.
+        assert!(!preview.contains("user/user.rs"));
+        assert!(preview.contains("mod _def;"));
         // Nested layout reaches siblings two levels up via the root re-export.
         assert!(preview.contains("use super::super::Address;"));
         assert!(!preview.contains("use super::address::Address;"));

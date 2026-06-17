@@ -3,7 +3,7 @@ use colored::Colorize;
 /// A single file the writer would produce, used to render previews that mirror
 /// the on-disk layout without writing anything.
 pub struct PreviewFile {
-    /// Path relative to the output directory (e.g. `user.rs` or `user/user.rs`).
+    /// Path relative to the output directory (e.g. `user.rs` or `user/def.rs`).
     pub path: String,
     /// Full file contents, exactly as it would be written to disk.
     pub content: String,

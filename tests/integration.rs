@@ -1483,19 +1483,27 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
     .await
     .expect("rust codegen should succeed");
 
-    let user = std::fs::read_to_string(output_dir.join("user/user.rs"))
-        .expect("user struct module should be written");
-    let status = std::fs::read_to_string(output_dir.join("user_status/user_status.rs"))
-        .expect("status enum module should be written");
+    let user_def = std::fs::read_to_string(output_dir.join("user/_def.rs"))
+        .expect("user struct definition should be written");
+    let user_mod = std::fs::read_to_string(output_dir.join("user/mod.rs"))
+        .expect("user module index should be written");
+    let status_def = std::fs::read_to_string(output_dir.join("user_status/_def.rs"))
+        .expect("status enum definition should be written");
     let root_mod =
         std::fs::read_to_string(output_dir.join("mod.rs")).expect("root module should be written");
 
-    assert!(user.contains("pub struct User"));
-    // In nested-modules format the struct lives at `user/user.rs`, so a sibling
-    // type is two levels up and reached through the top-level re-export.
-    assert!(user.contains("use super::super::UserStatus;"));
-    assert!(!user.contains("use super::user_status::UserStatus;"));
-    assert!(status.contains("pub enum UserStatus"));
+    assert!(user_def.contains("pub struct User"));
+    // The directory name is not mirrored as a file name (avoids clippy's
+    // `module_inception`); the generated definition lives in `user/_def.rs`.
+    assert!(!output_dir.join("user/user.rs").exists());
+    // The thin, user-editable mod.rs mounts the generated _def.rs.
+    assert!(user_mod.contains("mod _def;"));
+    assert!(user_mod.contains("pub use _def::*;"));
+    // The definition lives two levels deep, so a sibling type is reached via the
+    // top-level re-export: `super::super::<Type>`.
+    assert!(user_def.contains("use super::super::UserStatus;"));
+    assert!(!user_def.contains("use super::user_status::UserStatus;"));
+    assert!(status_def.contains("pub enum UserStatus"));
     assert!(root_mod.contains("pub use user::*;"));
 }
 

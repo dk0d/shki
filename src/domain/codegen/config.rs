@@ -65,10 +65,6 @@ pub struct CodegenConfig {
     #[serde(default)]
     pub exclude_tables: Vec<String>,
 
-    /// The pattern to use for  building impl file in modules format: defaults to `impl_{}.rs`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub impl_pattern: Option<String>,
-
     #[serde(default, skip_serializing_if = "crate::config::is_false")]
     pub preview: bool,
 }
@@ -100,28 +96,23 @@ pub enum OutputMode {
     /// files in the output directory.
     Module,
 
-    /// Generate a module directory for each struct/enum with
-    /// separate files for the struct/enum if not already present,
-    /// an impl file and a mod.rs file to re-export them.
+    /// Generate a module directory for each struct/enum, with the generated
+    /// type definition isolated in `_def.rs` and a thin, user-editable `mod.rs`
+    /// that mounts it.
     ///
     /// e.g. for a table `user`, generate:
     /// ```bash
     /// user/
-    /// ├── mod.rs
-    /// ├── user.rs (struct definition)
-    /// ├── impl_user.rs (impl block)
-    /// ├── ...
-    /// └── ...
+    /// ├── mod.rs  (mounts _def.rs: `mod _def; pub use _def::*;` + your code)
+    /// └── _def.rs (struct/enum definition)
     /// ```
     ///
-    /// The struct/enum file is _always_ generated and overwritten.
-    /// The impl file is only generated if it does not already exist
-    /// And the mod.rs file is only generated if not already present.
-    /// i.e. if you want to add custom methods, or other supporting code,
-    /// you can create the impl_[model-name].rs or other files manually.
-    ///
-    /// This can be useful when re-generating code, and want to keep
-    /// custom methods or other code in the impl_[model-name].rs file.
+    /// `_def.rs` holds the generated definition and is _always_ overwritten
+    /// (its name avoids the `user/user.rs` that would trip clippy's
+    /// `module_inception` lint). `mod.rs` is only generated when absent, so any
+    /// hand-written code there — custom `impl` blocks, extra modules, supporting
+    /// types, or additional files wired into this directory — survives
+    /// regeneration.
     Modules,
 }
 
@@ -164,7 +155,6 @@ impl Default for CodegenConfig {
             sqlx: true,
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
-            impl_pattern: None,
             preview: false,
         }
     }
