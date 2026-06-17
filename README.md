@@ -478,3 +478,12 @@ Issues and pull requests are welcome.
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Related Projects
+
+`shki` stands on the shoulders of projects that explored these ideas first:
+
+- [pgschema](https://github.com/pgschema/pgschema) — declarative, Terraform-style schema management for PostgreSQL.
+- [jayy-lmao/sql-gen](https://github.com/jayy-lmao/sql-gen) — generating typed Rust code from a live database schema.
+- [squirrel](https://github.com/giacomocavalieri/squirrel) — type-safe SQL code generation from introspected queries.
+- [goose](https://github.com/pressly/goose) - A database migration tool. Supports SQL migrations and Go functions.
