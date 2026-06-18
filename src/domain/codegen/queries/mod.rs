@@ -104,7 +104,7 @@ pub async fn cmd_query_codegen(config: &Config, preview: bool) -> Result<()> {
 /// Resolve the Rust module path the generated query module imports schema types
 /// from (`use <path>::*;`).
 ///
-/// An explicit `[queries] models_module` wins; otherwise the path is derived
+/// An explicit `[queries] models` wins; otherwise the path is derived
 /// from the relationship between the schema codegen output and the queries
 /// output (see [`derive_models_module`]). Either way the result is validated as
 /// a real Rust `use` path so a stray file path can never reach the generator.
@@ -117,7 +117,7 @@ fn resolve_models_module(config: &Config) -> Result<Option<String>> {
     if let Some(path) = &candidate {
         syn::parse_str::<syn::ItemUse>(&format!("use {}::*;", path)).map_err(|_| {
             ShkiError::config(format!(
-                "[queries] models_module must be a Rust module path like `crate::models` or \
+                "[queries] models must be a Rust module path like `crate::models` or \
                  `super::models`, not a file path: `{}`",
                 path
             ))

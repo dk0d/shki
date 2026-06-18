@@ -456,7 +456,7 @@ Cardinality controls the return shape:
 
 Features:
 
-- **Reuses schema types.** When a query's result columns map, in full and in order, to a known table, the function returns that table's generated struct (e.g. `Option<User>`) instead of a parallel row type; columns whose type is a known enum reuse the generated enum. Projections and joins get a synthesized per-query row struct named from the query (`active_users` → `ActiveUsersRow`). The generated module imports these types with a `use` path derived from your output layout (override with `models_module`).
+- **Reuses schema types.** When a query's result columns map, in full and in order, to a known table, the function returns that table's generated struct (e.g. `Option<User>`) instead of a parallel row type; columns whose type is a known enum reuse the generated enum. Projections and joins get a synthesized per-query row struct named from the query (`active_users` → `ActiveUsersRow`). The generated module imports these types with a `use` path derived from your output layout (override with `models`).
 - **Schema-driven nullability.** `RowDescription` does not report nullability, so it is inferred from the Declarative Schema: a column traced to a base-table column honors its `NOT NULL` constraint (`T` vs `Option<T>`); anything the schema cannot prove (expressions, function results, outer-join columns) defaults to `Option<T>`.
 - **Named arguments.** A query may bind parameters as `$name` (e.g. `$email`) instead of positional `$1`, producing a self-documenting signature (`user_by_email(executor, email: String)`) rather than positional `arg1`. shki rewrites `$name` to `$n` before describing; the names exist only in the Rust signature. A single query must use one style or the other — mixing `$name` and `$1` is rejected.
 - **Pagination (`:batch`).** Two explicit modes:
@@ -478,17 +478,17 @@ Configure in `[queries]`:
 sources = "db/queries"          # SQL file or directory (default: <root>/queries)
 output = "src/db/queries.rs"     # output file; prints to stdout if omitted
 format = "single"                # output layout, as in [codegen]
-# models_module is optional — see below. By default it is derived from the
+# models is optional — see below. By default it is derived from the
 # codegen/queries output paths, e.g. with [codegen] output = "src/db/models.rs"
 # the generated module imports `use super::models::*;`.
 ```
 
-| Option          | Purpose                                                                                              |
-| --------------- | ---------------------------------------------------------------------------------------------------- |
-| `sources`       | SQL file or directory of annotated `*.sql` queries. Relative paths resolve from `root`. Default `<root>/queries`. |
-| `output`        | Output file for generated Rust. Prints to stdout when omitted. Relative paths resolve from `root`.   |
-| `format`        | Output layout: `single`, `singlemodule`, or `modules` (shared with `[codegen]`).                     |
-| `models_module` | Rust module path imported as `use <path>::*;` so generated functions can name your schema structs/enums. **Optional** — derived from the `[codegen]`/`[queries]` output paths when unset (sibling files share a directory, so e.g. `models.rs` + `queries.rs` → `super::models`). Set it (e.g. `crate::models`) only to override that for non-standard layouts; it must be a Rust module path, not a file path. |
+| Option    | Purpose                                                                                              |
+| --------- | ---------------------------------------------------------------------------------------------------- |
+| `sources` | SQL file or directory of annotated `*.sql` queries. Relative paths resolve from `root`. Default `<root>/queries`. |
+| `output`  | Output file for generated Rust. Prints to stdout when omitted. Relative paths resolve from `root`.   |
+| `format`  | Output layout: `single`, `singlemodule`, or `modules` (shared with `[codegen]`).                     |
+| `models`  | Rust module path imported as `use <path>::*;` so generated functions can name your schema structs/enums. **Optional** — derived from the `[codegen]`/`[queries]` output paths when unset (sibling files share a directory, so e.g. `models.rs` + `queries.rs` → `super::models`). Set it (e.g. `crate::models`) only to override that for non-standard layouts; it must be a Rust module path, not a file path. |
 
 The schema type mapping, naming/rename config, output modes, and `--preview` are shared with `[codegen]`; see [ADR 0001](docs/adr/0001-typed-query-codegen.md) for the full design.
 
