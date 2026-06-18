@@ -195,7 +195,10 @@ fn build_row_struct(
         fields,
         derives: config.struct_derives.clone(),
         attributes: config.struct_attributes.clone(),
-        serde: config.serde,
+        serde: config.serde(),
+        // Query result rows are decoded via sqlx, so FromRow is mandatory here
+        // regardless of the `sqlx` codegen toggle.
+        sqlx: true,
         comment: None,
     }
 }

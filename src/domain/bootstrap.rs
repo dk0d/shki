@@ -110,7 +110,7 @@ fn plan_bootstrap(
             "bootstrap requires an empty migrations directory; use --force to append a bootstrap migration",
         ));
     }
-    let empty = Snapshot::new(config.dialect);
+    let empty = Snapshot::new(config.dialect());
     let diff = diff_snapshots(&empty, snapshot)?;
 
     let suffix = sanitize_migration_name(name.unwrap_or("bootstrap"));
@@ -140,7 +140,7 @@ fn write_bootstrap_artifacts(
     manager.ensure_dir()?;
     write_directory_schema(&snapshot, &schema_path, force)?;
 
-    let up_sql = SqlRenderer::new(&config.dialect).generate_string(&plan.diff.statements)?;
+    let up_sql = SqlRenderer::new(&config.dialect()).generate_string(&plan.diff.statements)?;
     write_schema_migration(&plan.up_path, &plan.migration_name, &up_sql, false)?;
 
     let file_sql = std::fs::read_to_string(&plan.up_path)?;
@@ -172,14 +172,14 @@ mod tests {
         let mut config = Config::default()
             .with_dialect(SqlDialect::Postgres)
             .with_root(root.to_path_buf());
-        config.migrations.prefix = MigrationPrefix::Index;
+        config.migrations.args.prefix = Some(MigrationPrefix::Index);
         config
     }
 
     fn test_manager(config: &Config) -> MigrationManager {
         MigrationManager::new(
             config.out_dir(),
-            Engine::detached(config.dialect, config.migrations.entity()),
+            Engine::detached(config.dialect(), config.migrations.entity()),
         )
     }
 

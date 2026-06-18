@@ -335,7 +335,7 @@ impl CodeWriter for RustWriter {
     ) -> Vec<PreviewFile> {
         let ext = self.file_extension();
 
-        match config.format {
+        match config.format() {
             OutputMode::File => vec![PreviewFile::new(
                 format!("{}.{}", self.default_filename(), ext),
                 self.single_file_contents(code),
@@ -431,6 +431,7 @@ mod tests {
             derives: vec![],
             attributes: vec![],
             serde: false,
+            sqlx: false,
             comment: None,
         }
     }
@@ -443,6 +444,7 @@ mod tests {
             derives: vec![],
             attributes: vec![],
             serde: false,
+            sqlx: false,
             comment: None,
         }
     }

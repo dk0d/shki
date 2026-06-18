@@ -22,11 +22,10 @@ pub trait CodeWriter {
     /// Write generated code to files based on the output mode
     fn write(&self, code: &Self::GeneratedCode, config: &CodegenConfig) -> Result<Vec<PathBuf>> {
         let output_dir = config
-            .output
-            .as_ref()
+            .output()
             .ok_or_else(|| ShkiError::Config("No output directory specified".to_string()))?;
 
-        match config.format {
+        match config.format() {
             OutputMode::File => self.write_single_file(code, output_dir, config),
             OutputMode::Module => self.write_single_module(code, output_dir, config),
             OutputMode::Modules => self.write_modules(code, output_dir, config),

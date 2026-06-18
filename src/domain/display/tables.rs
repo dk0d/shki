@@ -32,7 +32,7 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
         return Ok(());
     }
 
-    let applied = if config.database_url.is_some() {
+    let applied = if config.database_url().is_some() {
         Some(manager.try_get_applied_migrations().await?)
     } else {
         None
@@ -272,12 +272,11 @@ mod tests {
     #[test]
     fn config_display_rows_flatten_complex_sections_at_the_end() {
         let mut config = Config {
-            dialect: SqlDialect::Postgres,
-            database_url: Some("postgres://localhost/app".to_string()),
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
             ..Config::default()
         };
-        config.migrations.table = "schema_migrations".to_string();
-        config.codegen.format = OutputMode::Module;
+        config.migrations.args.table = Some("schema_migrations".to_string());
+        config.codegen.format = Some(OutputMode::Module);
         config
             .codegen
             .type_overrides

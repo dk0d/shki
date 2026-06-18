@@ -31,6 +31,8 @@ pub struct RustEnum {
     pub attributes: Vec<String>,
     /// Whether serde support is enabled
     pub serde: bool,
+    /// Whether sqlx support is enabled (`sqlx::Type` derive + `#[sqlx(...)]`)
+    pub sqlx: bool,
     /// Doc comment
     pub comment: Option<String>,
 }
@@ -59,6 +61,8 @@ pub struct RustStruct {
     pub attributes: Vec<String>,
     /// Whether serde support is enabled
     pub serde: bool,
+    /// Whether sqlx support is enabled (`sqlx::FromRow` derive + `#[sqlx(...)]`)
+    pub sqlx: bool,
     /// Doc comment
     pub comment: Option<String>,
 }
@@ -218,7 +222,8 @@ impl RustGenerator {
             variants,
             derives: config.enum_derives.clone(),
             attributes: config.enum_attributes.clone(),
-            serde: config.serde,
+            serde: config.serde(),
+            sqlx: config.sqlx(),
             comment: enum_snapshot.description.clone(),
         }
     }
@@ -246,7 +251,8 @@ impl RustGenerator {
             fields,
             derives: config.struct_derives.clone(),
             attributes: config.struct_attributes.clone(),
-            serde: config.serde,
+            serde: config.serde(),
+            sqlx: config.sqlx(),
             comment: table.comment.clone(),
         }
     }
@@ -285,7 +291,8 @@ impl RustGenerator {
             fields,
             derives: config.struct_derives.clone(),
             attributes: config.struct_attributes.clone(),
-            serde: config.serde,
+            serde: config.serde(),
+            sqlx: config.sqlx(),
             comment: composite.description.clone(),
         }
     }
@@ -299,7 +306,8 @@ impl RustGenerator {
         config: &CodegenConfig,
     ) -> RustField {
         let field_name = make_safe_field_name(&col.name);
-        let rust_type = self.sql_type_to_rust(&col.data_type, col.nullable, enums, composites, config);
+        let rust_type =
+            self.sql_type_to_rust(&col.data_type, col.nullable, enums, composites, config);
 
         RustField {
             name: field_name,
@@ -451,9 +459,10 @@ impl RustEnum {
             quote! { #[doc = #c] }
         });
 
-        let derives = generate_derives(&self.derives, self.serde);
+        let derives =
+            generate_derives(&self.derives, self.serde, self.sqlx.then_some("sqlx::Type"));
         let attrs = generate_attributes(&self.attributes);
-        let sqlx_type = quote! { #[sqlx(type_name = #db_name)] };
+        let sqlx_type = self.sqlx.then(|| quote! { #[sqlx(type_name = #db_name)] });
         let variants: Vec<TokenStream> = self
             .variants
             .iter()
@@ -461,8 +470,10 @@ impl RustEnum {
                 let variant_name = Ident::new(&v.name, Span::call_site());
                 let variant_db_name = &v.db_name;
 
-                let mut variant_attrs = vec![quote! { #[sqlx(rename = #variant_db_name)] }];
-
+                let mut variant_attrs = Vec::new();
+                if self.sqlx {
+                    variant_attrs.push(quote! { #[sqlx(rename = #variant_db_name)] });
+                }
                 if self.serde && v.name != v.db_name {
                     variant_attrs.push(quote! { #[serde(rename = #variant_db_name)] });
                 }
@@ -500,7 +511,11 @@ impl RustStruct {
             quote! { #[doc = #c] }
         });
 
-        let derives = generate_derives(&self.derives, self.serde);
+        let derives = generate_derives(
+            &self.derives,
+            self.serde,
+            self.sqlx.then_some("sqlx::FromRow"),
+        );
         let attrs = generate_attributes(&self.attributes);
         let fields: Vec<TokenStream> = self
             .fields
@@ -512,14 +527,11 @@ impl RustStruct {
                 let mut field_attrs = Vec::new();
 
                 let db_name = &f.db_name;
-                if f.name != f.db_name && !f.name.starts_with("r#") {
+                if self.sqlx && (f.name != f.db_name || f.name.starts_with("r#")) {
                     field_attrs.push(quote! { #[sqlx(rename = #db_name)] });
                 }
-                if f.name.starts_with("r#") {
-                    field_attrs.push(quote! { #[sqlx(rename = #db_name)] });
-                    if self.serde {
-                        field_attrs.push(quote! { #[serde(rename = #db_name)] });
-                    }
+                if f.name.starts_with("r#") && self.serde {
+                    field_attrs.push(quote! { #[serde(rename = #db_name)] });
                 }
 
                 let doc = f.comment.as_ref().map(|c| {
@@ -550,16 +562,24 @@ impl RustStruct {
     }
 }
 
-fn generate_derives(derives: &[String], serde: bool) -> TokenStream {
-    if derives.is_empty() && !serde {
-        return quote! {};
-    }
-
+/// Render the `#[derive(...)]` line. `serde` injects the serde derives and
+/// `sqlx_derive` (e.g. `sqlx::FromRow` for structs, `sqlx::Type` for enums)
+/// injects the sqlx derive — both are convenience toggles, kept out of the
+/// caller's explicit `derives` list so they can be turned off.
+fn generate_derives(derives: &[String], serde: bool, sqlx_derive: Option<&str>) -> TokenStream {
     let mut derives: HashSet<String> = HashSet::from_iter(derives.iter().cloned());
 
     if serde {
         derives.insert("serde::Serialize".to_owned());
         derives.insert("serde::Deserialize".to_owned());
+    }
+
+    if let Some(sqlx_derive) = sqlx_derive {
+        derives.insert(sqlx_derive.to_owned());
+    }
+
+    if derives.is_empty() {
+        return quote! {};
     }
 
     let derives = derives.iter().map(|d| {
@@ -802,6 +822,7 @@ mod tests {
             derives: vec!["Debug".to_string()],
             attributes: vec![],
             serde: true,
+            sqlx: true,
             comment: None,
         };
 
@@ -811,5 +832,100 @@ mod tests {
         assert!(output.contains(r#"#[sqlx(rename = "type")]"#));
         assert!(output.contains(r#"#[serde(rename = "type")]"#));
         assert!(output.contains("pub r#type: String"));
+    }
+
+    fn renamed_field_struct(sqlx: bool) -> RustStruct {
+        RustStruct {
+            name: "User".to_string(),
+            table_name: "users".to_string(),
+            fields: vec![RustField {
+                name: "first_name".to_string(),
+                db_name: "firstName".to_string(),
+                rust_type: "String".to_string(),
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                comment: None,
+            }],
+            derives: vec!["Debug".to_string()],
+            attributes: vec![],
+            serde: false,
+            sqlx,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn sqlx_enabled_injects_fromrow_and_rename() {
+        let output = renamed_field_struct(true).to_string_pretty();
+        assert!(output.contains("sqlx::FromRow"));
+        assert!(output.contains(r#"#[sqlx(rename = "firstName")]"#));
+    }
+
+    #[test]
+    fn sqlx_disabled_omits_fromrow_and_sqlx_attrs() {
+        let output = renamed_field_struct(false).to_string_pretty();
+        assert!(output.contains("pub struct User"));
+        assert!(!output.contains("FromRow"), "got: {output}");
+        assert!(!output.contains("#[sqlx("), "got: {output}");
+    }
+
+    #[test]
+    fn sqlx_toggle_controls_enum_type_derive_and_attrs() {
+        let mk = |sqlx: bool| {
+            RustEnum {
+                name: "Status".to_string(),
+                db_name: "status".to_string(),
+                variants: vec![RustEnumVariant {
+                    name: "Active".to_string(),
+                    db_name: "active".to_string(),
+                }],
+                derives: vec!["Debug".to_string()],
+                attributes: vec![],
+                serde: false,
+                sqlx,
+                comment: None,
+            }
+            .to_string_pretty()
+        };
+
+        let on = mk(true);
+        assert!(on.contains("sqlx::Type"));
+        assert!(on.contains(r#"#[sqlx(type_name = "status")]"#));
+        assert!(on.contains(r#"#[sqlx(rename = "active")]"#));
+
+        let off = mk(false);
+        assert!(off.contains("pub enum Status"));
+        assert!(!off.contains("sqlx"), "got: {off}");
+    }
+
+    #[test]
+    fn default_config_still_derives_fromrow() {
+        // Regression: with the default config (sqlx on), generated structs must
+        // still derive sqlx::FromRow even though it's no longer in the default
+        // derive list — it's injected by the flag.
+        use crate::schema::{CompositeType, CompositeTypeColumn};
+
+        let composite = CompositeType {
+            name: "point".to_string(),
+            schema: Some("public".to_string()),
+            columns: vec![CompositeTypeColumn {
+                name: "x".to_string(),
+                data_type: DataType::Integer,
+            }],
+            description: None,
+        };
+
+        let output = RustGenerator
+            .build_composite_struct(
+                &Iden::new("point", Some("public".to_string())),
+                &composite,
+                &IndexMap::new(),
+                &IndexMap::new(),
+                &CodegenConfig::default(),
+            )
+            .to_string_pretty();
+
+        assert!(output.contains("sqlx::FromRow"), "got: {output}");
     }
 }

@@ -160,7 +160,7 @@ impl CodeWriter for ProtobufWriter {
         code: &Self::GeneratedCode,
         config: &CodegenConfig,
     ) -> Vec<PreviewFile> {
-        match config.format {
+        match config.format() {
             OutputMode::File => vec![PreviewFile::new(
                 format!("{}.{}", self.default_filename(), self.file_extension()),
                 self.single_file_contents(code),

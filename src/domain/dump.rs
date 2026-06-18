@@ -138,7 +138,7 @@ pub fn render_directory_schema_preview(config: &Config, snapshot: &Snapshot) -> 
             content: f.content,
         })
         .collect();
-    let output = render_preview(&files, "sql", config.no_color);
+    let output = render_preview(&files, "sql", config.no_color());
     Ok(output)
 }
 
@@ -168,7 +168,7 @@ fn directory_schema_files(snapshot: &Snapshot) -> Result<Vec<DirectorySchemaFile
 
     let main = includes
         .iter()
-        .map(|path| format!("\\i {}", path.to_string_lossy()))
+        .map(|path| format!("\\i {}", path.display()))
         .collect::<Vec<_>>()
         .join("\n");
     files.insert(
@@ -919,7 +919,7 @@ mod tests {
 
         let preview = render_directory_schema_preview(
             &Config {
-                no_color: true,
+                common: crate::CommonArgs { no_color: true, ..Default::default() },
                 ..Default::default()
             },
             &snapshot,

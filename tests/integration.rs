@@ -1433,9 +1433,12 @@ async fn codegen_writes_typescript_module_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                output: Some(output_dir.clone()),
-                format: Some(OutputMode::Module),
-                ..Default::default()
+                    config: shki::codegen::CodegenConfig {
+                        output: Some(output_dir.clone()),
+                        format: Some(OutputMode::Module),
+                        ..Default::default()
+                    },
+                    ..Default::default()
             },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
@@ -1472,9 +1475,12 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                output: Some(output_dir.clone()),
-                format: Some(OutputMode::Modules),
-                ..Default::default()
+                    config: shki::codegen::CodegenConfig {
+                        output: Some(output_dir.clone()),
+                        format: Some(OutputMode::Modules),
+                        ..Default::default()
+                    },
+                    ..Default::default()
             },
             language: CodegenLanguage::Rust,
             source: Some(snapshot_path),
@@ -1520,9 +1526,12 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                output: Some(output_dir.clone()),
-                format: Some(OutputMode::Module),
-                ..Default::default()
+                    config: shki::codegen::CodegenConfig {
+                        output: Some(output_dir.clone()),
+                        format: Some(OutputMode::Module),
+                        ..Default::default()
+                    },
+                    ..Default::default()
             },
             language: CodegenLanguage::Protobuf,
             source: Some(snapshot_path),
@@ -1566,9 +1575,12 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
                 ..Default::default()
             },
             codegen: shki::CodegenArgs {
-                output: Some(output_dir.clone()),
-                format: Some(OutputMode::Module),
-                ..Default::default()
+                    config: shki::codegen::CodegenConfig {
+                        output: Some(output_dir.clone()),
+                        format: Some(OutputMode::Module),
+                        ..Default::default()
+                    },
+                    ..Default::default()
             },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
@@ -1642,7 +1654,7 @@ async fn postgres_catalog_includes_functions_and_triggers() {
         .expect("failed to create function and trigger fixture");
 
     let config = Config {
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
         ..Config::default()
     };
     let snapshot = ctx
@@ -1726,7 +1738,7 @@ async fn postgres_catalog_includes_composite_types_and_domains() {
         .expect("failed to create composite type and domain fixture");
 
     let config = Config {
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
         ..Config::default()
     };
     let snapshot = ctx
@@ -1829,7 +1841,7 @@ async fn postgres_catalog_includes_procedures_aggregates_rls_and_partitions() {
         .expect("failed to create remaining catalog fixture");
 
     let config = Config {
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
         ..Config::default()
     };
     let snapshot = ctx
@@ -1925,7 +1937,7 @@ async fn postgres_catalog_includes_privileges() {
         .expect("failed to create privilege fixture");
 
     let config = Config {
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
         ..Config::default()
     };
     let snapshot = ctx
@@ -2050,10 +2062,16 @@ async fn compiler_turns_declarative_schema_sql_into_snapshot() {
 
     let config = Config {
         root: ctx.root_dir().to_path_buf(),
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            database_url: Some(ctx.database_url()),
+            ..Default::default()
+        },
         schema: schema_path,
-        database_url: Some(ctx.database_url()),
-        shadow_database_url: Some(shadow.database_url.clone()),
+        shadow: shki::ShadowArgs {
+            shadow_database_url: Some(shadow.database_url.clone()),
+            ..Default::default()
+        },
         ..Config::default()
     };
 
@@ -2096,10 +2114,16 @@ async fn compiler_consumes_directory_schema_with_i_includes() {
 
     let config = Config {
         root: ctx.root_dir().to_path_buf(),
-        dialect: shki::schema::SqlDialect::Postgres,
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            database_url: Some(ctx.database_url()),
+            ..Default::default()
+        },
         schema: schema_dir,
-        database_url: Some(ctx.database_url()),
-        shadow_database_url: Some(shadow.database_url.clone()),
+        shadow: shki::ShadowArgs {
+            shadow_database_url: Some(shadow.database_url.clone()),
+            ..Default::default()
+        },
         ..Config::default()
     };
 

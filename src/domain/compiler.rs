@@ -31,7 +31,7 @@ pub trait SchemaCompiler {
 }
 
 pub fn compiler_from_config(config: &Config) -> Result<Box<dyn SchemaCompiler + Send + Sync>> {
-    if config.shadow_database_url.is_some() {
+    if config.shadow.shadow_database_url.is_some() {
         Ok(Box::new(ExternalShadowDBCompiler::from_config(config)?))
     } else {
         Ok(Box::new(EmbeddedShadowDBCompiler::from_config(config)?))
@@ -85,7 +85,7 @@ fn embedded_shadow_settings(config: &Config) -> Result<Settings> {
     let mut settings = SettingsBuilder::new().timeout(Some(std::time::Duration::from_secs(
         shadow_timeout_seconds(config),
     )));
-    settings = settings.version(postgres_major_version_req(config.pg_version.unwrap_or(18))?);
+    settings = settings.version(postgres_major_version_req(config.shadow.pg_version.unwrap_or(18))?);
     Ok(settings.build())
 }
 
@@ -126,7 +126,7 @@ fn is_embedded_not_installed(status: Status) -> bool {
 }
 
 fn ensure_postgres_compiler_config(config: &Config) -> Result<()> {
-    if config.dialect != SqlDialect::Postgres {
+    if config.dialect() != SqlDialect::Postgres {
         return Err(ShkiError::unsupported_dialect(
             "Declarative Schema compilation currently requires PostgreSQL",
         ));
@@ -141,7 +141,7 @@ pub struct EmbeddedShadowDBCompiler;
 impl EmbeddedShadowDBCompiler {
     pub fn from_config(config: &Config) -> Result<Self> {
         ensure_postgres_compiler_config(config)?;
-        if let Some(version) = config.pg_version {
+        if let Some(version) = config.shadow.pg_version {
             postgres_major_version_req(version)?;
         }
 
@@ -185,11 +185,11 @@ impl ExternalShadowDBCompiler {
     pub fn from_config(config: &Config) -> Result<Self> {
         ensure_postgres_compiler_config(config)?;
 
-        let shadow_database_url = config.shadow_database_url.clone().ok_or_else(|| {
+        let shadow_database_url = config.shadow.shadow_database_url.clone().ok_or_else(|| {
             ShkiError::config("shadow_database_url is required to compile a Declarative Schema")
         })?;
 
-        if config.database_url.as_deref() == Some(shadow_database_url.as_str()) {
+        if config.database_url() == Some(shadow_database_url.as_str()) {
             return Err(ShkiError::config(
                 "shadow_database_url must not be the same as database_url",
             ));
@@ -282,7 +282,7 @@ where
     ensure_postgres_compiler_config(config)?;
     let schema = load_declarative_schema(config.schema_path())?;
 
-    if config.shadow_database_url.is_some() {
+    if config.shadow.shadow_database_url.is_some() {
         let compiler = ExternalShadowDBCompiler::from_config(config)?;
         let pool = compiler.connect(config).await?;
         let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
@@ -351,9 +351,9 @@ async fn validate_generated_diff_sql_with_pool(
 }
 
 fn render_baseline_sql(config: &Config, baseline: &Snapshot) -> Result<String> {
-    let empty = Snapshot::new(config.dialect);
+    let empty = Snapshot::new(config.dialect());
     let baseline_diff = diff_snapshots(&empty, baseline)?;
-    SqlRenderer::new(&config.dialect).generate_string(&baseline_diff.statements)
+    SqlRenderer::new(&config.dialect()).generate_string(&baseline_diff.statements)
 }
 
 fn generated_diff_sql_is_empty(generated_sql: &str) -> bool {
@@ -405,8 +405,11 @@ mod tests {
     #[test]
     fn external_shadow_compiler_requires_postgres() {
         let config = Config {
-            dialect: SqlDialect::Sqlite,
-            shadow_database_url: Some("sqlite://shadow".to_string()),
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Sqlite), ..Default::default() },
+            shadow: crate::ShadowArgs {
+                shadow_database_url: Some("sqlite://shadow".to_string()),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -419,7 +422,7 @@ mod tests {
     #[test]
     fn embedded_shadow_compiler_requires_postgres() {
         let config = Config {
-            dialect: SqlDialect::Sqlite,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Sqlite), ..Default::default() },
             ..Config::default()
         };
 
@@ -432,8 +435,11 @@ mod tests {
     #[test]
     fn embedded_shadow_compiler_rejects_unsupported_version_during_configuration() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
-            pg_version: Some(13),
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            shadow: crate::ShadowArgs {
+                pg_version: Some(13),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -450,7 +456,7 @@ mod tests {
     #[test]
     fn compiler_selector_uses_embedded_when_shadow_url_is_missing() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             ..Config::default()
         };
 
@@ -460,9 +466,11 @@ mod tests {
     #[test]
     fn compiler_selector_uses_external_when_shadow_url_is_configured() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
-            database_url: Some("postgres://localhost/app".to_string()),
-            shadow_database_url: Some("postgres://localhost/shadow".to_string()),
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
+            shadow: crate::ShadowArgs {
+                shadow_database_url: Some("postgres://localhost/shadow".to_string()),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -479,7 +487,7 @@ mod tests {
     #[test]
     fn embedded_shadow_settings_uses_longer_startup_timeout_floor() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             timeout_seconds: 2,
             ..Config::default()
         };
@@ -497,7 +505,7 @@ mod tests {
     #[test]
     fn embedded_shadow_settings_preserves_longer_configured_timeout() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             timeout_seconds: MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS + 30,
             ..Config::default()
         };
@@ -543,7 +551,7 @@ mod tests {
     #[test]
     fn external_shadow_compiler_requires_shadow_database_url() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             ..Config::default()
         };
 
@@ -560,9 +568,11 @@ mod tests {
     #[test]
     fn external_shadow_compiler_rejects_live_database_url() {
         let config = Config {
-            dialect: SqlDialect::Postgres,
-            database_url: Some("postgres://localhost/app".to_string()),
-            shadow_database_url: Some("postgres://localhost/app".to_string()),
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
+            shadow: crate::ShadowArgs {
+                shadow_database_url: Some("postgres://localhost/app".to_string()),
+                ..Default::default()
+            },
             ..Config::default()
         };
 

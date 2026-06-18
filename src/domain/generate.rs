@@ -30,7 +30,7 @@ pub async fn cmd_generate(
 
     let manager = MigrationManager::new(
         config.out_dir(),
-        crate::engines::Engine::detached(config.dialect, config.migrations.entity()),
+        crate::engines::Engine::detached(config.dialect(), config.migrations.entity()),
     );
     manager.ensure_dir()?;
 
@@ -56,12 +56,12 @@ pub async fn cmd_generate(
         diff = diff.apply_rename_decisions(&decisions)?;
     }
 
-    let generator = SqlRenderer::new(&config.dialect);
+    let generator = SqlRenderer::new(&config.dialect());
     let up_sql = generator.generate_string(&diff.statements)?;
     compiler
         .validate_generated_diff_sql(config, &baseline, &up_sql)
         .await?;
-    let down_sql = if with_down || config.migrations.generate_down {
+    let down_sql = if with_down || config.migrations.generate_down() {
         let (down_diff, irreversible) = diff.get_down_diff();
         let mut sql = generator.generate_string(&down_diff.statements)?;
         if !irreversible.is_empty() {

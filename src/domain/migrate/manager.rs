@@ -98,7 +98,7 @@ impl MigrationManager {
         Ok(Self {
             out_dir: config.out_dir(),
             table: table.clone(),
-            prefix: config.migrations.prefix,
+            prefix: config.migrations.prefix(),
             engine: Engine::from_config(config).await?,
         })
     }

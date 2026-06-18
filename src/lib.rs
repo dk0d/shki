@@ -55,7 +55,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             custom,
             with_down,
         } => {
-            let config = config.with_command_args(Some(&shadow), Some(&migrations), None)?;
+            let config = config
+                .with_shadow_args(&shadow)?
+                .with_migration_args(&migrations)?;
             generate::cmd_generate(&config, &name, custom, with_down).await
         }
 
@@ -110,16 +112,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Drop { migration } => drop_migration::cmd_drop(&config, &migration).await,
-        Commands::Queries {
-            shadow,
-            queries_dir,
-            output,
-            models_module,
-            preview,
-        } => {
-            let config = config.with_command_args(Some(&shadow), None, None)?;
-            codegen::queries::cmd_query_codegen(&config, queries_dir, output, models_module, preview)
-                .await
+        Commands::Queries { shadow, querygen } => {
+            let preview = querygen.preview;
+            let config = config
+                .with_shadow_args(&shadow)?
+                .with_querygen_args(&querygen)?;
+            codegen::queries::cmd_query_codegen(&config, preview).await
         }
         Commands::Codegen {
             shadow,
@@ -127,8 +125,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             source: schema,
             language,
         } => {
-            let config = config.with_command_args(Some(&shadow), None, Some(&codegen_args))?;
-            codegen::cmd_codegen(&config, schema, language).await
+            let preview = codegen_args.preview;
+            let config = config
+                .with_shadow_args(&shadow)?
+                .with_codegen_args(&codegen_args)?;
+            codegen::cmd_codegen(&config, schema, language, preview).await
         }
 
         Commands::Down {

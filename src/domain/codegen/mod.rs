@@ -38,7 +38,7 @@ where
         return Ok(());
     }
 
-    if config.output.is_none() {
+    if config.output().is_none() {
         println!("Generation skipped: no output path specified.");
         return Ok(());
     }
@@ -47,17 +47,20 @@ where
     Ok(())
 }
 
+/// `preview` is a CLI-only flag (not part of the merged `[codegen]` config), so
+/// it is passed explicitly rather than read from `config`.
 pub async fn cmd_codegen(
     config: &Config,
     source: Option<PathBuf>,
     language: CodegenLanguage,
+    preview: bool,
 ) -> Result<()> {
     let snapshot = load_codegen_snapshot(config, source).await?;
 
     let output = config
         .codegen
-        .output
-        .clone()
+        .output()
+        .cloned()
         .map(|output| resolve_path(Some(config.root.clone()), output));
 
     let gen_config = &config.codegen.clone().output_dir(output);
@@ -68,24 +71,24 @@ pub async fn cmd_codegen(
             RustWriter,
             &snapshot,
             gen_config,
-            config.codegen.preview,
-            config.no_color,
+            preview,
+            config.no_color(),
         ),
         CodegenLanguage::Protobuf => run_codegen(
             ProtobufGenerator::new(),
             ProtobufWriter,
             &snapshot,
             gen_config,
-            config.codegen.preview,
-            config.no_color,
+            preview,
+            config.no_color(),
         ),
         CodegenLanguage::Typescript { flavor } => run_codegen(
             TypeScriptGenerator::new(flavor),
             TypeScriptWriter,
             &snapshot,
             gen_config,
-            config.codegen.preview,
-            config.no_color,
+            preview,
+            config.no_color(),
         ),
     }
 }

@@ -270,7 +270,7 @@ impl CodeWriter for TypeScriptWriter {
         // TypeScript only distinguishes single-file from a flat module
         // directory (nested `Modules` is treated as a single module), so any
         // non-`File` mode previews the per-type files plus the `index.ts`.
-        if config.format == OutputMode::File {
+        if config.format() == OutputMode::File {
             return vec![PreviewFile::new(
                 format!("{}.{}", self.default_filename(), ext),
                 self.single_file_contents(code),

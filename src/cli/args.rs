@@ -18,7 +18,8 @@ use std::path::PathBuf;
 // use self::commands::codegen::languages::TypescriptFlavor;
 pub use CodegenLanguage as LanguageArg;
 
-use crate::codegen::OutputMode;
+use crate::codegen::CodegenConfig;
+use crate::codegen::queries::QueriesConfig;
 use crate::config::MigrationPrefix;
 use crate::domain::codegen::lang::typescript::TypescriptFlavor;
 use crate::dump::SchemaExportFormat;
@@ -55,31 +56,37 @@ pub fn get_styles() -> clap::builder::Styles {
         .placeholder(Style::new().fg_color(Some(AnsiColor::White.into())))
 }
 
-#[derive(Debug, Serialize, Parser, Default)]
+/// Global CLI overrides, flattened into the top-level
+/// [`Config`](crate::config::Config) as the single definition of the
+/// CLI-overridable top-level fields. `dialect`/`database_url`/`migrations_dir`
+/// are optional overrides resolved by `Config`'s accessors; `schema` is a
+/// CLI-only flag (`#[serde(skip)]`) applied to `migrations.schema` during load
+/// rather than merged (it would otherwise collide with the schema-dir key).
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, Default)]
 pub struct CommonArgs {
     /// Database dialect
     #[arg(long, short = 'l', global = true, value_enum)]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<SqlDialect>,
 
     /// Schema for the migrations table (PostgreSQL)
     #[arg(short='S', long,  default_value = None)]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub schema: Option<String>,
 
     /// Database connection URL
     #[arg(long, short = 'u', global = true, env = "DATABASE_URL")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_url: Option<String>,
 
     /// Directory to output and read migrations
     #[arg(short = 'd', long = "dir", long, global = true)]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "out", skip_serializing_if = "Option::is_none")]
     pub migrations_dir: Option<PathBuf>,
 
     /// Verbose output
     #[arg(short, long, global = true)]
-    #[serde(skip_serializing_if = "crate::config::is_false")]
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
     pub verbose: bool,
 
     #[arg(short, long, global = true, default_value_t = false)]
@@ -87,60 +94,62 @@ pub struct CommonArgs {
     pub no_color: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Args, Default)]
+/// Shadow Database overrides shared by the top-level [`Config`](crate::config::Config)
+/// (which flattens this) and the `--shadow-database-url` / `--pg-version` flags on
+/// shadow-using subcommands. Single definition of the shadow override fields.
+#[derive(Debug, Clone, Serialize, Deserialize, Args, Default)]
 pub struct ShadowArgs {
     /// Shadow Database connection URL used to compile Declarative Schemas
     #[arg(long, env = "SHKI_SHADOW_DATABASE_URL")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow_database_url: Option<String>,
 
     /// PostgreSQL major version for embedded Shadow Database compilation
     #[arg(long, env = "SHKI_PG_VERSION")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pg_version: Option<u8>,
 }
 
+/// CLI binding for `shki codegen`. The flattened [`CodegenConfig`] is the
+/// figment merge payload (the values that override the `[codegen]` config
+/// section); `#[serde(skip)]` fields like `preview` are CLI-only and never
+/// merged.
 #[derive(Debug, Clone, Serialize, Args, Default)]
 pub struct CodegenArgs {
-    /// Output directory for generated code
-    #[arg(short, long)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<PathBuf>,
-
-    /// Output mode: single file or module directory
-    #[arg(long, short)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format: Option<OutputMode>,
-
-    /// Whether to add serde derives and rename attributes
-    #[arg(long, action = ArgAction::SetTrue)]
-    #[serde(default, skip_serializing_if = "crate::config::is_false")]
-    pub serde: bool,
-
-    /// Whether to generate sqlx::FromRow derive
-    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_sqlx")]
-    pub sqlx: bool,
-
-    /// Disable sqlx derives
-    #[arg(long = "no-sqlx", action = ArgAction::SetTrue)]
-    pub no_sqlx: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub config: CodegenConfig,
 
     /// Preview the output without writing anything
-    #[arg(long, action = ArgAction::SetFalse)]
+    #[arg(long, action = ArgAction::SetTrue)]
+    #[serde(skip)]
     pub preview: bool,
 }
 
-impl CodegenArgs {
-    pub fn is_empty(&self) -> bool {
-        self.output.is_none() && self.format.is_none() && !self.serde && !self.sqlx && !self.no_sqlx
-    }
+/// CLI binding for `shki queries`. The flattened [`QueriesConfig`] is the
+/// figment merge payload (the values that override the `[queries]` config
+/// section); `#[serde(skip)]` fields like `preview` are CLI-only and never
+/// merged.
+#[derive(Debug, Clone, Serialize, Args, Default)]
+pub struct QueriesArgs {
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub config: QueriesConfig,
+
+    /// Preview the generated code without writing
+    #[arg(long, action = ArgAction::SetTrue)]
+    #[serde(skip)]
+    pub preview: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Args, Default)]
+/// Migration overrides shared by both the `[migrations]` config section (which
+/// flattens this) and every migration subcommand's CLI flags. The single
+/// definition of what a command may override on the migration config.
+#[derive(Debug, Clone, Serialize, Deserialize, Args, Default)]
 pub struct MigrationArgs {
     /// Name of the migrations table
     #[arg(short='T',long,  default_value = None)]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table: Option<String>,
 
     /// Migration file name prefix style
@@ -149,19 +158,13 @@ pub struct MigrationArgs {
         value_enum,
         default_value = None
     )]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix: Option<MigrationPrefix>,
 
     /// Whether to generate down migrations alongside up migrations
     #[arg(long, default_value_t = false)]
-    #[serde(skip_serializing_if = "crate::config::is_false")]
+    #[serde(default, skip_serializing_if = "crate::config::is_false")]
     pub generate_down: bool,
-}
-
-impl MigrationArgs {
-    pub fn is_empty(&self) -> bool {
-        self.table.is_none() && self.prefix.is_none() && !self.generate_down
-    }
 }
 
 /// Shki - Declarative database schema management
@@ -210,6 +213,11 @@ pub enum CodegenLanguage {
 }
 
 /// CLI commands
+// `Codegen` flattens the full `CodegenConfig` (one definition shared with the
+// `[codegen]` section), which is larger than the other variants. The enum is
+// built once per invocation, so the size variance is irrelevant, and a
+// `#[command(flatten)]` field can't be boxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug, Serialize)]
 pub enum Commands {
     /// Print the current configuration
@@ -413,21 +421,8 @@ pub enum Commands {
         #[command(flatten)]
         shadow: ShadowArgs,
 
-        /// Directory of annotated *.sql query files (default: <root>/queries)
-        #[arg(short = 'q', long = "queries")]
-        queries_dir: Option<PathBuf>,
-
-        /// Output file for generated Rust (prints to stdout if omitted)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-
-        /// Module path to import generated schema types from (e.g. `crate::models`)
-        #[arg(long = "models")]
-        models_module: Option<String>,
-
-        /// Preview the generated code without writing
-        #[arg(long)]
-        preview: bool,
+        #[command(flatten)]
+        querygen: QueriesArgs,
     },
 
     /// Drop a migration & snapshot (destructive)
@@ -462,4 +457,63 @@ pub enum Commands {
     //     #[arg(long)]
     //     output: Option<PathBuf>,
     // },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Parse `shki codegen <extra> rust` and return the flattened CodegenArgs.
+    fn parse_codegen(extra: &[&str]) -> CodegenArgs {
+        let mut argv = vec!["shki", "codegen"];
+        argv.extend_from_slice(extra);
+        argv.push("rust");
+        match Cli::try_parse_from(argv)
+            .expect("args should parse")
+            .command
+        {
+            Commands::Codegen { codegen, .. } => codegen,
+            other => panic!("expected codegen command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sqlx_flag_is_tri_state() {
+        // Absent: None, so the config value is left untouched on merge.
+        assert_eq!(parse_codegen(&[]).config.sqlx, None);
+        // Bare flag opts in via default_missing_value.
+        assert_eq!(parse_codegen(&["--sqlx"]).config.sqlx, Some(true));
+        // Explicit `=false` opts out (require_equals keeps it unambiguous).
+        assert_eq!(parse_codegen(&["--sqlx=false"]).config.sqlx, Some(false));
+        assert_eq!(parse_codegen(&["--serde=true"]).config.serde, Some(true));
+    }
+
+    #[test]
+    fn cli_codegen_args_leave_config_only_fields_empty() {
+        // CodegenArgs flattens the full CodegenConfig, so merge-safety depends on
+        // clap filling the `#[arg(skip)]` config-only fields with their empty
+        // default — `skip_serializing_if` then drops them from the merge payload,
+        // so a `--sqlx` flag can't clobber config-file `struct_derives`/etc.
+        let args = parse_codegen(&["--sqlx=false"]);
+        assert!(args.config.struct_derives.is_empty());
+        assert!(args.config.enum_derives.is_empty());
+        assert!(args.config.type_overrides.is_empty());
+
+        let config = crate::config::Config {
+            codegen: CodegenConfig {
+                struct_derives: vec!["Debug".to_string(), "MyDerive".to_string()],
+                ..CodegenConfig::default()
+            },
+            ..Default::default()
+        }
+        .with_codegen_args(&args)
+        .expect("codegen args should apply");
+
+        assert!(!config.codegen.sqlx());
+        assert_eq!(
+            config.codegen.struct_derives,
+            vec!["Debug".to_string(), "MyDerive".to_string()]
+        );
+    }
 }

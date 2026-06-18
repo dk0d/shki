@@ -121,17 +121,17 @@ impl Engine {
     pub async fn from_config(config: &Config) -> Result<Self> {
         let table: Iden = config.migrations.entity().clone();
 
-        if config.database_url.is_none() {
+        if config.database_url().is_none() {
             // If no database URL is provided, use the detached engine which doesn't require a connection
-            return Ok(Engine::Detached(Detached::new(config.dialect, table)));
+            return Ok(Engine::Detached(Detached::new(config.dialect(), table)));
         }
 
-        match config.dialect {
+        match config.dialect() {
             SqlDialect::Postgres => {
                 let pool = sqlx::postgres::PgPoolOptions::new()
                     .max_connections(5) // TODO: make this configurable?
                     .acquire_timeout(std::time::Duration::from_secs(config.timeout_seconds))
-                    .connect(config.database_url.as_ref().ok_or_else(|| {
+                    .connect(config.database_url().ok_or_else(|| {
                         crate::ShkiError::migration("Database URL is required for Postgres engine")
                     })?)
                     .await?;
@@ -141,7 +141,7 @@ impl Engine {
                 let pool = sqlx::sqlite::SqlitePoolOptions::new()
                     .max_connections(5)
                     .acquire_timeout(std::time::Duration::from_secs(config.timeout_seconds))
-                    .connect(config.database_url.as_ref().ok_or_else(|| {
+                    .connect(config.database_url().ok_or_else(|| {
                         crate::ShkiError::migration("Database URL is required for Sqlite engine")
                     })?)
                     .await?;
@@ -151,7 +151,7 @@ impl Engine {
                 let pool = sqlx::mysql::MySqlPoolOptions::new()
                     .max_connections(5)
                     .acquire_timeout(std::time::Duration::from_secs(config.timeout_seconds))
-                    .connect(config.database_url.as_ref().ok_or_else(|| {
+                    .connect(config.database_url().ok_or_else(|| {
                         crate::ShkiError::migration("Database URL is required for MySQL engine")
                     })?)
                     .await?;

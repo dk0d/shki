@@ -30,7 +30,7 @@ pub async fn cmd_diff(config: &Config) -> Result<()> {
 pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
     let manager = MigrationManager::new(
         config.out_dir(),
-        crate::engines::Engine::detached(config.dialect, config.migrations.entity()),
+        crate::engines::Engine::detached(config.dialect(), config.migrations.entity()),
     );
     let journal = manager.load_journal()?;
     let Some(entry) = journal
@@ -39,7 +39,7 @@ pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
         .rev()
         .find(|entry| entry.kind == MigrationKind::Schema)
     else {
-        return Ok(Snapshot::new(config.dialect));
+        return Ok(Snapshot::new(config.dialect()));
     };
 
     load_snapshot_by_name(config, &entry.migration)
@@ -312,7 +312,7 @@ mod tests {
         });
         let diff = diff_snapshots(&baseline, &desired).expect("snapshot diff should succeed");
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             ..Config::default()
         };
 
@@ -339,7 +339,7 @@ mod tests {
         desired.insert_table(Iden::new("users", None), Table::new("users"));
         let diff = diff_snapshots(&baseline, &desired).expect("snapshot diff should succeed");
         let config = Config {
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
             ..Config::default()
         };
 
@@ -404,8 +404,7 @@ mod tests {
 
         let config = Config {
             root: temp_dir.path().to_path_buf(),
-            migrations_dir: out_dir,
-            dialect: SqlDialect::Postgres,
+            common: crate::CommonArgs { migrations_dir: Some(out_dir), dialect: Some(SqlDialect::Postgres), ..Default::default() },
             ..Config::default()
         };
 

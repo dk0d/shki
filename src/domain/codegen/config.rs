@@ -1,72 +1,103 @@
 //! Code generation configuration
 
+use clap::Args;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Configuration for Rust code generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Configuration for Rust code generation.
+///
+/// This struct doubles as the `[codegen]` config section, the figment merge
+/// payload, and (flattened into the `codegen` command's args) the CLI flags —
+/// one definition, like [`QueriesConfig`](crate::codegen::queries::QueriesConfig).
+/// The overridable fields (`output`/`format`/`serde`/`sqlx`) carry `#[arg]`;
+/// the rest are `#[arg(skip)]` config-only fields. Every field is
+/// `skip_serializing_if`-guarded so a CLI-built instance (all config-only fields
+/// at their empty default) serializes to only what the user set and never
+/// clobbers the config file on merge. Read resolved values via the accessors
+/// (`serde()`, `sqlx()`, `format()`, `struct_derives()`, `enum_derives()`).
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct CodegenConfig {
     /// Output directory for generated code
-    #[serde(default)]
+    #[arg(short, long)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<PathBuf>,
 
     /// Output mode: single file or module directory
-    #[serde(default)]
-    pub format: OutputMode,
+    #[arg(long, short)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<OutputMode>,
+
+    /// Add serde derives and rename attributes (`--serde` / `--serde=false`)
+    #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serde: Option<bool>,
+
+    /// Generate sqlx::FromRow derives (`--sqlx` / `--sqlx=false`)
+    #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sqlx: Option<bool>,
 
     /// Derives to add to generated structs
-    #[serde(default = "default_struct_derives")]
+    #[arg(skip)]
+    #[serde(
+        default = "default_struct_derives",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub struct_derives: Vec<String>,
 
     /// Additional attributes for generated structs
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub struct_attributes: Vec<String>,
 
     /// Derives to add to generated enums
-    #[serde(default = "default_enum_derives")]
+    #[arg(skip)]
+    #[serde(
+        default = "default_enum_derives",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub enum_derives: Vec<String>,
 
     /// Additional attributes for generated enums
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enum_attributes: Vec<String>,
 
     /// Custom struct name overrides (table_name -> RustStructName)
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub struct_renames: IndexMap<String, String>,
 
     /// Pattern for generated struct names, using "{}" as the base name placeholder
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub struct_pattern: Option<String>,
 
     /// Custom enum name overrides (enum_name -> RustEnumName)
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub enum_renames: IndexMap<String, String>,
 
     /// Pattern for generated enum names, using "{}" as the base name placeholder
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enum_pattern: Option<String>,
 
     /// SQL type to Rust type overrides
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub type_overrides: IndexMap<String, String>,
 
-    /// Whether to add serde derives and rename attributes
-    #[serde(default = "default_true")]
-    pub serde: bool,
-
-    /// Whether to generate sqlx::FromRow derive
-    #[serde(default = "default_true")]
-    pub sqlx: bool,
-
     /// Tables to include (empty = all)
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include_tables: Vec<String>,
 
     /// Tables to exclude
-    #[serde(default)]
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_tables: Vec<String>,
-
-    #[serde(default, skip_serializing_if = "crate::config::is_false")]
-    pub preview: bool,
 }
 
 /// Output mode for generated code
@@ -116,12 +147,12 @@ pub enum OutputMode {
     Modules,
 }
 
+// The `sqlx` convenience flag injects `sqlx::FromRow` (structs) / `sqlx::Type`
+// (enums) at generation time, mirroring how `serde` injects its derives. So
+// these lists hold only the always-on base derives plus any user extras; they
+// must NOT carry the sqlx derives or toggling `sqlx` off would have no effect.
 fn default_struct_derives() -> Vec<String> {
-    vec![
-        "Debug".to_string(),
-        "Clone".to_string(),
-        "sqlx::FromRow".to_string(),
-    ]
+    vec!["Debug".to_string(), "Clone".to_string()]
 }
 
 fn default_enum_derives() -> Vec<String> {
@@ -129,19 +160,16 @@ fn default_enum_derives() -> Vec<String> {
         "Debug".to_string(),
         "Clone".to_string(),
         "PartialEq".to_string(),
-        "sqlx::Type".to_string(),
     ]
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Default for CodegenConfig {
     fn default() -> Self {
         Self {
             output: None,
-            format: OutputMode::File,
+            format: None,
+            serde: None,
+            sqlx: None,
             struct_derives: default_struct_derives(),
             struct_attributes: Vec::new(),
             enum_derives: default_enum_derives(),
@@ -151,11 +179,8 @@ impl Default for CodegenConfig {
             enum_renames: IndexMap::new(),
             enum_pattern: None,
             type_overrides: IndexMap::new(),
-            serde: false,
-            sqlx: true,
             include_tables: Vec::new(),
             exclude_tables: Vec::new(),
-            preview: false,
         }
     }
 }
@@ -166,6 +191,26 @@ impl CodegenConfig {
         Self::default()
     }
 
+    /// Resolved output directory for generated code (none = print/skip).
+    pub fn output(&self) -> Option<&PathBuf> {
+        self.output.as_ref()
+    }
+
+    /// Resolved output layout (defaults to a single file).
+    pub fn format(&self) -> OutputMode {
+        self.format.unwrap_or_default()
+    }
+
+    /// Whether serde derives/attributes are enabled (defaults to off).
+    pub fn serde(&self) -> bool {
+        self.serde.unwrap_or(false)
+    }
+
+    /// Whether sqlx derives/attributes are enabled (defaults to on).
+    pub fn sqlx(&self) -> bool {
+        self.sqlx.unwrap_or(true)
+    }
+
     /// Set the output directory
     pub fn output_dir(mut self, dir: Option<impl Into<PathBuf>>) -> Self {
         self.output = dir.map(Into::into);
@@ -174,24 +219,26 @@ impl CodegenConfig {
 
     /// Set single file output mode
     pub fn single_file(mut self) -> Self {
-        self.format = OutputMode::File;
+        self.format = Some(OutputMode::File);
         self
     }
 
     /// Set single module output mode
     pub fn single_module(mut self) -> Self {
-        self.format = OutputMode::Module;
+        self.format = Some(OutputMode::Module);
         self
     }
 
     /// Set module output mode
     pub fn modules(mut self) -> Self {
-        self.format = OutputMode::Modules;
+        self.format = Some(OutputMode::Modules);
         self
     }
 
     pub fn mode(mut self, mode: Option<OutputMode>) -> Self {
-        self.format = mode.unwrap_or(self.format);
+        if mode.is_some() {
+            self.format = mode;
+        }
         self
     }
 
@@ -275,28 +322,17 @@ impl CodegenConfig {
         self
     }
 
-    /// Enable serde support
+    /// Enable serde support (Serialize/Deserialize derives + rename attributes).
+    /// The derives are injected at generation time, so this only sets the flag.
     pub fn with_serde(mut self) -> Self {
-        self.serde = true;
-        if !self
-            .struct_derives
-            .contains(&"serde::Serialize".to_string())
-        {
-            self.struct_derives.push("serde::Serialize".to_string());
-            self.struct_derives.push("serde::Deserialize".to_string());
-        }
-        if !self.enum_derives.contains(&"serde::Serialize".to_string()) {
-            self.enum_derives.push("serde::Serialize".to_string());
-            self.enum_derives.push("serde::Deserialize".to_string());
-        }
+        self.serde = Some(true);
         self
     }
 
-    /// Disable sqlx derives
+    /// Disable sqlx derives. The `sqlx::FromRow`/`sqlx::Type` derives and
+    /// `#[sqlx(...)]` attributes are injected by the flag, so this only clears it.
     pub fn without_sqlx(mut self) -> Self {
-        self.sqlx = false;
-        self.struct_derives.retain(|d| !d.contains("sqlx"));
-        self.enum_derives.retain(|d| !d.contains("sqlx"));
+        self.sqlx = Some(false);
         self
     }
 

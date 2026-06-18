@@ -481,9 +481,9 @@ where
     E: SnapshotProvider + Send + Sync,
 {
     async fn introspect(&self, config: &Config, schema: &Option<String>) -> Result<Snapshot> {
-        let mut snapshot = Snapshot::new(config.dialect);
+        let mut snapshot = Snapshot::new(config.dialect());
 
-        let schema = match config.dialect {
+        let schema = match config.dialect() {
             SqlDialect::Postgres => Some(schema.clone().unwrap_or("public".to_string())),
             SqlDialect::Mysql | SqlDialect::Sqlite => schema.clone(),
         };

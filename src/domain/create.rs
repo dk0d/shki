@@ -17,7 +17,7 @@ pub async fn cmd_create(
     let migration_manager = MigrationManager::from_config(config).await?;
 
     // Use config setting for down migrations, but CLI flag can override
-    let create_down = with_down || config.migrations.generate_down;
+    let create_down = with_down || config.migrations.generate_down();
 
     // Get initial SQL content if provided
     let initial_sql = if let Some(sql_content) = sql {

@@ -62,17 +62,21 @@ pub struct QuerySpec {
 /// Parse every `*.sql` file in `dir` into a flat, file-then-declaration-ordered
 /// list of query specs.
 pub fn parse_query_dir(dir: &Path) -> Result<Vec<QuerySpec>> {
-    if !dir.is_dir() {
+    if !dir.exists() {
         return Err(ShkiError::config(format!(
-            "Query directory not found: {}",
+            "Query path not found: {}",
             dir.display()
         )));
     }
 
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
-        .collect();
+    let mut files: Vec<PathBuf> = if dir.is_dir() {
+        std::fs::read_dir(dir)?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+            .collect()
+    } else {
+        vec![dir.to_path_buf()]
+    };
     files.sort();
 
     let mut specs = Vec::new();
@@ -87,8 +91,8 @@ pub fn parse_query_dir(dir: &Path) -> Result<Vec<QuerySpec>> {
 /// Parse a single query file's contents.
 pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySpec>> {
     // e.g. `-- name: active_users :many` or `-- name: page :batch :keyset $1 $2`
-    let marker = Regex::new(r"^\s*--\s*name:\s*(?P<name>\S+)\s+(?P<rest>:.*?)\s*$")
-        .expect("valid regex");
+    let marker =
+        Regex::new(r"^\s*--\s*name:\s*(?P<name>\S+)\s+(?P<rest>:.*?)\s*$").expect("valid regex");
 
     let mut specs: Vec<QuerySpec> = Vec::new();
     let mut current: Option<(String, Cardinality, Vec<String>)> = None;
@@ -98,7 +102,12 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
                  body: &mut Vec<&str>,
                  specs: &mut Vec<QuerySpec>| {
         if let Some((name, cardinality, keyset)) = current.take() {
-            let sql = body.join("\n").trim().trim_end_matches(';').trim().to_string();
+            let sql = body
+                .join("\n")
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+                .to_string();
             specs.push(QuerySpec {
                 name,
                 cardinality,

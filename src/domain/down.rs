@@ -6,10 +6,7 @@ use crate::{Config, Result, ShkiError};
 
 // Rollback migrations using down migration files
 pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> Result<()> {
-    config
-        .database_url
-        .as_ref()
-        .ok_or_else(|| ShkiError::config("DATABASE_URL is required"))?;
+    config.require_database_url()?;
 
     let migration_manager = MigrationManager::from_config(config).await?;
 
@@ -74,7 +71,7 @@ pub async fn cmd_down(config: &Config, count: Option<usize>, dry_run: bool) -> R
             .unwrap_or("unknown")
             .to_string();
 
-        if config.verbose {
+        if config.verbose() {
             println!("Rolling back: {}", name);
         }
 
