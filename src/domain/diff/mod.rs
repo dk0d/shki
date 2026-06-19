@@ -7,7 +7,6 @@ pub(crate) mod topological;
 
 use crate::compiler::compiler_from_config;
 use crate::config::Config;
-use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::{Result, ShkiError};
 
@@ -17,7 +16,7 @@ use super::schema::Table;
 use super::snapshots::Snapshot;
 
 pub async fn cmd_diff(config: &Config) -> Result<()> {
-    let baseline = load_latest_snapshot(config)?;
+    let baseline = crate::compiler::resolve_baseline_snapshot(config).await?;
     let desired = compiler_from_config(config)?.compile(config).await?;
     let diff = diff_snapshots(&baseline, &desired)?;
     let preview = diff_preview(config, &diff)?;
@@ -27,18 +26,24 @@ pub async fn cmd_diff(config: &Config) -> Result<()> {
     Ok(())
 }
 
+/// The most recent committed Snapshot — the latest Journal entry that has a
+/// `<migration>.snapshot.json` on disk, regardless of migration kind.
+///
+/// Custom migrations are snapshotted lazily (see
+/// [`crate::compiler::resolve_baseline_snapshot`]); once backfilled they are
+/// valid baselines too, so this no longer filters on `MigrationKind::Schema`.
 pub fn load_latest_snapshot(config: &Config) -> Result<Snapshot> {
     let manager = MigrationManager::new(
         config.out_dir(),
         crate::engines::Engine::detached(config.dialect(), config.migrations.entity()),
     );
     let journal = manager.load_journal()?;
-    let Some(entry) = journal
-        .entries
-        .iter()
-        .rev()
-        .find(|entry| entry.kind == MigrationKind::Schema)
-    else {
+    let meta_dir = manager.meta_dir();
+    let Some(entry) = journal.entries.iter().rev().find(|entry| {
+        meta_dir
+            .join(format!("{}.snapshot.json", entry.migration))
+            .exists()
+    }) else {
         return Ok(Snapshot::new(config.dialect()));
     };
 
@@ -257,7 +262,7 @@ pub fn detect_nested_renames(
 mod tests {
     use super::*;
     use crate::diff::rename::{RenameDecision, RenameKind, RenameMap};
-    use crate::migrate::journal::{Journal, JournalEntry};
+    use crate::migrate::journal::{Journal, JournalEntry, MigrationKind};
     use crate::models::iden::Iden;
     use crate::schema::DataType;
     use crate::schema::{
@@ -411,6 +416,61 @@ mod tests {
         let snapshot = load_latest_snapshot(&config).expect("latest snapshot should load");
 
         assert_eq!(snapshot.id, "second");
+    }
+
+    #[test]
+    fn load_latest_snapshot_uses_latest_snapshotted_entry_including_custom() {
+        // Once a custom migration has been backfilled with a Snapshot, it is a
+        // valid baseline — load_latest_snapshot must pick it over an earlier
+        // schema Snapshot rather than skipping it for being `Custom`.
+        let temp_dir = TempDir::new().expect("failed to create temp dir");
+        let out_dir = temp_dir.path().join("migrations");
+        let meta_dir = out_dir.join("_meta");
+        std::fs::create_dir_all(&meta_dir).expect("failed to create meta dir");
+
+        for (name, id) in [("0001_schema", "schema"), ("0002_custom", "custom")] {
+            let mut snap = Snapshot::new(SqlDialect::Postgres);
+            snap.id = id.to_string();
+            std::fs::write(
+                meta_dir.join(format!("{name}.snapshot.json")),
+                serde_json::to_string_pretty(&snap).expect("serialize snapshot"),
+            )
+            .expect("write snapshot");
+        }
+
+        Journal {
+            version: "1".to_string(),
+            entries: vec![
+                JournalEntry {
+                    index: 0,
+                    migration: "0001_schema".to_string(),
+                    kind: MigrationKind::Schema,
+                    checksum: "schema".to_string(),
+                },
+                JournalEntry {
+                    index: 1,
+                    migration: "0002_custom".to_string(),
+                    kind: MigrationKind::Custom,
+                    checksum: "custom".to_string(),
+                },
+            ],
+        }
+        .save(&crate::migrate::journal::journal_path(&out_dir))
+        .expect("failed to write journal");
+
+        let config = Config {
+            root: temp_dir.path().to_path_buf(),
+            common: crate::CommonArgs {
+                migrations_dir: Some(out_dir),
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+
+        let snapshot = load_latest_snapshot(&config).expect("latest snapshot should load");
+
+        assert_eq!(snapshot.id, "custom");
     }
 
     #[test]

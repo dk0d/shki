@@ -748,6 +748,122 @@ async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
     ctx.cleanup().await;
 }
 
+/// A Custom Migration that changes the schema shape must be reflected in the
+/// next diff. shki backfills a Snapshot for it (replaying its SQL on a shadow
+/// DB) so the baseline includes the custom change — otherwise the next
+/// `generate` would re-emit DDL the custom migration already applied.
+#[tokio::test]
+async fn cli_generate_accounts_for_schema_changing_custom_migration() {
+    let ctx = PgTestContext::setup("cli_generate_custom_ddl").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table = ctx.unique_name("custom_ddl_users");
+
+    // 1. A schema migration creating the table (id, name).
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {table} (id integer primary key, name text not null);\n"),
+    )
+    .expect("write declarative schema");
+    let shadow_args = || shki::ShadowArgs {
+        shadow_database_url: Some(shadow.database_url.clone()),
+        ..Default::default()
+    };
+    let common = || CommonArgs {
+        dialect: Some(shki::schema::SqlDialect::Postgres),
+        ..CommonArgs::default()
+    };
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: common(),
+        command: Commands::Generate {
+            shadow: shadow_args(),
+            migrations: Default::default(),
+            name: "create users".to_string(),
+            custom: false,
+            with_down: false,
+        },
+    })
+    .await
+    .expect("schema generate should succeed");
+
+    // 2. A Custom Migration that adds a column via hand-written DDL.
+    run(shki::Cli {
+        config: config_path.clone(),
+        common: common(),
+        command: Commands::Create {
+            migrations: Default::default(),
+            name: "add email".to_string(),
+            sql: Some(format!("ALTER TABLE {table} ADD COLUMN email text;")),
+            sql_file: None,
+            with_down: false,
+            edit: false,
+        },
+    })
+    .await
+    .expect("custom create should write a Custom Migration");
+
+    // 3. Mirror the custom change in the declarative schema (the source of truth).
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!(
+            "CREATE TABLE {table} (id integer primary key, name text not null, email text);\n"
+        ),
+    )
+    .expect("write updated declarative schema");
+
+    // 4. Generate again. Because the custom migration's `email` column is now in
+    //    the baseline, the declarative schema matches it and there are NO changes
+    //    — so no third migration is written.
+    run(shki::Cli {
+        config: config_path,
+        common: common(),
+        command: Commands::Generate {
+            shadow: shadow_args(),
+            migrations: Default::default(),
+            name: "should be empty".to_string(),
+            custom: false,
+            with_down: false,
+        },
+    })
+    .await
+    .expect("second schema generate should succeed");
+
+    // The custom migration was backfilled with a Snapshot capturing `email`.
+    let custom_snapshot_path = ctx.migrations_dir().join("_meta/0001_add-email.snapshot.json");
+    let snapshot: Snapshot = serde_json::from_str(
+        &std::fs::read_to_string(&custom_snapshot_path)
+            .expect("custom migration should have a backfilled snapshot"),
+    )
+    .expect("snapshot should parse");
+    let users = snapshot
+        .tables()
+        .into_iter()
+        .find(|(id, _)| id.name == table)
+        .map(|(_, t)| t)
+        .expect("snapshot should contain the table");
+    assert!(
+        users.columns.contains_key("email"),
+        "backfilled custom-migration snapshot must include the column the custom DDL added"
+    );
+
+    // No spurious migration was generated for a change the custom migration made.
+    let sql_files: Vec<String> = std::fs::read_dir(ctx.migrations_dir())
+        .expect("migrations dir readable")
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".sql"))
+        .collect();
+    assert_eq!(
+        sql_files.len(),
+        2,
+        "only the schema + custom migration files should exist, got: {sql_files:?}"
+    );
+
+    shadow.cleanup().await;
+    ctx.cleanup().await;
+}
+
 #[tokio::test]
 async fn cli_migrate_steps_applies_limited_pending() {
     scenario_cli_migrate_steps_applies_limited_pending(

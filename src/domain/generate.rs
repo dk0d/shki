@@ -8,7 +8,7 @@ use crate::compiler::compiler_from_config;
 use crate::config::Config;
 use crate::create;
 use crate::diff::rename::{RenameDecision, RenameKind, RenameScenario};
-use crate::diff::{detect_nested_renames, diff_preview, diff_snapshots, load_latest_snapshot};
+use crate::diff::{detect_nested_renames, diff_preview, diff_snapshots};
 use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::migrate::utils::sanitize_migration_name;
@@ -34,7 +34,7 @@ pub async fn cmd_generate(
     );
     manager.ensure_dir()?;
 
-    let baseline = load_latest_snapshot(config)?;
+    let baseline = crate::compiler::resolve_baseline_snapshot(config).await?;
     let compiler = compiler_from_config(config)?;
     let mut desired = compiler.compile(config).await?;
     desired.prev_id = Some(baseline.id.clone());

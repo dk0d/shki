@@ -208,7 +208,7 @@ If Shki detects possible renames, `generate` prompts before rendering the migrat
 
 ### Create A Custom Migration
 
-Use Custom Migrations for changes outside schema-shape planning, such as data backfills or operational SQL.
+Use Custom Migrations for hand-written SQL — data backfills, operational SQL, or schema changes the Declarative Schema can't express. Any schema-shape changes they make are still tracked (see below), so the Declarative Schema and Snapshot chain stay in sync.
 
 ```bash
 shki create backfill_user_emails --with-down
@@ -233,7 +233,7 @@ Seed a Custom Migration from a file:
 shki create add_audit_table --sql-file ./sql/add_audit_table.sql
 ```
 
-Custom Migrations are executable artifacts. They are recorded in the Journal but do not create schema Snapshots.
+Custom Migrations are executable artifacts recorded in the Journal. Their SQL isn't final at creation time, so no Snapshot is written then — but the next time a diff is needed (`diff` or `generate`), Shki replays any not-yet-snapshotted migrations on a Shadow Database, introspects the result, and records a Snapshot for each. This keeps the Snapshot chain complete: if a Custom Migration changes the schema shape, that change is captured in the baseline so the next generated migration accounts for it (and won't re-emit DDL the Custom Migration already applied).
 
 ### Apply Migrations
 

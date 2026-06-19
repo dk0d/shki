@@ -9,8 +9,11 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::declarative::{load_declarative_schema, normalize_declarative_apply_sql};
-use crate::diff::diff_snapshots;
+use crate::diff::{diff_snapshots, load_latest_snapshot, load_snapshot_by_name};
+use crate::engines::Engine;
 use crate::engines::pg::Postgres;
+use crate::migrate::checksum::sql_checksum;
+use crate::migrate::manager::{MigrationInfo, MigrationManager};
 use crate::schema::SqlDialect;
 use crate::snapshots::{Introspectable, Snapshot};
 use crate::sql::render::SqlRenderer;
@@ -282,18 +285,144 @@ where
     ensure_postgres_compiler_config(config)?;
     let schema = load_declarative_schema(config.schema_path())?;
 
+    with_shadow_pool(config, |pool| async move {
+        let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
+        operation(snapshot, pool).await
+    })
+    .await
+}
+
+/// Run `operation` against a connected Shadow Database pool — external when
+/// `shadow_database_url` is configured, otherwise a freshly provisioned embedded
+/// one. The pool's schema state is whatever the caller makes it; nothing is
+/// compiled into it first.
+async fn with_shadow_pool<T, F, Fut>(config: &Config, operation: F) -> Result<T>
+where
+    F: FnOnce(sqlx::Pool<sqlx::Postgres>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
     if config.shadow.shadow_database_url.is_some() {
         let compiler = ExternalShadowDBCompiler::from_config(config)?;
         let pool = compiler.connect(config).await?;
-        let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
-        operation(snapshot, pool).await
+        operation(pool).await
     } else {
-        with_embedded_shadow_pool(config, |pool| async move {
-            let snapshot = compile_with_pool(config, &schema.sql, pool.clone()).await?;
-            operation(snapshot, pool).await
-        })
-        .await
+        with_embedded_shadow_pool(config, operation).await
     }
+}
+
+/// Resolve the baseline [`Snapshot`] to diff a new schema change against,
+/// completing the Snapshot chain for any custom migrations first.
+///
+/// Schema-derived migrations record a Snapshot at `generate` time, but custom
+/// migrations are hand-written SQL whose final form isn't known until the user
+/// finishes editing — so they aren't snapshotted at creation. A custom migration
+/// may still change the schema shape, which would otherwise be invisible to the
+/// next diff (the baseline would be the last *schema* Snapshot, missing the
+/// custom changes).
+///
+/// This walks the Journal, finds every trailing migration without a Snapshot,
+/// replays them in order on a Shadow Database seeded from the last known
+/// Snapshot, introspects after each, and persists a `<migration>.snapshot.json`
+/// for it. The returned Snapshot is the resulting state — so the diff baseline
+/// reflects custom-migration changes.
+pub async fn resolve_baseline_snapshot(config: &Config) -> Result<Snapshot> {
+    backfill_pending_snapshots(config).await?;
+    load_latest_snapshot(config)
+}
+
+/// Replay and snapshot any committed migrations that don't yet have a Snapshot
+/// (see [`resolve_baseline_snapshot`]). A no-op (no Shadow Database needed) when
+/// every migration is already snapshotted, which is the common case.
+async fn backfill_pending_snapshots(config: &Config) -> Result<()> {
+    let manager = MigrationManager::new(
+        config.out_dir(),
+        Engine::detached(config.dialect(), config.migrations.entity()),
+    );
+    let journal = manager.load_journal()?;
+    let meta_dir = manager.meta_dir();
+
+    // The Journal splits into [already snapshotted… | trailing un-snapshotted].
+    let last_snapshotted = journal.entries.iter().rposition(|entry| {
+        meta_dir
+            .join(format!("{}.snapshot.json", entry.migration))
+            .exists()
+    });
+    let pending = match last_snapshotted {
+        Some(index) => &journal.entries[index + 1..],
+        None => &journal.entries[..],
+    };
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    ensure_postgres_compiler_config(config)?;
+
+    let base = match last_snapshotted {
+        Some(index) => load_snapshot_by_name(config, &journal.entries[index].migration)?,
+        None => Snapshot::new(config.dialect()),
+    };
+
+    // Read each pending migration's up SQL up front so the async block owns it.
+    let pending: Vec<(String, String)> = pending
+        .iter()
+        .map(|entry| {
+            let up_path = manager.out_dir.join(format!("{}.sql", entry.migration));
+            let sql = std::fs::read_to_string(&up_path).map_err(|err| {
+                ShkiError::migration(format!(
+                    "Failed to read migration {} for Snapshot backfill: {}",
+                    up_path.display(),
+                    err
+                ))
+            })?;
+            Ok((entry.migration.clone(), sql))
+        })
+        .collect::<Result<_>>()?;
+
+    with_shadow_pool(config, |pool| async move {
+        reset_shadow_database(&pool).await?;
+
+        // Seed the last known schema shape, then replay each pending migration.
+        let base_sql = render_baseline_sql(config, &base)?;
+        if !base_sql.trim().is_empty() {
+            sqlx::raw_sql(AssertSqlSafe(base_sql))
+                .execute(&pool)
+                .await
+                .map_err(|err| {
+                    ShkiError::schema(format!(
+                        "Failed to seed baseline Snapshot before custom-migration replay: {}",
+                        err
+                    ))
+                })?;
+        }
+
+        let mut prev_id = base.id;
+        for (name, sql) in pending {
+            sqlx::raw_sql(AssertSqlSafe(sql.clone()))
+                .execute(&pool)
+                .await
+                .map_err(|err| {
+                    ShkiError::database_with_source(
+                        err,
+                        "Migration failed to apply during Snapshot backfill in the Shadow Database",
+                        &name,
+                        &sql,
+                    )
+                })?;
+
+            let engine = Postgres::new(pool.clone(), config.migrations.entity());
+            let mut snapshot = introspect_all_schemas(config, &engine).await?;
+            snapshot.prev_id = Some(prev_id.clone());
+            snapshot.migration = Some(MigrationInfo {
+                name: name.clone(),
+                checksum: Some(sql_checksum(&sql)),
+            });
+            std::fs::write(meta_dir.join(format!("{}.snapshot.json", name)), snapshot.to_json()?)?;
+            prev_id = snapshot.id;
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 async fn apply_declarative_schema_sql(
