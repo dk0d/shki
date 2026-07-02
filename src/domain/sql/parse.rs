@@ -491,7 +491,10 @@ fn validate_sql_token(kind: &squawk_lexer::TokenKind) -> Result<()> {
         squawk_lexer::TokenKind::BlockComment { terminated: false } => Err(ShkiError::schema(
             "Unterminated block comment in Declarative Schema",
         )),
-        squawk_lexer::TokenKind::QuotedIdent { terminated: false } => Err(ShkiError::schema(
+        squawk_lexer::TokenKind::QuotedIdent {
+            terminated: false,
+            uescape: _,
+        } => Err(ShkiError::schema(
             "Unterminated quoted identifier in Declarative Schema",
         )),
         squawk_lexer::TokenKind::Literal { kind, .. } if literal_is_unterminated(kind) => Err(
