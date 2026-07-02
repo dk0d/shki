@@ -5,6 +5,7 @@ use colored::Colorize;
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
 
+use crate::engines::Engine;
 use crate::{Config, Result, ShkiError};
 
 use super::migrate::manager::MigrationManager;
@@ -18,9 +19,18 @@ struct LocalMigration {
 }
 
 /// Drop a migration file
-pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()> {
-    let manager = MigrationManager::from_config(config).await?;
-    let migrations = local_migrations(&manager).await?;
+pub async fn cmd_drop(config: &Config, migration: &Option<String>, force: bool) -> Result<()> {
+    let manager = if force {
+        // NOTE: --force skips the db entirely, so nothing can show as applied
+        MigrationManager::new(
+            config.out_dir(),
+            Engine::detached(config.dialect(), config.migrations.entity().clone()),
+        )
+        .with_prefix(config.migrations.prefix())
+    } else {
+        MigrationManager::from_config(config).await?
+    };
+    let migrations = local_migrations(&manager, force).await?;
 
     if migrations.is_empty() {
         println!("\n{}", "No migrations found".yellow());
@@ -42,13 +52,17 @@ pub async fn cmd_drop(config: &Config, migration: &Option<String>) -> Result<()>
     Ok(())
 }
 
-async fn local_migrations(manager: &MigrationManager) -> Result<Vec<LocalMigration>> {
-    let applied = manager
-        .get_applied_migrations()
-        .await?
-        .into_iter()
-        .map(|row| row.name)
-        .collect::<HashSet<_>>();
+async fn local_migrations(manager: &MigrationManager, force: bool) -> Result<Vec<LocalMigration>> {
+    let applied = if force {
+        HashSet::new()
+    } else {
+        manager
+            .get_applied_migrations()
+            .await?
+            .into_iter()
+            .map(|row| row.name)
+            .collect::<HashSet<_>>()
+    };
 
     let mut migrations = manager
         .list_up_migrations()?

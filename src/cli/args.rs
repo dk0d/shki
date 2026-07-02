@@ -431,6 +431,10 @@ pub enum Commands {
         /// Migration name or index to drop
         #[arg(default_value=None)]
         migration: Option<String>,
+
+        /// Skip database validation (won't check if the migration is applied)
+        #[arg(long, short)]
+        force: bool,
     },
 
     /// Rollback (undo) applied migrations using down migration files

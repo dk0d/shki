@@ -521,6 +521,7 @@ async fn scenario_cli_drop_removes_pending_custom_migration<T: TestBackend>(ctx:
         common: ctx.common_args(),
         command: Commands::Drop {
             migration: Some("add-audit-table".to_string()),
+            force: false,
         },
     })
     .await
@@ -558,6 +559,7 @@ async fn scenario_cli_drop_refuses_applied_migration<T: TestBackend>(ctx: T) {
         common: ctx.common_args(),
         command: Commands::Drop {
             migration: Some("create_applied_users".to_string()),
+            force: false,
         },
     })
     .await
@@ -570,6 +572,41 @@ async fn scenario_cli_drop_refuses_applied_migration<T: TestBackend>(ctx: T) {
         ctx.applied_names(&manager).await,
         vec!["0001_create_applied_users"]
     );
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_drop_force_skips_applied_check<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("forced_users");
+    let up_path = ctx.write_migration(
+        "0001_create_forced_users.sql",
+        &ctx.create_table_sql(&table_name, &[]),
+    );
+    let down_path = ctx.write_migration(
+        "0001_create_forced_users.down.sql",
+        &ctx.drop_table_sql(&table_name),
+    );
+
+    manager
+        .apply_migration(&up_path)
+        .await
+        .expect("failed to apply migration before drop");
+
+    run(Cli {
+        config: config_path,
+        common: ctx.common_args(),
+        command: Commands::Drop {
+            migration: Some("create_forced_users".to_string()),
+            force: true,
+        },
+    })
+    .await
+    .expect("drop --force should remove applied migration without db validation");
+
+    assert!(!up_path.exists());
+    assert!(!down_path.exists());
 
     ctx.cleanup().await;
 }
@@ -907,6 +944,12 @@ async fn cli_status_does_not_create_migration_table() {
 #[tokio::test]
 async fn cli_drop_refuses_applied_migration() {
     scenario_cli_drop_refuses_applied_migration(SqliteTestContext::setup("cli_drop_applied").await)
+        .await;
+}
+
+#[tokio::test]
+async fn cli_drop_force_skips_applied_check() {
+    scenario_cli_drop_force_skips_applied_check(SqliteTestContext::setup("cli_drop_force").await)
         .await;
 }
 
@@ -2148,6 +2191,7 @@ async fn cli_drop_removes_pending_schema_migration_snapshot_and_journal_entry() 
         },
         command: Commands::Drop {
             migration: Some("create-generated-users".to_string()),
+            force: false,
         },
     })
     .await

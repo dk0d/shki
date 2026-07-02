@@ -111,7 +111,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             diff::cmd_diff(&config).await
         }
 
-        Commands::Drop { migration } => drop_migration::cmd_drop(&config, &migration).await,
+        Commands::Drop { migration, force } => {
+            drop_migration::cmd_drop(&config, &migration, force).await
+        }
         Commands::Queries { shadow, querygen } => {
             let preview = querygen.preview;
             let config = config
