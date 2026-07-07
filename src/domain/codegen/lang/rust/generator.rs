@@ -582,6 +582,10 @@ fn generate_derives(derives: &[String], serde: bool, sqlx_derive: Option<&str>) 
         return quote! {};
     }
 
+    // Sort the derives for consistent output
+    let mut derives = derives.into_iter().collect::<Vec<_>>();
+    derives.sort_unstable();
+
     let derives = derives.iter().map(|d| {
         let path: syn::Path = syn::parse_str(d).expect("Invalid derive path");
         quote! { #path }
@@ -853,6 +857,31 @@ mod tests {
             sqlx,
             comment: None,
         }
+    }
+
+    #[test]
+    fn generate_derives_consistent_ordering() {
+        let derives = vec!["Debug".to_string(), "Clone".to_string(), "Copy".to_string()];
+        let token_stream = generate_derives(&derives, true, Some("sqlx::FromRow"));
+        let token_stream = quote! {
+            #token_stream
+            struct Test;
+        };
+        let output = format_tokens(token_stream);
+        assert!(output.contains(
+            "#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, sqlx::FromRow)]"
+        ));
+
+        let derives = vec!["Debug".to_string(), "Copy".to_string(), "Clone".to_string()];
+        let token_stream = generate_derives(&derives, true, Some("sqlx::FromRow"));
+        let token_stream = quote! {
+            #token_stream
+            struct Test;
+        };
+        let output = format_tokens(token_stream);
+        assert!(output.contains(
+            "#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, sqlx::FromRow)]"
+        ));
     }
 
     #[test]
