@@ -3,17 +3,18 @@ version: 3
 tasks:
   default:
     cmd: task --list-all
-    
+
   up:
-    cmd: docker compose -p shki up -d 
+    cmd: docker compose -p shki up -d
 
   down:
-    cmd: docker compose -p shki down -v 
-      
+    cmd: docker compose -p shki down -v
+
   test:
-    cmds: 
+    desc: Run unit tests
+    cmds:
       - cargo nextest run {{ .CLI_ARGS }}
-      
+
   tools:install:
     desc: Install dev tooling
     cmds:
@@ -21,32 +22,28 @@ tasks:
       - cargo binstall cargo-nextest -y
       - cargo binstall bacon -y
       - cargo binstall cargo-dist -y
-      - cargo binstall cargo-release -y 
+      - cargo binstall cargo-release -y
       - cargo binstall cargo-update -y
       - cargo binstall cargo-llvm-cov -y
-
-  test:
-    desc: Run unit tests
-    cmd: cargo nextest run
 
   # https://nexte.st/docs/integrations/test-coverage/
   test:cov:
     desc: Run test coverage
     cmd: cargo llvm-cov nextest
-    
+
   # https://nexte.st/docs/integrations/test-coverage/
   test:cov:html:
     desc: Run test coverage
-    cmds: 
+    cmds:
       - cargo llvm-cov nextest --open
 
   # From: https://axodotdev.github.io/cargo-dist/book/workspaces/cargo-release-guide.html#using-cargo-release-with-pull-requests
-  # 
+  #
   # This will:
   #  * tag the commit
   #  * push the tag
   #  * trigger dist when it sees the tag (if applicable)
-  #  
+  #
   # THIS WON'T CREATE NEW COMMITS
   #
   # running "dist plan" is totally optional, but this is is the best time to check
@@ -55,10 +52,10 @@ tasks:
     desc: Final release step to tag main with version
     cmds:
       - git checkout main
-      - git pull 
+      - git pull
       - dist plan
       - cargo release --execute
-  
+
   cargo-release:
     internal: true
     desc: Prepare a cargo-release commit on the current branch
