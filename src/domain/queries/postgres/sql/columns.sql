@@ -4,6 +4,7 @@ SELECT
     c.column_name,
     c.data_type,
     c.udt_name,
+    format_type(attr.atttypid, attr.atttypmod) AS formatted_type,
     c.is_nullable,
     c.column_default,
     c.collation_name,
@@ -34,6 +35,10 @@ LEFT JOIN pg_class table_cls
 LEFT JOIN pg_namespace table_ns
     ON table_ns.oid = table_cls.relnamespace
     AND table_ns.nspname = c.table_schema
+LEFT JOIN pg_attribute attr
+    ON attr.attrelid = table_cls.oid
+    AND attr.attname = c.column_name
+    AND NOT attr.attisdropped
 LEFT JOIN pg_class seq_cls
     ON seq_cls.oid = to_regclass(pg_get_serial_sequence(format('%I.%I', c.table_schema, c.table_name), c.column_name))
 LEFT JOIN pg_namespace seq_ns

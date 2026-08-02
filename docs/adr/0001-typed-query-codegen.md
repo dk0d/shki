@@ -1,6 +1,6 @@
 # ADR 0001: Typed Query Codegen
 
-- Status: Proposed
+- Status: Proposed (feature-gated behind `querygen`)
 - Date: 2026-06-16
 - Deciders: shki maintainers
 
@@ -16,6 +16,10 @@ We want a second capability, inspired by
 SQL queries into a directory and shki generates **type-safe functions that wrap
 those queries**, using `sqlx` as the execution runtime. Each query becomes a
 function with typed parameters and a typed result.
+
+Until the type/runtime contract and integration coverage are complete, this
+capability is excluded from default builds and must be enabled with Cargo's
+`querygen` feature.
 
 Two observations make this a good fit for shki specifically rather than a
 generic codegen exercise:

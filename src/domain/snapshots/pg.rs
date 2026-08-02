@@ -27,6 +27,7 @@ struct PgInfoSchemaColumnRow {
     column_name: String,
     data_type: String,
     udt_name: String,
+    formatted_type: Option<String>,
     is_nullable: String,
     column_default: Option<String>,
     collation_name: Option<String>,
@@ -359,6 +360,7 @@ impl From<PgInfoSchemaColumnRow> for DataType {
         let PgInfoSchemaColumnRow {
             data_type,
             udt_name,
+            formatted_type,
             character_maximum_length,
             numeric_precision,
             numeric_scale,
@@ -385,7 +387,10 @@ impl From<PgInfoSchemaColumnRow> for DataType {
             "time with time zone" => "TIMETZ".to_string(),
             "double precision" => "DOUBLE PRECISION".to_string(),
             "ARRAY" => format!("{}[]", udt_name.trim_start_matches('_').to_uppercase()),
-            "USER-DEFINED" => udt_name.to_string(),
+            // `udt_name` omits type modifiers. PostgreSQL extensions such as
+            // pgvector use them for dimensions (`halfvec(384)`), so retain the
+            // catalog-rendered form when it is available.
+            "USER-DEFINED" => formatted_type.unwrap_or(udt_name).to_string(),
             _ => data_type.to_uppercase(),
         };
 
@@ -1457,6 +1462,7 @@ mod tests {
             column_name: name.to_string(),
             data_type: data_type.to_string(),
             udt_name: data_type.to_string(),
+            formatted_type: None,
             is_nullable: "YES".to_string(),
             column_default: None,
             collation_name: None,
@@ -1546,6 +1552,7 @@ mod tests {
             column_name: "id".to_string(),
             data_type: "integer".to_string(),
             udt_name: "int4".to_string(),
+            formatted_type: None,
             is_nullable: "NO".to_string(),
             column_default: Some("nextval('users_id_seq'::regclass)".to_string()),
             collation_name: None,
@@ -1586,6 +1593,7 @@ mod tests {
             column_name: "id".to_string(),
             data_type: "integer".to_string(),
             udt_name: "int4".to_string(),
+            formatted_type: None,
             is_nullable: "NO".to_string(),
             column_default: Some("nextval('public.users_id_seq'::regclass)".to_string()),
             collation_name: None,
@@ -1626,6 +1634,7 @@ mod tests {
             column_name: "id".to_string(),
             data_type: "integer".to_string(),
             udt_name: "int4".to_string(),
+            formatted_type: None,
             is_nullable: "NO".to_string(),
             column_default: Some("nextval('\"public\".\"users_id_seq\"'::regclass)".to_string()),
             collation_name: None,
@@ -1666,6 +1675,7 @@ mod tests {
             column_name: "id".to_string(),
             data_type: "integer".to_string(),
             udt_name: "int4".to_string(),
+            formatted_type: None,
             is_nullable: "NO".to_string(),
             column_default: Some("nextval('other.users_id_seq'::regclass)".to_string()),
             collation_name: None,

@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::{
-    CodegenArgs, CommonArgs, MigrationArgs, QueriesArgs, ShadowArgs, ShkiError,
-    codegen::CodegenConfig, codegen::queries::QueriesConfig, models::iden::Iden,
-    schema::SqlDialect, utils::resolve_path,
+    CodegenArgs, CommonArgs, MigrationArgs, ShadowArgs, ShkiError, codegen::CodegenConfig,
+    models::iden::Iden, schema::SqlDialect, utils::resolve_path,
 };
+#[cfg(feature = "querygen")]
+use crate::{QueriesArgs, codegen::queries::QueriesConfig};
 use clap::ValueEnum;
 use colored::Colorize;
 
@@ -96,6 +97,7 @@ pub struct Config {
     #[serde(default)]
     pub codegen: CodegenConfig,
 
+    #[cfg(feature = "querygen")]
     #[serde(default)]
     pub queries: QueriesConfig,
 }
@@ -256,6 +258,7 @@ impl Default for Config {
             migrations: MigrationConfig::default(),
             // introspect: IntrospectConfig::default(),
             timeout_seconds: default_timeout(),
+            #[cfg(feature = "querygen")]
             queries: QueriesConfig::default(),
         }
     }
@@ -370,6 +373,7 @@ impl Config {
         self.merge_args(Serialized::default("codegen", args))
     }
 
+    #[cfg(feature = "querygen")]
     pub fn with_querygen_args(self, args: &QueriesArgs) -> crate::Result<Self> {
         self.merge_args(Serialized::default("queries", args))
     }
@@ -489,7 +493,7 @@ fn resolve_project_root(starting_path: &Path, default_root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-        use std::fs::create_dir_all;
+    use std::fs::create_dir_all;
     use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
 
@@ -691,6 +695,7 @@ generate_down = false
         assert!(config.migrations.generate_down());
     }
 
+    #[cfg(feature = "querygen")]
     #[test]
     fn querygen_args_override_queries_section() {
         let config = Config {

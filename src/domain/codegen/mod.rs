@@ -2,7 +2,10 @@ pub mod config;
 pub use config::*;
 pub mod generator;
 pub mod lang;
+
+#[cfg(feature = "querygen")]
 pub mod queries;
+
 pub mod writer;
 
 use std::path::PathBuf;

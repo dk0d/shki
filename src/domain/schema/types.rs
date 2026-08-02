@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::SqlDialect;
+use crate::sql::statements::quote_identifier;
 
 /// Enum type definition (PostgreSQL)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,10 +274,9 @@ impl DataType {
                 Some(s) => format!("\"{}\".\"{}\"", s, name),
                 None => format!("\"{}\"", name),
             },
-            DataType::Custom { name, schema } => match schema {
-                Some(s) => format!("\"{}\".\"{}\"", s, name),
-                None => format!("\"{}\"", name),
-            },
+            DataType::Custom { name, schema } => {
+                custom_type_to_postgres_sql(name, schema.as_deref())
+            }
             // MySQL/SQLite types that might appear
             _ => "TEXT".to_string(),
         }
@@ -418,6 +418,31 @@ impl DataType {
             SqlDialect::Mysql => self.to_mysql_sql(),
         }
     }
+}
+
+/// Render an extension-defined type. PostgreSQL reports type modifiers as part
+/// of its formatted type (for example `halfvec(384)`); quote only the type name.
+fn custom_type_to_postgres_sql(name: &str, schema: Option<&str>) -> String {
+    let (name, modifier) = match name.split_once('(') {
+        Some((name, modifier))
+            if modifier.ends_with(')')
+                && modifier[..modifier.len() - 1]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == ',' || c.is_ascii_whitespace()) =>
+        {
+            (name, format!("({modifier}"))
+        }
+        _ => (name, String::new()),
+    };
+    let qualified = match schema {
+        Some(schema) => format!(
+            "{}.{}",
+            quote_identifier(&SqlDialect::Postgres, schema),
+            quote_identifier(&SqlDialect::Postgres, name)
+        ),
+        None => quote_identifier(&SqlDialect::Postgres, name),
+    };
+    format!("{qualified}{modifier}")
 }
 
 impl DataType {
@@ -1142,6 +1167,26 @@ mod tests {
         assert_eq!(
             DefaultValue::Identity { always: false }.to_string(),
             "BY DEFAULT"
+        );
+    }
+
+    #[test]
+    fn renders_custom_type_modifiers_with_shared_identifier_quoting() {
+        assert_eq!(
+            DataType::Custom {
+                name: "halfvec(384)".to_string(),
+                schema: None,
+            }
+            .to_postgres_sql(),
+            "\"halfvec\"(384)"
+        );
+        assert_eq!(
+            DataType::Custom {
+                name: "odd\"type(3)".to_string(),
+                schema: Some("my\"schema".to_string()),
+            }
+            .to_postgres_sql(),
+            "\"my\"\"schema\".\"odd\"\"type\"(3)"
         );
     }
 }

@@ -82,7 +82,8 @@ pub trait CodeGenerator: Default {
         }
 
         for (name, composite_snapshot) in &composite_types {
-            let generated = self.generate_composite_type(name, composite_snapshot, snapshot, config);
+            let generated =
+                self.generate_composite_type(name, composite_snapshot, snapshot, config);
             self.insert_table(&mut output, name, generated);
         }
 
@@ -124,8 +125,7 @@ pub trait CodeGenerator: Default {
         enums: &IndexMap<Iden, DbEnum>,
         config: &CodegenConfig,
     ) -> Option<String> {
-        matches_object(enums.keys(), name, schema)
-            .then(|| self.transform_enum_name(name, config))
+        matches_object(enums.keys(), name, schema).then(|| self.transform_enum_name(name, config))
     }
 
     /// Resolve a column's custom type against the composite types being

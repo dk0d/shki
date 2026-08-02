@@ -119,7 +119,30 @@ For CI, locked-down environments, or teams that want explicit provisioning, conf
 export SHKI_SHADOW_DATABASE_URL='postgres://user:pass@localhost:5432/shki_shadow'
 ```
 
-The Shadow Database is disposable. `shki` resets user schemas before applying the Declarative Schema. `shadow_database_url` must not be the same as `database_url`.
+The Shadow Database is disposable. `shki` resets user schemas before applying the Declarative Schema. `shadow_database_url` must not be the same as `database_url`, and an external shadow must be marked as Shki-owned:
+
+```sql
+COMMENT ON DATABASE shki_shadow IS 'shki:shadow';
+```
+
+## PostgreSQL Extensions
+
+Declare extensions in the schema before objects that use their types. Shki tracks
+the extension and preserves extension-defined column types as custom types.
+
+```sql
+CREATE EXTENSION postgis;
+CREATE TABLE places (location geometry(Point, 4326) NOT NULL);
+
+CREATE EXTENSION vector;
+CREATE TABLE embeddings (embedding vector(3) NOT NULL);
+```
+
+The Shadow Database image must have each declared extension installed. Embedded
+PostgreSQL does not provide PostGIS or pgvector; configure an external,
+Shki-owned PostgreSQL image that includes them. Extension type modifiers, such
+as `vector(3)`, `halfvec(384)`, and `geometry(Point, 4326)`, are retained in
+Snapshots and detected by schema diffs.
 
 ## Directory Schemas
 
@@ -152,11 +175,12 @@ Global options:
 
 Command-scoped options:
 
-- `diff`, `generate`, `codegen`, and `queries` accept `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
+- `diff`, `generate`, and `codegen` accept `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
+- Experimental query generation, enabled with `--features querygen`, also accepts `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
 - `create`, `generate`, `migrate`, `status`, and `down` accept migration options such as `--table <NAME>`, `--prefix <index|timestamp|unix>`, and `--generate-down` where applicable.
 - `migrate` accepts `--dry` and optional mode subcommands: `all`, `steps <NUM>`, and `to <NAME>`.
 - `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, and the tri-state derive toggles `--serde[=<bool>]` and `--sqlx[=<bool>]` (bare flag enables; `=false` disables).
-- `queries` accepts `--sources <PATH>`, `--output <PATH>`, `--format <single|singlemodule|modules>`, `--models <PATH>`, and `--preview`.
+- Experimental `queries` accepts `--sources <PATH>`, `--output <PATH>`, `--format <single|singlemodule|modules>`, `--models <PATH>`, and `--preview`.
 
 | Command                    | Alias      | Purpose                                                                                                                    |
 | -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -173,7 +197,7 @@ Command-scoped options:
 | `status`                   | `s`        | Show migration status and checksum issues                                                                                  |
 | `down [count]`             | -          | Apply Down Migrations for local rollback                                                                                   |
 | `codegen`                  | `code`     | Generate Rust, TypeScript, or Protobuf code from schema shape                                                              |
-| `queries`                  | `q`        | Generate type-safe Rust query functions from annotated SQL files (PostgreSQL)                                              |
+| `queries`                  | `q`        | Experimental `querygen` feature: generate type-safe Rust query functions from annotated PostgreSQL files                 |
 | `drop [migration]`         | -          | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                      |
 
 ## Usage Patterns
@@ -416,6 +440,13 @@ Name resolution order is: explicit rename, default casing, then pattern. Struct 
 
 ### Generate Typed Queries (PostgreSQL)
 
+Query generation is experimental and excluded from default builds. Enable it
+explicitly:
+
+```bash
+cargo run --features querygen -- queries
+```
+
 `queries` turns annotated `*.sql` files into type-safe Rust functions backed by `sqlx`. Each query becomes a function with typed parameters and a typed result. Unlike `sqlx::query!`, the types are resolved at generation time by **describing** each query against the Shadow Database (the same embedded/external PostgreSQL used by `diff`/`generate`), so **no live production database is required at your compile time** and the generated code uses sqlx's runtime API — it is not re-checked against `DATABASE_URL`.
 
 ```bash
@@ -472,7 +503,7 @@ Limitations:
 - **Unsupported runtime mappings fail generation.** Types that the Rust schema generator renders as `String` but sqlx cannot decode as `String` (such as `NUMERIC`, ranges, network, geometric, and interval types) require a compatible `[codegen.type_overrides]` entry.
 - The Shadow Database is started for the describe step, so query codegen pays the same startup cost as `diff`/`generate`.
 
-Configure in `[queries]`:
+With `querygen` enabled, configure in `[queries]`:
 
 ```toml
 [queries]

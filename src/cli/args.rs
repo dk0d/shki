@@ -19,6 +19,7 @@ use std::path::PathBuf;
 pub use CodegenLanguage as LanguageArg;
 
 use crate::codegen::CodegenConfig;
+#[cfg(feature = "querygen")]
 use crate::codegen::queries::QueriesConfig;
 use crate::config::MigrationPrefix;
 use crate::domain::codegen::lang::typescript::TypescriptFlavor;
@@ -130,6 +131,7 @@ pub struct CodegenArgs {
 /// figment merge payload (the values that override the `[queries]` config
 /// section); `#[serde(skip)]` fields like `preview` are CLI-only and never
 /// merged.
+#[cfg(feature = "querygen")]
 #[derive(Debug, Clone, Serialize, Args, Default)]
 pub struct QueriesArgs {
     #[command(flatten)]
@@ -416,6 +418,7 @@ pub enum Commands {
     },
 
     /// Generate type-safe query functions from annotated SQL files (PostgreSQL)
+    #[cfg(feature = "querygen")]
     #[command(visible_alias = "q")]
     Queries {
         #[command(flatten)]

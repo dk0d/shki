@@ -14,9 +14,63 @@ use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
 use shki::snapshots::{Introspectable, Snapshot};
 use shki::{Cli, CodegenLanguage, Commands, CommonArgs};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, Executor};
+use testcontainers::core::IntoContainerPort;
+use testcontainers::runners::AsyncRunner;
+use testcontainers::{GenericImage, ImageExt};
 
 use self::common::*;
+
+async fn compile_extension_schema(image: &str, tag: &str, schema_sql: &str) -> Snapshot {
+    let container = GenericImage::new(image, tag)
+        .with_exposed_port(5432.tcp())
+        .with_env_var("POSTGRES_USER", "postgres")
+        .with_env_var("POSTGRES_PASSWORD", "postgres")
+        .with_env_var("POSTGRES_DB", "postgres")
+        .start()
+        .await
+        .expect("failed to start PostgreSQL extension image");
+    let host = container
+        .get_host()
+        .await
+        .expect("failed to get PostgreSQL extension image host");
+    let port = container
+        .get_host_port_ipv4(5432)
+        .await
+        .expect("failed to get PostgreSQL extension image port");
+    let database_url = format!("postgresql://postgres:postgres@{host}:{port}/postgres");
+    let pool = connect_with_retries("PostgreSQL extension image", || {
+        PgPoolOptions::new().max_connections(1).connect(&database_url)
+    })
+    .await;
+    pool.execute("COMMENT ON DATABASE postgres IS 'shki:shadow'")
+        .await
+        .expect("failed to mark extension database as Shki-owned");
+
+    let temp_dir = tempfile::tempdir().expect("failed to create extension schema fixture");
+    std::fs::write(temp_dir.path().join("schema.sql"), schema_sql)
+        .expect("failed to write extension schema fixture");
+    let config = Config {
+        root: temp_dir.path().to_path_buf(),
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        schema: "schema.sql".into(),
+        shadow: shki::ShadowArgs {
+            shadow_database_url: Some(database_url),
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+
+    ExternalShadowDBCompiler::from_config(&config)
+        .expect("extension compiler should configure")
+        .compile(&config)
+        .await
+        .expect("extension schema should compile")
+}
 
 async fn scenario_apply_simple<T: TestBackend>(ctx: T) {
     let manager = ctx.manager();
@@ -2254,6 +2308,117 @@ async fn compiler_turns_declarative_schema_sql_into_snapshot() {
 
     shadow.cleanup().await;
     ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn compiler_tracks_postgis_extension_and_geometry_columns() {
+    let snapshot = compile_extension_schema(
+        "postgis/postgis",
+        "16-3.4-alpine",
+        "CREATE EXTENSION postgis;\nCREATE TABLE places (location geometry(Point, 4326) NOT NULL);\n",
+    )
+    .await;
+
+    assert!(snapshot.extensions().contains(&"postgis".to_string()));
+    let places = snapshot
+        .tables()
+        .into_iter()
+        .find(|(iden, _)| iden.name == "places")
+        .expect("places should be in the snapshot");
+    assert_eq!(
+        places.1.columns["location"].data_type,
+        DataType::Custom {
+            name: "geometry(Point,4326)".to_string(),
+            schema: None,
+        }
+    );
+}
+
+#[tokio::test]
+async fn compiler_tracks_pgvector_extension_and_vector_columns() {
+    let snapshot = compile_extension_schema(
+        "pgvector/pgvector",
+        "0.8.0-pg16",
+        "CREATE EXTENSION vector;\nCREATE TABLE embeddings (embedding vector(3) NOT NULL);\n",
+    )
+    .await;
+
+    assert!(snapshot.extensions().contains(&"vector".to_string()));
+    let embeddings = snapshot
+        .tables()
+        .into_iter()
+        .find(|(iden, _)| iden.name == "embeddings")
+        .expect("embeddings should be in the snapshot");
+    assert_eq!(
+        embeddings.1.columns["embedding"].data_type,
+        DataType::Custom {
+            name: "vector(3)".to_string(),
+            schema: None,
+        }
+    );
+}
+
+#[tokio::test]
+async fn diff_alters_pgvector_halfvec_dimensions() {
+    let before = compile_extension_schema(
+        "pgvector/pgvector",
+        "0.8.0-pg16",
+        "CREATE EXTENSION vector;\nCREATE TABLE embeddings (embedding halfvec(384) NOT NULL);\n",
+    )
+    .await;
+    let after = compile_extension_schema(
+        "pgvector/pgvector",
+        "0.8.0-pg16",
+        "CREATE EXTENSION vector;\nCREATE TABLE embeddings (embedding halfvec(768) NOT NULL);\n",
+    )
+    .await;
+
+    let before_type = before
+        .tables()
+        .into_iter()
+        .find(|(iden, _)| iden.name == "embeddings")
+        .expect("baseline embeddings should be in the snapshot")
+        .1
+        .columns["embedding"]
+        .data_type
+        .clone();
+    let after_type = after
+        .tables()
+        .into_iter()
+        .find(|(iden, _)| iden.name == "embeddings")
+        .expect("altered embeddings should be in the snapshot")
+        .1
+        .columns["embedding"]
+        .data_type
+        .clone();
+    assert_eq!(
+        before_type,
+        DataType::Custom {
+            name: "halfvec(384)".to_string(),
+            schema: None,
+        }
+    );
+    assert_eq!(
+        after_type,
+        DataType::Custom {
+            name: "halfvec(768)".to_string(),
+            schema: None,
+        }
+    );
+
+    let diff = shki::diff::diff_snapshots(&before, &after).expect("snapshots should diff");
+    assert!(diff.statements.iter().any(|statement| {
+        matches!(
+            statement,
+            shki::diff::DiffStatement::AlterColumn { table, column, changes, .. }
+                if table == "embeddings"
+                    && column == "embedding"
+                    && changes.iter().any(|change| matches!(
+                        change,
+                        shki::diff::ColumnChange::SetType(data_type) if data_type == "\"halfvec\"(768)"
+                    ))
+        )
+    }));
 }
 
 #[tokio::test]

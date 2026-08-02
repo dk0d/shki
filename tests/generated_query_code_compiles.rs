@@ -1,3 +1,5 @@
+#![cfg(feature = "querygen")]
+
 //! Fixture test: the code emitted by query codegen must actually compile when
 //! placed alongside a schema-codegen `models` module.
 //!

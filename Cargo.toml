@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "shki"
 path = "src/lib.rs"
 
+[features]
+default = []
+querygen = []
+
 [dependencies]
 anyhow = "1.0.100"
 chrono = { version = "0.4.43", features = ["serde"] }

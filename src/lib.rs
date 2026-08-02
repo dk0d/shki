@@ -114,6 +114,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         Commands::Drop { migration, force } => {
             drop_migration::cmd_drop(&config, &migration, force).await
         }
+
+        #[cfg(feature = "querygen")]
         Commands::Queries { shadow, querygen } => {
             let preview = querygen.preview;
             let config = config
