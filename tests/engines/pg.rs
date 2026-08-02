@@ -86,6 +86,12 @@ impl TestDatabase {
             .await
             .expect("failed to create postgres shadow database");
 
+        let marker_sql = format!("COMMENT ON DATABASE \"{}\" IS 'shki:shadow'", database_name);
+        sqlx::raw_sql(AssertSqlSafe(marker_sql))
+            .execute(&admin_pool)
+            .await
+            .expect("failed to mark postgres shadow database as Shki-owned");
+
         Self {
             database_url: server
                 .admin_url

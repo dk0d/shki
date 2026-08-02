@@ -53,7 +53,7 @@ pub async fn cmd_query_codegen(config: &Config, preview: bool) -> Result<()> {
     let rendered = with_compiled_shadow(config, |snapshot, pool| async move {
         let mut described = Vec::with_capacity(specs.len());
         for spec in specs {
-            described.push(describe_query(&pool, &snapshot, spec).await?);
+            described.push(describe_query(&pool, &snapshot, &codegen_config, spec).await?);
         }
         Ok(generate_rust_module(
             &described,

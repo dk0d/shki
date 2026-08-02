@@ -8,9 +8,10 @@
 
 use std::collections::HashMap;
 
-use sqlx::{AssertSqlSafe, Column, Either, Executor, SqlSafeStr, TypeInfo};
 use sqlx::postgres::{PgTypeInfo, PgTypeKind};
+use sqlx::{AssertSqlSafe, Column, Either, Executor, SqlSafeStr, TypeInfo};
 
+use crate::codegen::CodegenConfig;
 use crate::schema::{DataType, Table};
 use crate::snapshots::Snapshot;
 use crate::{Result, ShkiError};
@@ -78,6 +79,7 @@ pub struct DescribedQuery {
 pub async fn describe_query(
     pool: &sqlx::Pool<sqlx::Postgres>,
     snapshot: &Snapshot,
+    config: &CodegenConfig,
     spec: QuerySpec,
 ) -> Result<DescribedQuery> {
     let rewritten = rewrite_named_params(&spec.sql)?;
@@ -121,13 +123,47 @@ pub async fn describe_query(
             .enumerate()
             .map(|(idx, ti)| QueryParam {
                 data_type: pg_type_to_data_type(ti, snapshot),
-                binding: param_binding(rewritten.names.as_deref(), idx, is_batch, is_keyset, &keyset_pos),
+                binding: param_binding(
+                    rewritten.names.as_deref(),
+                    idx,
+                    is_batch,
+                    is_keyset,
+                    &keyset_pos,
+                ),
             })
             .collect(),
-        // `Either::Right(n)` only reports a parameter count without types, which
-        // we cannot turn into typed arguments.
-        _ => Vec::new(),
+        // `Either::Right(n)` only reports a parameter count without types. Do
+        // not emit a wrapper that cannot bind its required arguments.
+        Some(Either::Right(count)) => {
+            return Err(ShkiError::schema(format!(
+                "Failed to resolve types for {} parameter{} in query '{}' from {}",
+                count,
+                if count == 1 { "" } else { "s" },
+                spec.name,
+                spec.source_file.display(),
+            )));
+        }
+        None => Vec::new(),
     };
+
+    for (idx, param) in params.iter().enumerate() {
+        validate_query_type(
+            &param.data_type,
+            snapshot,
+            config,
+            &spec,
+            &format!("parameter ${}", idx + 1),
+        )?;
+    }
+    for column in &described.columns {
+        validate_query_type(
+            &pg_type_to_data_type(column.type_info(), snapshot),
+            snapshot,
+            config,
+            &spec,
+            &format!("result column '{}'", column.name()),
+        )?;
+    }
 
     // Every keyset reference must resolve to a real parameter.
     if is_keyset {
@@ -155,6 +191,85 @@ pub async fn describe_query(
         params,
         result,
     })
+}
+
+/// Query wrappers use sqlx runtime decoding, so reject types the shared schema
+/// generator currently renders as `String` without a compatible sqlx decoder.
+/// A configured type override is an explicit promise that the application has
+/// supplied a compatible Rust type and sqlx implementation.
+fn validate_query_type(
+    data_type: &DataType,
+    snapshot: &Snapshot,
+    config: &CodegenConfig,
+    spec: &QuerySpec,
+    context: &str,
+) -> Result<()> {
+    if type_override_key(data_type).is_some_and(|key| config.type_overrides.contains_key(&key)) {
+        return Ok(());
+    }
+
+    match data_type {
+        DataType::Array { element_type } => {
+            validate_query_type(element_type, snapshot, config, spec, context)
+        }
+        DataType::Numeric { .. }
+        | DataType::Decimal { .. }
+        | DataType::Money
+        | DataType::Interval
+        | DataType::Inet
+        | DataType::Cidr
+        | DataType::MacAddr
+        | DataType::MacAddr8
+        | DataType::Point
+        | DataType::Line
+        | DataType::LSeg
+        | DataType::Box
+        | DataType::Path
+        | DataType::Polygon
+        | DataType::Circle
+        | DataType::Int4Range
+        | DataType::Int8Range
+        | DataType::NumRange
+        | DataType::TsRange
+        | DataType::TsTzRange
+        | DataType::DateRange => unsupported_query_type(data_type, spec, context),
+        DataType::Enum { name, schema } | DataType::Custom { name, schema }
+            if !known_custom_type(name, schema.as_deref(), snapshot) =>
+        {
+            unsupported_query_type(data_type, spec, context)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn type_override_key(data_type: &DataType) -> Option<String> {
+    match data_type {
+        DataType::Enum { name, schema } | DataType::Custom { name, schema } => Some(
+            schema
+                .as_ref()
+                .map(|schema| format!("{}.{}", schema, name))
+                .unwrap_or_else(|| name.clone()),
+        ),
+        _ => Some(data_type.to_postgres_sql().to_lowercase()),
+    }
+}
+
+fn known_custom_type(name: &str, schema: Option<&str>, snapshot: &Snapshot) -> bool {
+    snapshot
+        .enums()
+        .keys()
+        .chain(snapshot.composite_types().keys())
+        .any(|iden| iden.name == name && (schema.is_none() || iden.schema.as_deref() == schema))
+}
+
+fn unsupported_query_type(data_type: &DataType, spec: &QuerySpec, context: &str) -> Result<()> {
+    Err(ShkiError::config(format!(
+        "query '{}' from {} has unsupported {} type '{}'; add a compatible [codegen.type_overrides] entry",
+        spec.name,
+        spec.source_file.display(),
+        context,
+        data_type.to_postgres_sql(),
+    )))
 }
 
 /// Resolve `:keyset` parameter references to a map of parameter index → cursor
@@ -245,7 +360,12 @@ fn resolve_result(
         .iter()
         .enumerate()
         .map(|(idx, column)| {
-            let describe_nullable = described.nullable.get(idx).copied().flatten().unwrap_or(true);
+            let describe_nullable = described
+                .nullable
+                .get(idx)
+                .copied()
+                .flatten()
+                .unwrap_or(true);
 
             // Prefer the Declarative Schema's view of a column that traces back to
             // a base table: it carries the authoritative nullability and resolves
@@ -253,7 +373,11 @@ fn resolve_result(
             let from_schema = column
                 .origin()
                 .table_column()
-                .and_then(|tc| tables.get(&*tc.table).map(|table| (table, tc.name.to_string())))
+                .and_then(|tc| {
+                    tables
+                        .get(&*tc.table)
+                        .map(|table| (table, tc.name.to_string()))
+                })
                 .and_then(|(table, col_name)| table.columns.get(&col_name));
 
             let (data_type, nullable) = match from_schema {
@@ -399,5 +523,63 @@ fn scalar_from_name(name: &str, snapshot: &Snapshot) -> DataType {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn spec() -> QuerySpec {
+        QuerySpec {
+            name: "example".to_string(),
+            cardinality: Cardinality::One,
+            keyset: Vec::new(),
+            sql: "SELECT 1".to_string(),
+            source_file: PathBuf::from("queries/example.sql"),
+        }
+    }
+
+    #[test]
+    fn rejects_lossy_runtime_type_mappings() {
+        let error = validate_query_type(
+            &DataType::Numeric {
+                precision: None,
+                scale: None,
+            },
+            &Snapshot::new(crate::schema::SqlDialect::Postgres),
+            &CodegenConfig::default(),
+            &spec(),
+            "result column 'total'",
+        )
+        .expect_err("numeric must not silently become String in query codegen");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported result column 'total' type 'NUMERIC'")
+        );
+    }
+
+    #[test]
+    fn allows_explicit_type_overrides() {
+        let mut config = CodegenConfig::default();
+        config
+            .type_overrides
+            .insert("numeric".to_string(), "bigdecimal::BigDecimal".to_string());
+
+        validate_query_type(
+            &DataType::Numeric {
+                precision: None,
+                scale: None,
+            },
+            &Snapshot::new(crate::schema::SqlDialect::Postgres),
+            &config,
+            &spec(),
+            "parameter $1",
+        )
+        .expect("an explicit compatible override should be accepted");
     }
 }

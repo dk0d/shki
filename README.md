@@ -469,6 +469,7 @@ Limitations:
 - **Rust/sqlx only.** TypeScript/Protobuf query output is not implemented (schema `codegen` covers those for types).
 - **Keyset next-cursor is not derived.** Cursor `:batch` currently returns `Result<Vec<Row>>` and does not compute the *next* cursor from the last row; `CursorPagination`'s `next`/`prev` are caller-managed for now.
 - **Generated query rows always derive `sqlx::FromRow`**, regardless of the `[codegen] sqlx` toggle, since they are decoded by sqlx.
+- **Unsupported runtime mappings fail generation.** Types that the Rust schema generator renders as `String` but sqlx cannot decode as `String` (such as `NUMERIC`, ranges, network, geometric, and interval types) require a compatible `[codegen.type_overrides]` entry.
 - The Shadow Database is started for the describe step, so query codegen pays the same startup cost as `diff`/`generate`.
 
 Configure in `[queries]`:
@@ -506,7 +507,9 @@ schema = "schema"
 out = "migrations"
 timeout_seconds = 2
 
-# Optional. If omitted, Shki uses managed embedded PostgreSQL.
+# Optional. If omitted, Shki uses managed embedded PostgreSQL. An external
+# database must be dedicated to Shki and marked before use:
+# COMMENT ON DATABASE shki_shadow IS 'shki:shadow';
 shadow_database_url = "postgres://user:pass@localhost:5432/shki_shadow"
 
 # Optional. Supported: 14, 15, 16, 17, 18.

@@ -21,6 +21,7 @@ use crate::sql::render::SqlRenderer;
 use crate::{Result, ShkiError};
 
 const MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS: u64 = 120;
+const EXTERNAL_SHADOW_OWNER_MARKER: &str = "shki:shadow";
 
 #[async_trait]
 pub trait SchemaCompiler {
@@ -204,7 +205,9 @@ impl ExternalShadowDBCompiler {
     }
 
     async fn connect(&self, config: &Config) -> Result<sqlx::Pool<sqlx::Postgres>> {
-        connect_postgres(config, &self.shadow_database_url).await
+        let pool = connect_postgres(config, &self.shadow_database_url).await?;
+        verify_external_shadow_ownership(&pool).await?;
+        Ok(pool)
     }
 }
 
@@ -241,6 +244,31 @@ async fn connect_postgres(
         .acquire_timeout(std::time::Duration::from_secs(config.timeout_seconds))
         .connect(database_url)
         .await?)
+}
+
+/// External shadow databases survive beyond this process. Require an explicit
+/// database-level marker before the reset path can remove their schemas.
+async fn verify_external_shadow_ownership(pool: &sqlx::Pool<sqlx::Postgres>) -> Result<()> {
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|err| {
+        ShkiError::schema(format!(
+            "Failed to verify external Shadow Database ownership: {}",
+            err
+        ))
+    })?;
+
+    if marker.as_deref() == Some(EXTERNAL_SHADOW_OWNER_MARKER) {
+        return Ok(());
+    }
+
+    Err(ShkiError::config(format!(
+        "shadow_database_url must point to a Shki-owned database. Mark the disposable database with: COMMENT ON DATABASE <shadow_database_name> IS '{}';",
+        EXTERNAL_SHADOW_OWNER_MARKER
+    )))
 }
 
 fn postgres_major_version_req(version: u8) -> Result<VersionReq> {
@@ -709,5 +737,10 @@ mod tests {
             .expect_err("matching live and shadow urls should fail");
 
         assert!(error.to_string().contains("must not be the same"));
+    }
+
+    #[test]
+    fn external_shadow_owner_marker_is_stable() {
+        assert_eq!(EXTERNAL_SHADOW_OWNER_MARKER, "shki:shadow");
     }
 }
