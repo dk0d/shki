@@ -462,8 +462,6 @@ fn resolve_project_root(starting_path: &Path, default_root: &Path) -> PathBuf {
     let starting_path = starting_path.as_path();
 
     let parent = if starting_path.is_file() {
-        starting_path.ancestors().nth(2)
-    } else if starting_path.is_dir() {
         starting_path.ancestors().nth(1)
     } else {
         Some(starting_path)
