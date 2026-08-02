@@ -2315,7 +2315,15 @@ async fn compiler_tracks_postgis_extension_and_geometry_columns() {
     let snapshot = compile_extension_schema(
         "postgis/postgis",
         "16-3.4-alpine",
-        "CREATE EXTENSION postgis;\nCREATE TABLE places (location geometry(Point, 4326) NOT NULL);\n",
+        r#"
+        CREATE EXTENSION postgis;
+        CREATE TABLE places (
+            location geometry(Point, 4326) NOT NULL,
+            route geometry(LineString, 4326),
+            boundary geometry(Polygon, 4326),
+            coverage geography(Point, 4326)
+        );
+        "#,
     )
     .await;
 
@@ -2332,6 +2340,34 @@ async fn compiler_tracks_postgis_extension_and_geometry_columns() {
             schema: None,
         }
     );
+    assert_eq!(
+        places.1.columns["route"].data_type,
+        DataType::Custom {
+            name: "geometry(LineString,4326)".to_string(),
+            schema: None,
+        }
+    );
+    assert_eq!(
+        places.1.columns["boundary"].data_type,
+        DataType::Custom {
+            name: "geometry(Polygon,4326)".to_string(),
+            schema: None,
+        }
+    );
+    assert_eq!(
+        places.1.columns["coverage"].data_type,
+        DataType::Custom {
+            name: "geography(Point,4326)".to_string(),
+            schema: None,
+        }
+    );
+
+    let sql = shki::dump::render_snapshot(&snapshot, &SchemaExportFormat::Sql)
+        .expect("snapshot should render as SQL");
+    assert!(sql.contains("\"location\" \"geometry\"(Point,4326) NOT NULL"));
+    assert!(sql.contains("\"route\" \"geometry\"(LineString,4326)"));
+    assert!(sql.contains("\"boundary\" \"geometry\"(Polygon,4326)"));
+    assert!(sql.contains("\"coverage\" \"geography\"(Point,4326)"));
 }
 
 #[tokio::test]
@@ -2356,6 +2392,20 @@ async fn compiler_tracks_pgvector_extension_and_vector_columns() {
             schema: None,
         }
     );
+}
+
+#[tokio::test]
+async fn dump_retains_pgvector_type_modifiers() {
+    let snapshot = compile_extension_schema(
+        "pgvector/pgvector",
+        "0.8.0-pg16",
+        "CREATE EXTENSION vector;\nCREATE TABLE embeddings (embedding vector(3) NOT NULL);\n",
+    )
+    .await;
+
+    let sql = shki::dump::render_snapshot(&snapshot, &SchemaExportFormat::Sql)
+        .expect("snapshot should render as SQL");
+    assert!(sql.contains("\"embedding\" \"vector\"(3) NOT NULL"));
 }
 
 #[tokio::test]

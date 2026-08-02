@@ -428,7 +428,7 @@ fn custom_type_to_postgres_sql(name: &str, schema: Option<&str>) -> String {
             if modifier.ends_with(')')
                 && modifier[..modifier.len() - 1]
                     .chars()
-                    .all(|c| c.is_ascii_digit() || c == ',' || c.is_ascii_whitespace()) =>
+                    .all(|c| c.is_ascii_alphanumeric() || c == ',' || c.is_ascii_whitespace()) =>
         {
             (name, format!("({modifier}"))
         }
