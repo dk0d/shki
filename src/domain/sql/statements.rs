@@ -348,6 +348,7 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
 
     let mut table_pk_cols: HashMap<String, Option<String>> = HashMap::new();
     let mut table_unique_cols: HashMap<String, Option<String>> = HashMap::new();
+    let mut table_foreign_keys: HashMap<String, Vec<ForeignKeyConstraint>> = HashMap::new();
     for constraint_type in &table.constraints {
         match constraint_type {
             Constraint::PrimaryKey(constraint) if constraint.columns.len() == 1 => {
@@ -355,6 +356,14 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
             }
             Constraint::Unique(constraint) if constraint.columns.len() == 1 => {
                 table_unique_cols.insert(constraint.columns[0].clone(), constraint.name.clone());
+            }
+            Constraint::ForeignKey(constraint)
+                if is_inlined_single_column_constraint(constraint_type, table) =>
+            {
+                table_foreign_keys
+                    .entry(constraint.columns[0].clone())
+                    .or_default()
+                    .push(constraint.clone());
             }
             _ => {}
         }
@@ -369,6 +378,10 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
                 c,
                 table_pk_cols.get(&c.name).map(Option::as_deref),
                 table_unique_cols.get(&c.name).map(Option::as_deref),
+                table_foreign_keys
+                    .get(&c.name)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
             )
             .to_string()
         })
@@ -414,7 +427,7 @@ pub fn create_table(dialect: &SqlDialect, table: &Table) -> SqlOutput {
 }
 
 pub fn column_definition(dialect: &SqlDialect, col: &Column) -> SqlStmtPart {
-    column_definition_with_suppression(dialect, col, None, None)
+    column_definition_with_suppression(dialect, col, None, None, &[])
 }
 
 fn column_definition_with_suppression(
@@ -422,6 +435,7 @@ fn column_definition_with_suppression(
     col: &Column,
     inline_primary_key: Option<Option<&str>>,
     inline_unique: Option<Option<&str>>,
+    inline_foreign_keys: &[ForeignKeyConstraint],
 ) -> SqlStmtPart {
     let renderer = get_renderer(dialect);
     let mut parts = vec![
@@ -451,6 +465,10 @@ fn column_definition_with_suppression(
         parts.push("UNIQUE".to_string());
     }
 
+    for foreign_key in inline_foreign_keys {
+        parts.push(inline_foreign_key_definition(&renderer, foreign_key));
+    }
+
     if let Some(default) = &col.default {
         parts.push(format!("DEFAULT {}", renderer.default_value(default)));
     }
@@ -472,6 +490,9 @@ fn is_inlined_single_column_constraint(constraint: &Constraint, table: &Table) -
             table.columns.contains_key(&c.columns[0])
         }
         Constraint::Unique(c) if c.columns.len() == 1 => table.columns.contains_key(&c.columns[0]),
+        Constraint::ForeignKey(c) if c.columns.len() == 1 && c.references_columns.len() == 1 => {
+            table.columns.contains_key(&c.columns[0])
+        }
         _ => false,
     }
 }
@@ -507,8 +528,6 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
             sql.push(')');
         }
         (_, Constraint::ForeignKey(c)) => {
-            let ref_table = renderer.qualified_name(&c.references.name, &c.references.schema);
-
             sql.push_str("FOREIGN KEY (");
             for (idx, col) in c.columns.iter().enumerate() {
                 if idx > 0 {
@@ -516,24 +535,8 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
                 }
                 sql.push_str(&renderer.quote_identifier(col));
             }
-            write!(&mut sql, ") REFERENCES {} (", ref_table)
-                .expect("writing to String cannot fail");
-            for (idx, col) in c.references_columns.iter().enumerate() {
-                if idx > 0 {
-                    sql.push_str(", ");
-                }
-                sql.push_str(&renderer.quote_identifier(col));
-            }
-            sql.push(')');
-
-            if c.on_delete != ReferenceAction::NoAction {
-                write!(&mut sql, " ON DELETE {}", c.on_delete)
-                    .expect("writing to String cannot fail");
-            }
-            if c.on_update != ReferenceAction::NoAction {
-                write!(&mut sql, " ON UPDATE {}", c.on_update)
-                    .expect("writing to String cannot fail");
-            }
+            sql.push_str(") ");
+            sql.push_str(&foreign_key_reference_definition(&renderer, c));
         }
         (_, Constraint::Check(c)) => {
             write!(&mut sql, "CHECK ({})", c.expression).expect("writing to String cannot fail");
@@ -562,6 +565,38 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
     }
 
     renderer.fragment(sql)
+}
+
+fn inline_foreign_key_definition(renderer: &SqlRenderer, foreign_key: &ForeignKeyConstraint) -> String {
+    let mut sql = String::new();
+    if let Some(name) = &foreign_key.name {
+        write!(&mut sql, "CONSTRAINT {} ", renderer.quote_identifier(name))
+            .expect("writing to String cannot fail");
+    }
+    sql.push_str(&foreign_key_reference_definition(renderer, foreign_key));
+    sql
+}
+
+fn foreign_key_reference_definition(renderer: &SqlRenderer, foreign_key: &ForeignKeyConstraint) -> String {
+    let mut sql = format!(
+        "REFERENCES {} ({})",
+        renderer.qualified_name(&foreign_key.references.name, &foreign_key.references.schema),
+        foreign_key
+            .references_columns
+            .iter()
+            .map(|column| renderer.quote_identifier(column))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if foreign_key.on_delete != ReferenceAction::NoAction {
+        write!(&mut sql, " ON DELETE {}", foreign_key.on_delete)
+            .expect("writing to String cannot fail");
+    }
+    if foreign_key.on_update != ReferenceAction::NoAction {
+        write!(&mut sql, " ON UPDATE {}", foreign_key.on_update)
+            .expect("writing to String cannot fail");
+    }
+    sql
 }
 
 pub fn drop_table(
@@ -1361,6 +1396,46 @@ mod tests {
             .to_string(),
             "ALTER TABLE \"public\".\"user_product\" ADD CONSTRAINT \"user_product_product_id_fkey\" FOREIGN KEY (\"product_id\") REFERENCES \"public\".\"product\" (\"id\");"
         );
+    }
+
+    #[test]
+    fn inlines_single_column_foreign_keys_in_table_definitions() {
+        let mut table = Table::in_schema("orders", "public");
+        table.column(Column::new("customer_id", DataType::Integer).not_null());
+        table.constraint(Constraint::ForeignKey(
+            ForeignKeyConstraint::new(
+                vec!["customer_id"],
+                ("customers".to_string(), Some("public".to_string())),
+                vec!["id"],
+            )
+            .named("orders_customer_id_fkey")
+            .on_delete(ReferenceAction::Cascade),
+        ));
+
+        let sql = create_table(&SqlDialect::Postgres, &table).to_string(None);
+
+        assert!(sql.contains(
+            "\"customer_id\" INTEGER NOT NULL CONSTRAINT \"orders_customer_id_fkey\" REFERENCES \"public\".\"customers\" (\"id\") ON DELETE CASCADE"
+        ));
+        assert!(!sql.contains("FOREIGN KEY (\"customer_id\")"));
+    }
+
+    #[test]
+    fn keeps_composite_foreign_keys_at_table_level() {
+        let mut table = Table::in_schema("order_lines", "public");
+        table.column(Column::new("order_id", DataType::Integer));
+        table.column(Column::new("line_no", DataType::Integer));
+        table.constraint(Constraint::ForeignKey(ForeignKeyConstraint::new(
+            vec!["order_id", "line_no"],
+            ("orders".to_string(), Some("public".to_string())),
+            vec!["id", "line_no"],
+        )));
+
+        let sql = create_table(&SqlDialect::Postgres, &table).to_string(None);
+
+        assert!(sql.contains(
+            "FOREIGN KEY (\"order_id\", \"line_no\") REFERENCES \"public\".\"orders\" (\"id\", \"line_no\")"
+        ));
     }
 
     #[test]
