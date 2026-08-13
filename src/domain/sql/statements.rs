@@ -567,7 +567,10 @@ pub fn constraint_definition(dialect: &SqlDialect, constraint: &Constraint) -> S
     renderer.fragment(sql)
 }
 
-fn inline_foreign_key_definition(renderer: &SqlRenderer, foreign_key: &ForeignKeyConstraint) -> String {
+fn inline_foreign_key_definition(
+    renderer: &SqlRenderer,
+    foreign_key: &ForeignKeyConstraint,
+) -> String {
     let mut sql = String::new();
     if let Some(name) = &foreign_key.name {
         write!(&mut sql, "CONSTRAINT {} ", renderer.quote_identifier(name))
@@ -577,7 +580,10 @@ fn inline_foreign_key_definition(renderer: &SqlRenderer, foreign_key: &ForeignKe
     sql
 }
 
-fn foreign_key_reference_definition(renderer: &SqlRenderer, foreign_key: &ForeignKeyConstraint) -> String {
+fn foreign_key_reference_definition(
+    renderer: &SqlRenderer,
+    foreign_key: &ForeignKeyConstraint,
+) -> String {
     let mut sql = format!(
         "REFERENCES {} ({})",
         renderer.qualified_name(&foreign_key.references.name, &foreign_key.references.schema),

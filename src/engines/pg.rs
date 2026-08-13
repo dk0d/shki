@@ -82,12 +82,22 @@ impl TransactionalEngine for Postgres {
             .execute(&mut **tx)
             .await
             .map_err(|e| {
-                ShkiError::migration(format!(
+                let mut message = format!(
                     "Failed to execute statement in migration '{}': {}\nStatement: {}",
                     file.name,
                     e,
                     truncate_sql(&file.sql, 200)
-                ))
+                );
+                if e.to_string()
+                    .contains("cannot run inside a transaction block")
+                {
+                    message.push_str(
+                        "\nHint: add '-- shki:no-transaction' to this migration to run it outside \
+                         the wrapping transaction, one '--> +statement' segment at a time. Such \
+                         migrations must be idempotent.",
+                    );
+                }
+                ShkiError::migration(message)
             })?;
 
         Ok(file)

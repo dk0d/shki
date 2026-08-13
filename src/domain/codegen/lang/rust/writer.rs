@@ -511,8 +511,7 @@ mod tests {
         let (code, _) = sample_code();
         // The composite struct only has a `String` field, so it needs no imports.
         let address = &code.structs["addresses"];
-        let imports =
-            RustWriter::new().collect_struct_imports(address, &code, OutputMode::Module);
+        let imports = RustWriter::new().collect_struct_imports(address, &code, OutputMode::Module);
 
         assert!(imports.is_empty());
     }
@@ -607,8 +606,10 @@ mod tests {
         // Regenerating must always refresh _def.rs but never clobber a
         // hand-edited mod.rs.
         let (code, _) = sample_code();
-        let dir = std::env::temp_dir()
-            .join(format!("shki_writer_modules_mod_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "shki_writer_modules_mod_test_{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
 
         let writer = RustWriter::new();
@@ -632,10 +633,16 @@ mod tests {
             .expect("second generation should succeed");
 
         let mod_rs = fs::read_to_string(&mod_path).expect("mod.rs should still exist");
-        assert!(mod_rs.contains("fn custom()"), "custom mod.rs was clobbered");
+        assert!(
+            mod_rs.contains("fn custom()"),
+            "custom mod.rs was clobbered"
+        );
 
         let def = fs::read_to_string(&def_path).expect("_def.rs should still exist");
-        assert!(def.contains("pub struct User"), "_def.rs was not regenerated");
+        assert!(
+            def.contains("pub struct User"),
+            "_def.rs was not regenerated"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -170,6 +170,36 @@ impl MigrationManager {
         self.save_journal(&journal)
     }
 
+    /// Custom migrations are intentionally edited after creation. Refresh their
+    /// journal checksums before a command consumes the migration chain.
+    pub fn refresh_custom_journal_checksums(&self) -> Result<()> {
+        let mut journal = self.load_journal()?;
+        let mut changed = false;
+
+        for entry in &mut journal.entries {
+            if entry.kind != MigrationKind::Custom {
+                continue;
+            }
+
+            let path = self.out_dir.join(format!("{}.sql", entry.migration));
+            if !path.exists() {
+                continue;
+            }
+
+            let checksum = sql_checksum(&std::fs::read_to_string(path)?);
+            if entry.checksum != checksum {
+                entry.checksum = checksum;
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.save_journal(&journal)?;
+        }
+
+        Ok(())
+    }
+
     /// Generate the next migration name
     pub fn next_migration_name(&self, suffix: Option<impl ToString>) -> Result<String> {
         let existing = self.list_up_migrations()?;
@@ -603,6 +633,17 @@ impl MigrationManager {
             MIGRATION_SPLIT_MARKER
         )
         .expect("writing to String cannot fail");
+        content.push_str("--\n");
+        content.push_str(
+            "-- Add '-- shki:no-transaction' to run outside the transaction (needed for\n",
+        );
+        writeln!(
+            &mut content,
+            "-- CREATE INDEX CONCURRENTLY). Each '{}' segment then runs on its own,",
+            MIGRATION_SPLIT_MARKER
+        )
+        .expect("writing to String cannot fail");
+        content.push_str("-- so the migration must be idempotent.\n");
         content.push('\n');
 
         if let Some(sql) = sql_content {
@@ -852,6 +893,22 @@ mod tests {
         let entry = &journal.entries[0];
         assert_eq!(entry.migration, "0000_custom");
         assert_eq!(entry.kind, MigrationKind::Schema);
+    }
+
+    #[test]
+    fn refresh_custom_journal_checksums_tracks_manual_edits() {
+        let (_temp_dir, manager) = temp_manager();
+        let up_path = manager
+            .create_blank_migration("custom")
+            .expect("failed to create migration");
+        std::fs::write(&up_path, "SELECT 1;").expect("failed to edit migration");
+
+        manager
+            .refresh_custom_journal_checksums()
+            .expect("failed to refresh journal");
+
+        let journal = manager.load_journal().expect("journal should load");
+        assert_eq!(journal.entries[0].checksum, sql_checksum("SELECT 1;"));
     }
 
     #[tokio::test]

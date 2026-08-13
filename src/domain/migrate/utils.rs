@@ -19,6 +19,29 @@ pub fn truncate_sql(sql: &str, max_len: usize) -> String {
     }
 }
 
+/// Split migration SQL into segments on [`crate::MIGRATION_SPLIT_MARKER`] lines.
+///
+/// Only no-transaction migrations need this: Postgres runs a multi-statement
+/// simple query inside an implicit transaction block, which is exactly what
+/// statements like `CREATE INDEX CONCURRENTLY` reject. Inside a transaction the
+/// marker stays cosmetic and the file is sent as one query.
+pub fn split_statements(sql: &str) -> Vec<String> {
+    sql.lines()
+        .fold(vec![String::new()], |mut segments, line| {
+            if line.trim() == crate::MIGRATION_SPLIT_MARKER {
+                segments.push(String::new());
+            } else {
+                let segment = segments.last_mut().expect("segments is never empty");
+                segment.push_str(line);
+                segment.push('\n');
+            }
+            segments
+        })
+        .into_iter()
+        .filter(|segment| !segment.trim().is_empty())
+        .collect()
+}
+
 /// Sanitize a migration name to be filesystem-safe
 pub fn sanitize_migration_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
@@ -71,6 +94,31 @@ mod tests {
             truncate_sql("SELECT    *    FROM users", 10),
             "SELECT * F..."
         );
+    }
+
+    #[test]
+    fn split_statements_separates_on_markers_and_drops_empty_segments() {
+        let sql = format!(
+            "CREATE INDEX a ON t (c);\n{marker}\n\n{marker}\n  CREATE INDEX b ON t (d);\n",
+            marker = crate::MIGRATION_SPLIT_MARKER
+        );
+
+        let segments = split_statements(&sql);
+
+        assert_eq!(segments.len(), 2);
+        assert!(segments[0].contains("CREATE INDEX a"));
+        assert!(segments[1].contains("CREATE INDEX b"));
+        assert!(
+            segments
+                .iter()
+                .all(|s| !s.contains(crate::MIGRATION_SPLIT_MARKER))
+        );
+    }
+
+    #[test]
+    fn split_statements_without_markers_yields_one_segment() {
+        let segments = split_statements("SELECT 1;\nSELECT 2;");
+        assert_eq!(segments.len(), 1);
     }
 
     #[test]

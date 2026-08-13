@@ -17,7 +17,9 @@ use std::pin::Pin;
 use crate::config::Config;
 use crate::engines::utils::tx::with_tx;
 use crate::migrate::checksum::sql_checksum;
+use crate::migrate::directives::Directives;
 use crate::migrate::manager::MigrationRow;
+use crate::migrate::utils::{split_statements, truncate_sql};
 use crate::models::iden::Iden;
 use crate::schema::*;
 use crate::snapshots::SnapshotProvider;
@@ -32,6 +34,79 @@ pub(crate) struct MigrationFile {
     pub sql: String,
     pub checksum: String,
     pub is_down: bool,
+    pub directives: Directives,
+}
+
+/// Execute a no-transaction migration segment by segment, directly on the pool.
+///
+/// A failure mid-file leaves earlier segments committed and the migration
+/// unrecorded, so re-running replays it from the top: no-transaction migrations
+/// must be idempotent (`CREATE INDEX IF NOT EXISTS` and friends).
+async fn execute_no_tx<DB>(pool: &sqlx::Pool<DB>, file: &MigrationFile) -> Result<()>
+where
+    DB: sqlx::Database,
+    for<'c> &'c sqlx::Pool<DB>: sqlx::Executor<'c, Database = DB>,
+{
+    for segment in split_statements(&file.sql) {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(segment.clone()))
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                let mut message = format!(
+                    "Failed to execute statement in no-transaction migration '{}': {}\nStatement: {}",
+                    file.name,
+                    e,
+                    truncate_sql(&segment, 200)
+                );
+                if segment.to_uppercase().contains("CONCURRENTLY") {
+                    message.push_str(
+                        "\nHint: a failed concurrent index build can leave an INVALID index behind; \
+                         check pg_index.indisvalid, DROP INDEX it, then re-run.",
+                    );
+                }
+                ShkiError::migration(message)
+            })?;
+    }
+    Ok(())
+}
+
+/// Apply a no-transaction migration: execute its segments outside any
+/// transaction, then record it in the journal table.
+async fn apply_no_tx<E>(
+    engine: &E,
+    pool: &sqlx::Pool<E::Database>,
+    file: &MigrationFile,
+) -> Result<MigrationRow>
+where
+    E: TransactionalEngine,
+    for<'c> &'c sqlx::Pool<E::Database>: sqlx::Executor<'c, Database = E::Database>,
+{
+    with_tx!(pool, |tx| { engine.ensure_migrations(&mut tx).await })?;
+    execute_no_tx(pool, file).await?;
+    with_tx!(pool, |tx| { engine.insert_migration(&mut tx, file).await })
+}
+
+/// Roll back a no-transaction migration: execute its down segments outside any
+/// transaction, then delete the journal row.
+async fn rollback_no_tx<E>(
+    engine: &E,
+    pool: &sqlx::Pool<E::Database>,
+    file: &MigrationFile,
+) -> Result<()>
+where
+    E: TransactionalEngine,
+    for<'c> &'c sqlx::Pool<E::Database>: sqlx::Executor<'c, Database = E::Database>,
+{
+    if !file.is_down {
+        return Err(ShkiError::migration(
+            "Down migration must end with .down.sql",
+        ));
+    }
+    execute_no_tx(pool, file).await?;
+    with_tx!(pool, |tx| {
+        engine.delete_migration(&mut tx, &file.name).await
+    })?;
+    Ok(())
 }
 
 pub(crate) trait TransactionalEngine {
@@ -95,12 +170,14 @@ pub(crate) trait TransactionalEngine {
             None => (name, false),
         };
         let checksum = sql_checksum(&sql);
+        let directives = Directives::parse(&sql)?;
         Ok(MigrationFile {
             filename: filename.to_string(),
             name: name.to_string(),
             sql,
             checksum,
             is_down,
+            directives,
         })
     }
 }
@@ -212,37 +289,47 @@ impl Engine {
     }
 
     pub(crate) async fn apply_migration(&self, path: &Path) -> Result<MigrationRow> {
+        macro_rules! apply {
+            ($engine:expr) => {{
+                let file = $engine.read_migration_file(path)?;
+                if file.directives.no_transaction {
+                    apply_no_tx($engine, &$engine.pool, &file).await
+                } else {
+                    with_tx!($engine.pool, |tx| {
+                        $engine.ensure_migrations(&mut tx).await?;
+                        let applied = $engine.apply_migration(&mut tx, path).await?;
+                        $engine.insert_migration(&mut tx, &applied).await
+                    })
+                }
+            }};
+        }
+
         match self {
-            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations(&mut tx).await?;
-                let applied = engine.apply_migration(&mut tx, path).await?;
-                engine.insert_migration(&mut tx, &applied).await
-            }),
-            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations(&mut tx).await?;
-                let applied = engine.apply_migration(&mut tx, path).await?;
-                engine.insert_migration(&mut tx, &applied).await
-            }),
-            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.ensure_migrations(&mut tx).await?;
-                let applied = engine.apply_migration(&mut tx, path).await?;
-                engine.insert_migration(&mut tx, &applied).await
-            }),
+            Engine::Postgres(engine) => apply!(engine),
+            Engine::Sqlite(engine) => apply!(engine),
+            Engine::Mysql(engine) => apply!(engine),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
     }
 
     pub(crate) async fn rollback_migration(&self, path: &Path) -> Result<()> {
+        macro_rules! rollback {
+            ($engine:expr) => {{
+                let file = $engine.read_migration_file(path)?;
+                if file.directives.no_transaction {
+                    rollback_no_tx($engine, &$engine.pool, &file).await
+                } else {
+                    with_tx!($engine.pool, |tx| {
+                        $engine.rollback_migration(&mut tx, path).await
+                    })
+                }
+            }};
+        }
+
         match self {
-            Engine::Postgres(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration(&mut tx, path).await
-            }),
-            Engine::Sqlite(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration(&mut tx, path).await
-            }),
-            Engine::Mysql(engine) => with_tx!(engine.pool, |tx| {
-                engine.rollback_migration(&mut tx, path).await
-            }),
+            Engine::Postgres(engine) => rollback!(engine),
+            Engine::Sqlite(engine) => rollback!(engine),
+            Engine::Mysql(engine) => rollback!(engine),
             Engine::Detached(engine) => Err(engine.unavailable()),
         }
     }

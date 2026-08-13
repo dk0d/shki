@@ -281,7 +281,9 @@ fn cursor_key_type(
 
     let types: Vec<String> = keys
         .iter()
-        .map(|(_, param)| generator.sql_type_to_rust(&param.data_type, false, enums, composites, config))
+        .map(|(_, param)| {
+            generator.sql_type_to_rust(&param.data_type, false, enums, composites, config)
+        })
         .collect();
 
     Some(if types.len() == 1 {

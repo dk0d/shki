@@ -1,4 +1,5 @@
 pub mod checksum;
+pub mod directives;
 pub mod journal;
 pub mod manager;
 pub mod utils;
@@ -26,6 +27,7 @@ pub async fn cmd_migrate(
         return Ok(());
     }
 
+    manager.refresh_custom_journal_checksums()?;
     let applied = manager.apply(mode.unwrap_or_default()).await?;
 
     println!(

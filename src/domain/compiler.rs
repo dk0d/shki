@@ -89,7 +89,9 @@ fn embedded_shadow_settings(config: &Config) -> Result<Settings> {
     let mut settings = SettingsBuilder::new().timeout(Some(std::time::Duration::from_secs(
         shadow_timeout_seconds(config),
     )));
-    settings = settings.version(postgres_major_version_req(config.shadow.pg_version.unwrap_or(18))?);
+    settings = settings.version(postgres_major_version_req(
+        config.shadow.pg_version.unwrap_or(18),
+    )?);
     Ok(settings.build())
 }
 
@@ -366,6 +368,7 @@ async fn backfill_pending_snapshots(config: &Config) -> Result<()> {
         config.out_dir(),
         Engine::detached(config.dialect(), config.migrations.entity()),
     );
+    manager.refresh_custom_journal_checksums()?;
     let journal = manager.load_journal()?;
     let meta_dir = manager.meta_dir();
 
@@ -444,7 +447,10 @@ async fn backfill_pending_snapshots(config: &Config) -> Result<()> {
                 name: name.clone(),
                 checksum: Some(sql_checksum(&sql)),
             });
-            std::fs::write(meta_dir.join(format!("{}.snapshot.json", name)), snapshot.to_json()?)?;
+            std::fs::write(
+                meta_dir.join(format!("{}.snapshot.json", name)),
+                snapshot.to_json()?,
+            )?;
             prev_id = snapshot.id;
         }
 
@@ -562,7 +568,10 @@ mod tests {
     #[test]
     fn external_shadow_compiler_requires_postgres() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Sqlite), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Sqlite),
+                ..Default::default()
+            },
             shadow: crate::ShadowArgs {
                 shadow_database_url: Some("sqlite://shadow".to_string()),
                 ..Default::default()
@@ -579,7 +588,10 @@ mod tests {
     #[test]
     fn embedded_shadow_compiler_requires_postgres() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Sqlite), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Sqlite),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -592,7 +604,10 @@ mod tests {
     #[test]
     fn embedded_shadow_compiler_rejects_unsupported_version_during_configuration() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             shadow: crate::ShadowArgs {
                 pg_version: Some(13),
                 ..Default::default()
@@ -613,7 +628,10 @@ mod tests {
     #[test]
     fn compiler_selector_uses_embedded_when_shadow_url_is_missing() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -623,7 +641,11 @@ mod tests {
     #[test]
     fn compiler_selector_uses_external_when_shadow_url_is_configured() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                database_url: Some("postgres://localhost/app".to_string()),
+                ..Default::default()
+            },
             shadow: crate::ShadowArgs {
                 shadow_database_url: Some("postgres://localhost/shadow".to_string()),
                 ..Default::default()
@@ -644,7 +666,10 @@ mod tests {
     #[test]
     fn embedded_shadow_settings_uses_longer_startup_timeout_floor() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             timeout_seconds: 2,
             ..Config::default()
         };
@@ -662,7 +687,10 @@ mod tests {
     #[test]
     fn embedded_shadow_settings_preserves_longer_configured_timeout() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             timeout_seconds: MIN_EMBEDDED_SHADOW_TIMEOUT_SECONDS + 30,
             ..Config::default()
         };
@@ -708,7 +736,10 @@ mod tests {
     #[test]
     fn external_shadow_compiler_requires_shadow_database_url() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -725,7 +756,11 @@ mod tests {
     #[test]
     fn external_shadow_compiler_rejects_live_database_url() {
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                database_url: Some("postgres://localhost/app".to_string()),
+                ..Default::default()
+            },
             shadow: crate::ShadowArgs {
                 shadow_database_url: Some("postgres://localhost/app".to_string()),
                 ..Default::default()
