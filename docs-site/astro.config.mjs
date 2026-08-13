@@ -70,6 +70,7 @@ export default defineConfig({
           ],
         },
         { label: "Contributing", slug: "contributing" },
+        { label: "Inspired By", slug: "inspired-by" },
       ],
       plugins: [starlightThemeTerminalPlugin()],
     }),

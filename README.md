@@ -89,7 +89,8 @@ MIT, see [LICENSE](LICENSE).
 
 ## Related projects
 
-`shki` stands on the shoulders of projects that explored these ideas first:
+`shki` stands on the shoulders of projects that explored these ideas first —
+full credits in [Inspired By](https://dk0d.github.io/shki/inspired-by/):
 
 - [pgschema](https://github.com/pgschema/pgschema) — declarative, Terraform-style schema management for PostgreSQL.
 - [jayy-lmao/sql-gen](https://github.com/jayy-lmao/sql-gen) — generating typed Rust code from a live database schema.
