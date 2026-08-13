@@ -9,6 +9,19 @@ homepage = "https://shki.sh"
 keywords = ["database", "schema", "migration", "postgresql", "mysql", "sqlite"]
 categories = ["database", "command-line-utilities"]
 
+# Describes the artifacts dist publishes, so `cargo binstall` resolves them
+# directly instead of probing its built-in URL patterns. Keep in sync with
+# dist-workspace.toml: naming is `{name}-{target}` with a matching inner dir.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+
+# dist's Windows zip is flat — no `{name}-{target}/` prefix like the unix tarballs.
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+bin-dir = "{ bin }{ binary-ext }"
+
 [[bin]]
 name = "shki"
 path = "src/main.rs"
