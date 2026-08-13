@@ -919,7 +919,10 @@ mod tests {
 
         let preview = render_directory_schema_preview(
             &Config {
-                common: crate::CommonArgs { no_color: true, ..Default::default() },
+                common: crate::CommonArgs {
+                    no_color: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             &snapshot,

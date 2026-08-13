@@ -33,6 +33,48 @@ Declarative Schema generation is PostgreSQL-focused for now. The migration runne
 
 ## Installation
 
+Install the latest release as a prebuilt binary — no Rust toolchain needed. The
+script detects your platform and downloads the matching build.
+
+**macOS and Linux**
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dk0d/shki/releases/latest/download/shki-installer.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://github.com/dk0d/shki/releases/latest/download/shki-installer.ps1 | iex
+```
+
+Both install `shki` into `$CARGO_HOME/bin` (`~/.cargo/bin` by default — make sure
+it is on your `PATH`), along with an updater:
+
+```bash
+shki-update   # upgrade in place to the newest release
+```
+
+To pin a version, replace `latest/download` with `download/v<version>`, e.g.
+`.../releases/download/v0.9.6/shki-installer.sh`.
+
+**With `cargo binstall`**
+
+`shki` is not published to crates.io, so point binstall at the repository:
+
+```bash
+cargo binstall --git https://github.com/dk0d/shki shki
+```
+
+This fetches the same prebuilt binary as the scripts above instead of compiling.
+There is no `@latest` specifier — binstall expects a semver requirement, and with
+`--git` it reads the version from the repository, which is already the newest
+release. Use `shki@*` to state "any version" explicitly, or `shki@0.9.6` to pin.
+Unlike the install scripts, binstall does not install `shki-update`.
+
+Prebuilt binaries cover macOS (Apple Silicon and Intel), Linux (x86_64 and
+aarch64, glibc), and Windows (x86_64). Anywhere else, build from source:
+
 ```bash
 cargo install --git https://github.com/dk0d/shki
 ```
@@ -197,7 +239,7 @@ Command-scoped options:
 | `status`                   | `s`        | Show migration status and checksum issues                                                                                  |
 | `down [count]`             | -          | Apply Down Migrations for local rollback                                                                                   |
 | `codegen`                  | `code`     | Generate Rust, TypeScript, or Protobuf code from schema shape                                                              |
-| `queries`                  | `q`        | Experimental `querygen` feature: generate type-safe Rust query functions from annotated PostgreSQL files                 |
+| `queries`                  | `q`        | Experimental `querygen` feature: generate type-safe Rust query functions from annotated PostgreSQL files                   |
 | `drop [migration]`         | -          | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                      |
 
 ## Usage Patterns
@@ -256,6 +298,24 @@ Seed a Custom Migration from a file:
 ```bash
 shki create add_audit_table --sql-file ./sql/add_audit_table.sql
 ```
+
+#### Running Outside A Transaction
+
+Each migration runs inside a single transaction, so a failure rolls the whole file back. Some PostgreSQL statements refuse to run that way — most commonly `CREATE INDEX CONCURRENTLY`, the non-blocking way to add an index to a large, live table. Add the `shki:no-transaction` directive to opt a migration out:
+
+```sql
+-- shki:no-transaction
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scan_captured_at ON scan (captured_at);
+--> +statement
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scan_profile ON scan (profile_id);
+```
+
+Each `--> +statement` segment is then sent on its own, outside any transaction. Two consequences:
+
+- **The migration must be idempotent.** A failure part-way leaves earlier segments committed and the migration unrecorded, so the next `shki migrate` replays the file from the top. Write `IF NOT EXISTS` and the like.
+- **A failed concurrent index build leaves an `INVALID` index behind**, which `IF NOT EXISTS` would then silently keep. Check `pg_index.indisvalid`, `DROP INDEX` the invalid one, and re-run. Shki says so in the error when a `CONCURRENTLY` statement fails.
+
+Directives are comments, and checksums are computed on comment-stripped SQL, so adding one to a migration that has already been applied elsewhere does **not** invalidate its checksum or require a Journal edit. An unrecognized `shki:` directive is a hard error rather than a silent no-op, so a typo surfaces before it reaches production.
 
 Custom Migrations are executable artifacts recorded in the Journal. Their SQL isn't final at creation time, so no Snapshot is written then — but the next time a diff is needed (`diff` or `generate`), Shki replays any not-yet-snapshotted migrations on a Shadow Database, introspects the result, and records a Snapshot for each. This keeps the Snapshot chain complete: if a Custom Migration changes the schema shape, that change is captured in the baseline so the next generated migration accounts for it (and won't re-emit DDL the Custom Migration already applied).
 
@@ -416,25 +476,25 @@ jsonb = "serde_json::Value"
 
 Codegen options:
 
-| Option              | Purpose                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `output`            | Default output path when `--output` is not provided. Relative paths resolve from `root`.                                                                                  |
-| `format`            | Output layout: `single`, `singlemodule`, or `modules`.                                                                                                                    |
-| `struct_derives`    | Replaces the default derives attached to generated structs.                                                                                                               |
-| `struct_attributes` | Extra raw attributes added above generated structs.                                                                                                                       |
-| `enum_derives`      | Replaces the default derives attached to generated enums.                                                                                                                 |
-| `enum_attributes`   | Extra raw attributes added above generated enums.                                                                                                                         |
-| `struct_renames`    | Exact table-name to generated struct-name overrides. These apply before `struct_pattern`.                                                                                 |
-| `struct_pattern`    | Pattern for generated struct names. `{}` is replaced with the resolved base name. For table `users`, the base is `User`; pattern `{}Row` produces `UserRow`.              |
-| `enum_renames`      | Exact enum-name to generated enum-name overrides. These apply before `enum_pattern`.                                                                                      |
-| `enum_pattern`      | Pattern for generated enum names. `{}` is replaced with the resolved base name. For enum `user_status`, the base is `UserStatus`; pattern `Db{}` produces `DbUserStatus`. |
-| `type_overrides`    | SQL type to generated type overrides. Built-in types use lowercase keys like `jsonb`; custom PostgreSQL types may use schema-qualified keys like `public.money`.          |
-| `serde`             | Convenience toggle: injects `serde::Serialize`/`Deserialize` derives and `#[serde(rename)]` attributes. Defaults to `false`. Kept out of `struct_derives`/`enum_derives` so it can be toggled.                                                       |
+| Option              | Purpose                                                                                                                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`            | Default output path when `--output` is not provided. Relative paths resolve from `root`.                                                                                                                                                      |
+| `format`            | Output layout: `single`, `singlemodule`, or `modules`.                                                                                                                                                                                        |
+| `struct_derives`    | Replaces the default derives attached to generated structs.                                                                                                                                                                                   |
+| `struct_attributes` | Extra raw attributes added above generated structs.                                                                                                                                                                                           |
+| `enum_derives`      | Replaces the default derives attached to generated enums.                                                                                                                                                                                     |
+| `enum_attributes`   | Extra raw attributes added above generated enums.                                                                                                                                                                                             |
+| `struct_renames`    | Exact table-name to generated struct-name overrides. These apply before `struct_pattern`.                                                                                                                                                     |
+| `struct_pattern`    | Pattern for generated struct names. `{}` is replaced with the resolved base name. For table `users`, the base is `User`; pattern `{}Row` produces `UserRow`.                                                                                  |
+| `enum_renames`      | Exact enum-name to generated enum-name overrides. These apply before `enum_pattern`.                                                                                                                                                          |
+| `enum_pattern`      | Pattern for generated enum names. `{}` is replaced with the resolved base name. For enum `user_status`, the base is `UserStatus`; pattern `Db{}` produces `DbUserStatus`.                                                                     |
+| `type_overrides`    | SQL type to generated type overrides. Built-in types use lowercase keys like `jsonb`; custom PostgreSQL types may use schema-qualified keys like `public.money`.                                                                              |
+| `serde`             | Convenience toggle: injects `serde::Serialize`/`Deserialize` derives and `#[serde(rename)]` attributes. Defaults to `false`. Kept out of `struct_derives`/`enum_derives` so it can be toggled.                                                |
 | `sqlx`              | Convenience toggle: injects `sqlx::FromRow` (structs) / `sqlx::Type` (enums) derives and `#[sqlx(...)]` attributes. Defaults to `true`; set `false` for plain types with no sqlx coupling. Kept out of the derive lists so it can be toggled. |
-| `include_tables`    | If non-empty, only listed table names are generated.                                                                                                                      |
-| `exclude_tables`    | Listed table names are skipped. Applied after `include_tables`.                                                                                                           |
-| `verbose`           | Prints generated code to stdout as well as writing files.                                                                                                                 |
-| `impl_file_name`    | File name stem for hand-written impl files in `modules` mode.                                                                                                             |
+| `include_tables`    | If non-empty, only listed table names are generated.                                                                                                                                                                                          |
+| `exclude_tables`    | Listed table names are skipped. Applied after `include_tables`.                                                                                                                                                                               |
+| `verbose`           | Prints generated code to stdout as well as writing files.                                                                                                                                                                                     |
+| `impl_file_name`    | File name stem for hand-written impl files in `modules` mode.                                                                                                                                                                                 |
 
 Name resolution order is: explicit rename, default casing, then pattern. Struct defaults singularize table names and use PascalCase, so `users` becomes `User`. Enum defaults use PascalCase, so `user_status` becomes `UserStatus`.
 
@@ -478,11 +538,11 @@ SELECT * FROM users WHERE email = $email;
 
 Cardinality controls the return shape:
 
-| Tag      | Returns                  |
-| -------- | ------------------------ |
-| `:one`   | `Result<Option<Row>>`    |
-| `:many`  | `Result<Vec<Row>>`       |
-| `:exec`  | `Result<u64>` (rows affected) |
+| Tag      | Returns                                                  |
+| -------- | -------------------------------------------------------- |
+| `:one`   | `Result<Option<Row>>`                                    |
+| `:many`  | `Result<Vec<Row>>`                                       |
+| `:exec`  | `Result<u64>` (rows affected)                            |
 | `:batch` | A paginated `:many` — `Result<Page<Row>>` (limit/offset) |
 
 Features:
@@ -498,7 +558,7 @@ Limitations:
 
 - **PostgreSQL only.** Describe-based typing relies on PostgreSQL; MySQL/SQLite query codegen is not implemented.
 - **Rust/sqlx only.** TypeScript/Protobuf query output is not implemented (schema `codegen` covers those for types).
-- **Keyset next-cursor is not derived.** Cursor `:batch` currently returns `Result<Vec<Row>>` and does not compute the *next* cursor from the last row; `CursorPagination`'s `next`/`prev` are caller-managed for now.
+- **Keyset next-cursor is not derived.** Cursor `:batch` currently returns `Result<Vec<Row>>` and does not compute the _next_ cursor from the last row; `CursorPagination`'s `next`/`prev` are caller-managed for now.
 - **Generated query rows always derive `sqlx::FromRow`**, regardless of the `[codegen] sqlx` toggle, since they are decoded by sqlx.
 - **Unsupported runtime mappings fail generation.** Types that the Rust schema generator renders as `String` but sqlx cannot decode as `String` (such as `NUMERIC`, ranges, network, geometric, and interval types) require a compatible `[codegen.type_overrides]` entry.
 - The Shadow Database is started for the describe step, so query codegen pays the same startup cost as `diff`/`generate`.
@@ -515,11 +575,11 @@ format = "single"                # output layout, as in [codegen]
 # the generated module imports `use super::models::*;`.
 ```
 
-| Option    | Purpose                                                                                              |
-| --------- | ---------------------------------------------------------------------------------------------------- |
-| `sources` | SQL file or directory of annotated `*.sql` queries. Relative paths resolve from `root`. Default `<root>/queries`. |
-| `output`  | Output file for generated Rust. Prints to stdout when omitted. Relative paths resolve from `root`.   |
-| `format`  | Output layout: `single`, `singlemodule`, or `modules` (shared with `[codegen]`).                     |
+| Option    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sources` | SQL file or directory of annotated `*.sql` queries. Relative paths resolve from `root`. Default `<root>/queries`.                                                                                                                                                                                                                                                                                               |
+| `output`  | Output file for generated Rust. Prints to stdout when omitted. Relative paths resolve from `root`.                                                                                                                                                                                                                                                                                                              |
+| `format`  | Output layout: `single`, `singlemodule`, or `modules` (shared with `[codegen]`).                                                                                                                                                                                                                                                                                                                                |
 | `models`  | Rust module path imported as `use <path>::*;` so generated functions can name your schema structs/enums. **Optional** — derived from the `[codegen]`/`[queries]` output paths when unset (sibling files share a directory, so e.g. `models.rs` + `queries.rs` → `super::models`). Set it (e.g. `crate::models`) only to override that for non-standard layouts; it must be a Rust module path, not a file path. |
 
 The schema type mapping, naming/rename config, output modes, and `--preview` are shared with `[codegen]`; see [ADR 0001](docs/adr/0001-typed-query-codegen.md) for the full design.

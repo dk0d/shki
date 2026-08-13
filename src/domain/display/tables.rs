@@ -272,7 +272,11 @@ mod tests {
     #[test]
     fn config_display_rows_flatten_complex_sections_at_the_end() {
         let mut config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), database_url: Some("postgres://localhost/app".to_string()), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                database_url: Some("postgres://localhost/app".to_string()),
+                ..Default::default()
+            },
             ..Config::default()
         };
         config.migrations.args.table = Some("schema_migrations".to_string());

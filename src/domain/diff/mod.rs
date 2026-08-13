@@ -317,7 +317,10 @@ mod tests {
         });
         let diff = diff_snapshots(&baseline, &desired).expect("snapshot diff should succeed");
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -344,7 +347,10 @@ mod tests {
         desired.insert_table(Iden::new("users", None), Table::new("users"));
         let diff = diff_snapshots(&baseline, &desired).expect("snapshot diff should succeed");
         let config = Config {
-            common: crate::CommonArgs { dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -409,7 +415,11 @@ mod tests {
 
         let config = Config {
             root: temp_dir.path().to_path_buf(),
-            common: crate::CommonArgs { migrations_dir: Some(out_dir), dialect: Some(SqlDialect::Postgres), ..Default::default() },
+            common: crate::CommonArgs {
+                migrations_dir: Some(out_dir),
+                dialect: Some(SqlDialect::Postgres),
+                ..Default::default()
+            },
             ..Config::default()
         };
 

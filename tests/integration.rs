@@ -41,7 +41,9 @@ async fn compile_extension_schema(image: &str, tag: &str, schema_sql: &str) -> S
         .expect("failed to get PostgreSQL extension image port");
     let database_url = format!("postgresql://postgres:postgres@{host}:{port}/postgres");
     let pool = connect_with_retries("PostgreSQL extension image", || {
-        PgPoolOptions::new().max_connections(1).connect(&database_url)
+        PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
     })
     .await;
     pool.execute("COMMENT ON DATABASE postgres IS 'shki:shadow'")
@@ -281,6 +283,82 @@ async fn scenario_transaction_rollback_on_error<T: TestBackend>(ctx: T) {
     }
 
     assert!(ctx.applied_names(&manager).await.is_empty());
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn no_transaction_directive_allows_create_index_concurrently() {
+    let ctx = PgTestContext::setup("no_tx_directive").await;
+    let manager = ctx.manager();
+    let schema = ctx.schema_name.clone();
+    let table = ctx.unique_name("scan");
+
+    manager
+        .apply_migration(&ctx.write_migration(
+            "0001_create_scan.sql",
+            &ctx.create_table_sql(&table, &[format!("payload {} NOT NULL", ctx.text_type())]),
+        ))
+        .await
+        .expect("failed to create table");
+
+    let index_sql = |index: &str, column: &str| {
+        format!(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS \"{index}\" ON \"{schema}\".\"{table}\" ({column});"
+        )
+    };
+
+    // Without the directive the wrapping transaction makes Postgres reject it,
+    // and the error points at the escape hatch.
+    let blocked = manager
+        .apply_migration(
+            &ctx.write_migration("0002_blocked.sql", &index_sql("idx_blocked", "payload")),
+        )
+        .await
+        .expect_err("CONCURRENTLY inside a transaction should fail");
+    let message = blocked.to_string();
+    assert!(
+        message.contains("cannot run inside a transaction block"),
+        "{message}"
+    );
+    assert!(message.contains("shki:no-transaction"), "{message}");
+    std::fs::remove_file(ctx.migrations_dir().join("0002_blocked.sql"))
+        .expect("failed to remove blocked migration");
+
+    // With it, each segment runs on its own connection outside any transaction.
+    let path = ctx.write_migration(
+        "0002_capture_profile.sql",
+        &format!(
+            "-- shki:no-transaction\n{}\n--> +statement\n{}\n",
+            index_sql("idx_payload", "payload"),
+            index_sql("idx_id", "id"),
+        ),
+    );
+
+    manager
+        .apply_migration(&path)
+        .await
+        .expect("no-transaction migration should apply");
+
+    for index in ["idx_payload", "idx_id"] {
+        let valid = sqlx::query_scalar::<_, bool>(
+            "SELECT i.indisvalid FROM pg_index i
+             JOIN pg_class c ON c.oid = i.indexrelid
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = $1 AND c.relname = $2",
+        )
+        .bind(&schema)
+        .bind(index)
+        .fetch_one(&ctx.pg_pool)
+        .await
+        .unwrap_or_else(|e| panic!("index {index} should exist: {e}"));
+        assert!(valid, "index {index} should be valid");
+    }
+
+    assert_eq!(
+        ctx.applied_names(&manager).await,
+        vec!["0001_create_scan", "0002_capture_profile"]
+    );
 
     ctx.cleanup().await;
 }
@@ -897,9 +975,7 @@ async fn cli_generate_accounts_for_schema_changing_custom_migration() {
     // 3. Mirror the custom change in the declarative schema (the source of truth).
     std::fs::write(
         ctx.root_dir().join("schema"),
-        format!(
-            "CREATE TABLE {table} (id integer primary key, name text not null, email text);\n"
-        ),
+        format!("CREATE TABLE {table} (id integer primary key, name text not null, email text);\n"),
     )
     .expect("write updated declarative schema");
 
@@ -921,7 +997,9 @@ async fn cli_generate_accounts_for_schema_changing_custom_migration() {
     .expect("second schema generate should succeed");
 
     // The custom migration was backfilled with a Snapshot capturing `email`.
-    let custom_snapshot_path = ctx.migrations_dir().join("_meta/0001_add-email.snapshot.json");
+    let custom_snapshot_path = ctx
+        .migrations_dir()
+        .join("_meta/0001_add-email.snapshot.json");
     let snapshot: Snapshot = serde_json::from_str(
         &std::fs::read_to_string(&custom_snapshot_path)
             .expect("custom migration should have a backfilled snapshot"),
@@ -1646,12 +1724,12 @@ async fn codegen_writes_typescript_module_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                    config: shki::codegen::CodegenConfig {
-                        output: Some(output_dir.clone()),
-                        format: Some(OutputMode::Module),
-                        ..Default::default()
-                    },
+                config: shki::codegen::CodegenConfig {
+                    output: Some(output_dir.clone()),
+                    format: Some(OutputMode::Module),
                     ..Default::default()
+                },
+                ..Default::default()
             },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
@@ -1688,12 +1766,12 @@ async fn codegen_writes_rust_nested_modules_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                    config: shki::codegen::CodegenConfig {
-                        output: Some(output_dir.clone()),
-                        format: Some(OutputMode::Modules),
-                        ..Default::default()
-                    },
+                config: shki::codegen::CodegenConfig {
+                    output: Some(output_dir.clone()),
+                    format: Some(OutputMode::Modules),
                     ..Default::default()
+                },
+                ..Default::default()
             },
             language: CodegenLanguage::Rust,
             source: Some(snapshot_path),
@@ -1739,12 +1817,12 @@ async fn codegen_writes_protobuf_files_from_snapshot() {
         command: Commands::Codegen {
             shadow: Default::default(),
             codegen: shki::CodegenArgs {
-                    config: shki::codegen::CodegenConfig {
-                        output: Some(output_dir.clone()),
-                        format: Some(OutputMode::Module),
-                        ..Default::default()
-                    },
+                config: shki::codegen::CodegenConfig {
+                    output: Some(output_dir.clone()),
+                    format: Some(OutputMode::Module),
                     ..Default::default()
+                },
+                ..Default::default()
             },
             language: CodegenLanguage::Protobuf,
             source: Some(snapshot_path),
@@ -1788,12 +1866,12 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
                 ..Default::default()
             },
             codegen: shki::CodegenArgs {
-                    config: shki::codegen::CodegenConfig {
-                        output: Some(output_dir.clone()),
-                        format: Some(OutputMode::Module),
-                        ..Default::default()
-                    },
+                config: shki::codegen::CodegenConfig {
+                    output: Some(output_dir.clone()),
+                    format: Some(OutputMode::Module),
                     ..Default::default()
+                },
+                ..Default::default()
             },
             language: CodegenLanguage::Typescript {
                 flavor: TypescriptFlavor::Interface,
@@ -1867,7 +1945,10 @@ async fn postgres_catalog_includes_functions_and_triggers() {
         .expect("failed to create function and trigger fixture");
 
     let config = Config {
-        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..Default::default()
+        },
         ..Config::default()
     };
     let snapshot = ctx
@@ -1951,7 +2032,10 @@ async fn postgres_catalog_includes_composite_types_and_domains() {
         .expect("failed to create composite type and domain fixture");
 
     let config = Config {
-        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..Default::default()
+        },
         ..Config::default()
     };
     let snapshot = ctx
@@ -2054,7 +2138,10 @@ async fn postgres_catalog_includes_procedures_aggregates_rls_and_partitions() {
         .expect("failed to create remaining catalog fixture");
 
     let config = Config {
-        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..Default::default()
+        },
         ..Config::default()
     };
     let snapshot = ctx
@@ -2150,7 +2237,10 @@ async fn postgres_catalog_includes_privileges() {
         .expect("failed to create privilege fixture");
 
     let config = Config {
-        common: shki::CommonArgs { dialect: Some(shki::schema::SqlDialect::Postgres), ..Default::default() },
+        common: shki::CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..Default::default()
+        },
         ..Config::default()
     };
     let snapshot = ctx
@@ -2517,7 +2607,9 @@ async fn compiler_consumes_directory_schema_with_i_includes() {
 // --- Bootstrap (authoring) and Adopt (environment adoption) ---------------
 
 fn seed_table_sql(schema: &str, table: &str) -> String {
-    format!("CREATE TABLE \"{schema}\".\"{table}\" (id integer primary key, name varchar(255) not null);")
+    format!(
+        "CREATE TABLE \"{schema}\".\"{table}\" (id integer primary key, name varchar(255) not null);"
+    )
 }
 
 #[tokio::test]
@@ -2553,7 +2645,10 @@ async fn postgres_bootstrap_authors_baseline_without_touching_db() {
         .join("_meta")
         .join("0000_bootstrap.snapshot.json");
     assert!(up_path.exists(), "baseline migration should be written");
-    assert!(snapshot_path.exists(), "baseline snapshot should be written");
+    assert!(
+        snapshot_path.exists(),
+        "baseline snapshot should be written"
+    );
     let up_sql = std::fs::read_to_string(&up_path).expect("read baseline migration");
     assert!(up_sql.contains("CREATE TABLE"));
     assert!(up_sql.contains(&users));
@@ -2626,7 +2721,10 @@ async fn postgres_adopt_marks_baseline_and_applies_newer_migration() {
     let manager = ctx.manager();
     assert_eq!(
         ctx.applied_names(&manager).await,
-        vec!["0000_bootstrap".to_string(), "0001_create_posts".to_string()]
+        vec![
+            "0000_bootstrap".to_string(),
+            "0001_create_posts".to_string()
+        ]
     );
     // Baseline table was never re-run, and the newer migration created its table.
     assert!(ctx.table_exists(&users).await);
@@ -2733,7 +2831,9 @@ async fn postgres_fresh_environment_runs_baseline_via_migrate() {
 
     // Simulate a fresh environment: drop the table so the baseline must recreate it.
     ctx.pg_pool
-        .execute(AssertSqlSafe(format!("DROP TABLE \"{schema}\".\"{users}\";")))
+        .execute(AssertSqlSafe(format!(
+            "DROP TABLE \"{schema}\".\"{users}\";"
+        )))
         .await
         .expect("failed to reset to a fresh environment");
     assert!(!ctx.table_exists(&users).await);

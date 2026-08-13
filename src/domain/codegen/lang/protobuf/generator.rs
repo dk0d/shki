@@ -367,7 +367,8 @@ impl ProtobufGenerator {
             DataType::Interval => ("google.protobuf.Duration".to_string(), false),
 
             DataType::Array { element_type } => {
-                let (inner_type, _) = self.sql_type_to_proto(element_type, enums, composites, config);
+                let (inner_type, _) =
+                    self.sql_type_to_proto(element_type, enums, composites, config);
                 (inner_type, true)
             }
 

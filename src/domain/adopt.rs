@@ -64,10 +64,7 @@ pub async fn cmd_adopt(
                 baseline_name
             )));
         }
-        println!(
-            "{}",
-            "\nProceeding despite drift (--force).".yellow()
-        );
+        println!("{}", "\nProceeding despite drift (--force).".yellow());
     } else {
         println!("{}", "Live database matches the baseline.".green());
     }
@@ -97,7 +94,12 @@ pub async fn cmd_adopt(
     for migration in &to_mark {
         let path = manager.get_up_migration_path(migration);
         manager.mark_migration_applied(&path).await?;
-        println!("{} {} {}", "✔".green(), migration, "marked as applied".dimmed());
+        println!(
+            "{} {} {}",
+            "✔".green(),
+            migration,
+            "marked as applied".dimmed()
+        );
     }
     if to_mark.is_empty() {
         println!("{}", "Baseline already recorded as applied.".dimmed());
@@ -151,7 +153,10 @@ async fn report_dry_run(
     println!("\n{}", "Dry run — no changes will be made.".cyan());
 
     if to_mark.is_empty() {
-        println!("Would mark applied: {}", "(nothing — already recorded)".dimmed());
+        println!(
+            "Would mark applied: {}",
+            "(nothing — already recorded)".dimmed()
+        );
     } else {
         println!("Would mark applied:");
         for migration in to_mark {
@@ -160,7 +165,10 @@ async fn report_dry_run(
     }
 
     if mark_only {
-        println!("Would apply newer migrations: {}", "(skipped, --mark-only)".dimmed());
+        println!(
+            "Would apply newer migrations: {}",
+            "(skipped, --mark-only)".dimmed()
+        );
         return Ok(());
     }
 
@@ -177,7 +185,10 @@ async fn report_dry_run(
         .collect();
 
     if would_apply.is_empty() {
-        println!("Would apply newer migrations: {}", "(none pending)".dimmed());
+        println!(
+            "Would apply newer migrations: {}",
+            "(none pending)".dimmed()
+        );
     } else {
         println!("Would apply newer migrations:");
         for migration in would_apply {

@@ -476,7 +476,12 @@ mod tests {
             "string"
         );
         assert_eq!(
-            generator.sql_type_to_typescript(&DataType::VarChar { length: None }, &enums, &composites, &config),
+            generator.sql_type_to_typescript(
+                &DataType::VarChar { length: None },
+                &enums,
+                &composites,
+                &config
+            ),
             "string"
         );
 
