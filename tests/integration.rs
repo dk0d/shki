@@ -8,7 +8,7 @@ use shki::compiler::{ExternalShadowDBCompiler, SchemaCompiler};
 use shki::config::Config;
 use shki::domain::migrate::manager::ApplyMigrationMode;
 use shki::dump::SchemaExportFormat;
-use shki::migrate::journal::{Journal, MigrationKind};
+use shki::migrate::journal::{Journal, JournalEntry, MigrationKind};
 use shki::models::iden::Iden;
 use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
@@ -441,6 +441,45 @@ async fn scenario_cli_migrate_applies_pending<T: TestBackend>(ctx: T) {
 
     assert!(ctx.table_exists(&table_name).await);
     assert_eq!(ctx.applied_names(&manager).await, vec!["0001_create_posts"]);
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_migrate_does_not_write_migration_files<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let table_name = ctx.unique_name("immutable_migrations");
+    let migration = ctx.write_migration(
+        "0001_create_immutable_migrations.sql",
+        &ctx.create_table_sql(&table_name, &[]),
+    );
+    std::fs::create_dir_all(manager.meta_dir()).expect("create migration metadata dir");
+    let journal = Journal {
+        version: "1".to_string(),
+        entries: vec![JournalEntry {
+            index: 0,
+            migration: "0001_create_immutable_migrations".to_string(),
+            kind: MigrationKind::Custom,
+            checksum: "stale-checksum".to_string(),
+        }],
+    };
+    journal
+        .save(&manager.journal_path())
+        .expect("write migration journal");
+
+    run(ctx.migrate_cli(ctx.write_config()))
+        .await
+        .expect("migrate should not need to write its input directory");
+
+    assert!(ctx.table_exists(&table_name).await);
+    assert_eq!(
+        manager
+            .load_journal()
+            .expect("read unchanged migration journal")
+            .entries[0]
+            .checksum,
+        "stale-checksum"
+    );
+    assert!(migration.exists());
 
     ctx.cleanup().await;
 }
@@ -1601,6 +1640,14 @@ macro_rules! backend_suite {
             async fn cli_migrate_applies_pending() {
                 scenario_cli_migrate_applies_pending(
                     <$backend as TestBackend>::setup("cli_migrate").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn cli_migrate_does_not_write_migration_files() {
+                scenario_cli_migrate_does_not_write_migration_files(
+                    <$backend as TestBackend>::setup("cli_migrate_immutable").await,
                 )
                 .await;
             }
