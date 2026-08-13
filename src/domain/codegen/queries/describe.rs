@@ -573,6 +573,7 @@ mod tests {
             name: "example".to_string(),
             cardinality: Cardinality::One,
             keyset: Vec::new(),
+            transaction: false,
             sql: "SELECT 1".to_string(),
             source_file: PathBuf::from("queries/example.sql"),
         }

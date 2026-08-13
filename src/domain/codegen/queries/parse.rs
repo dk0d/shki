@@ -61,6 +61,8 @@ pub struct QuerySpec {
     /// Keyset cursor parameter/result-field mappings from a `:keyset` modifier
     /// (e.g. `$1=id $2=created_at`), in cursor-key order.
     pub keyset: Vec<KeysetParam>,
+    /// Whether the generated function requires a transaction executor (`:tx`).
+    pub transaction: bool,
     /// The SQL body, with the annotation line stripped and trimmed.
     pub sql: String,
     /// The file this query came from (for diagnostics).
@@ -103,13 +105,13 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
         Regex::new(r"^\s*--\s*name:\s*(?P<name>\S+)\s+(?P<rest>:.*?)\s*$").expect("valid regex");
 
     let mut specs: Vec<QuerySpec> = Vec::new();
-    let mut current: Option<(String, Cardinality, Vec<KeysetParam>)> = None;
+    let mut current: Option<(String, Cardinality, Vec<KeysetParam>, bool)> = None;
     let mut body: Vec<&str> = Vec::new();
 
-    let flush = |current: &mut Option<(String, Cardinality, Vec<KeysetParam>)>,
+    let flush = |current: &mut Option<(String, Cardinality, Vec<KeysetParam>, bool)>,
                  body: &mut Vec<&str>,
                  specs: &mut Vec<QuerySpec>| {
-        if let Some((name, cardinality, keyset)) = current.take() {
+        if let Some((name, cardinality, keyset, transaction)) = current.take() {
             let sql = body
                 .join("\n")
                 .trim()
@@ -120,6 +122,7 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
                 name,
                 cardinality,
                 keyset,
+                transaction,
                 sql,
                 source_file: source_file.to_path_buf(),
             });
@@ -133,8 +136,9 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
             flush(&mut current, &mut body, &mut specs);
 
             let name = caps["name"].to_string();
-            let (cardinality, keyset) = parse_directives(&caps["rest"], &name, source_file)?;
-            current = Some((name, cardinality, keyset));
+            let (cardinality, keyset, transaction) =
+                parse_directives(&caps["rest"], &name, source_file)?;
+            current = Some((name, cardinality, keyset, transaction));
         } else if current.is_some() {
             body.push(line);
         }
@@ -162,7 +166,7 @@ fn parse_directives(
     rest: &str,
     name: &str,
     file: &Path,
-) -> Result<(Cardinality, Vec<KeysetParam>)> {
+) -> Result<(Cardinality, Vec<KeysetParam>, bool)> {
     let mut tokens = rest.split_whitespace().peekable();
 
     let card_tag = tokens
@@ -185,6 +189,7 @@ fn parse_directives(
     })?;
 
     let mut keyset = Vec::new();
+    let mut transaction = false;
     while let Some(token) = tokens.next() {
         match token {
             ":keyset" => {
@@ -222,6 +227,7 @@ fn parse_directives(
                     )));
                 }
             }
+            ":tx" => transaction = true,
             other => {
                 return Err(ShkiError::config(format!(
                     "Unknown directive '{}' for query '{}' in {}",
@@ -241,7 +247,7 @@ fn parse_directives(
         )));
     }
 
-    Ok((cardinality, keyset))
+    Ok((cardinality, keyset, transaction))
 }
 
 #[cfg(test)]
@@ -269,6 +275,7 @@ UPDATE users SET active = false WHERE id = $1;
 
         assert_eq!(specs[0].name, "user_by_id");
         assert_eq!(specs[0].cardinality, Cardinality::One);
+        assert!(!specs[0].transaction);
         assert_eq!(specs[0].sql, "SELECT * FROM users WHERE id = $1");
 
         assert_eq!(specs[1].name, "active_users");
@@ -333,6 +340,13 @@ UPDATE users SET active = false WHERE id = $1;
         let content = "-- name: bad :batch :keyset id=id\nSELECT 1;";
         let err = parse_query_file(content, Path::new("q.sql")).expect_err("should reject");
         assert!(err.to_string().contains("$parameter=result_field"));
+    }
+
+    #[test]
+    fn parses_transaction_directive() {
+        let content = "-- name: deactivate :exec :tx\nUPDATE users SET active = false;";
+        let specs = parse_query_file(content, Path::new("q.sql")).expect("parse");
+        assert!(specs[0].transaction);
     }
 
     #[test]

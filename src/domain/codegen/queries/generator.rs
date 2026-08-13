@@ -328,6 +328,23 @@ fn build_fn(
 
     let (mut arg_decls, binds) =
         build_args_and_binds(generator, &query.params, enums, composites, config);
+    let executor = if query.spec.transaction {
+        arg_decls.insert(
+            0,
+            quote! { transaction: &mut sqlx::Transaction<'_, sqlx::Postgres> },
+        );
+        quote! { &mut **transaction }
+    } else {
+        arg_decls.insert(0, quote! { executor: E });
+        quote! { executor }
+    };
+    let generic = (!query.spec.transaction).then(|| quote! { <'e, E> });
+    let where_clause = (!query.spec.transaction).then(|| {
+        quote! {
+            where
+                E: sqlx::PgExecutor<'e>,
+        }
+    });
 
     // `:batch` adds a pagination input after the data arguments: a keyset cursor
     // when the query has a `:keyset` annotation, otherwise the limit/offset page.
@@ -346,13 +363,12 @@ fn build_fn(
     if let QueryResult::Exec = &query.result {
         return quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<u64>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<u64>
+            #where_clause
             {
                 let result = sqlx::query(#sql)
                     #(#binds)*
-                    .execute(executor)
+                    .execute(#executor)
                     .await?;
                 Ok(result.rows_affected())
             }
@@ -371,25 +387,23 @@ fn build_fn(
     match query.spec.cardinality {
         Cardinality::One => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Option<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Option<#elem>>
+            #where_clause
             {
                 sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_optional(executor)
+                    .fetch_optional(#executor)
                     .await
             }
         },
         Cardinality::Many => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Vec<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Vec<#elem>>
+            #where_clause
             {
                 sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_all(executor)
+                    .fetch_all(#executor)
                     .await
             }
         },
@@ -408,13 +422,12 @@ fn build_fn(
             };
             quote! {
                 #[doc = #doc]
-                pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<KeysetPage<#elem, #cursor_key>>
-                where
-                    E: sqlx::PgExecutor<'e>,
+                pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<KeysetPage<#elem, #cursor_key>>
+                #where_clause
                 {
                     let items = sqlx::query_as::<_, #elem>(#sql)
                         #(#binds)*
-                        .fetch_all(executor)
+                        .fetch_all(#executor)
                         .await?;
                     let next = items.last().map(|row| CursorPagination::new(#next_key));
                     Ok(KeysetPage { items, next })
@@ -424,13 +437,12 @@ fn build_fn(
         // Limit/offset `:batch`: return a `Page` carrying the pagination used.
         Cardinality::Batch => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Page<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Page<#elem>>
+            #where_clause
             {
                 let items = sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_all(executor)
+                    .fetch_all(#executor)
                     .await?;
                 Ok(Page {
                     items,
@@ -485,6 +497,7 @@ mod tests {
                 name: "q".to_string(),
                 cardinality,
                 keyset: Vec::new(),
+                transaction: false,
                 sql: "SELECT n FROM t".to_string(),
                 source_file: PathBuf::from("q.sql"),
             },

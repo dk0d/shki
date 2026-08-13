@@ -1896,6 +1896,82 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
     ctx.cleanup().await;
 }
 
+#[cfg(feature = "querygen")]
+#[tokio::test]
+async fn querygen_describes_and_writes_typed_wrappers() {
+    let ctx = PgTestContext::setup("querygen").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let output = ctx.root_dir().join("queries.rs");
+    let users = ctx.unique_name("users");
+
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {users} (id integer primary key, email text not null, bio text);\n"),
+    )
+    .expect("failed to write declarative schema");
+    let query_dir = ctx.root_dir().join("queries");
+    std::fs::create_dir(&query_dir).expect("failed to create query dir");
+    std::fs::write(
+        query_dir.join("users.sql"),
+        format!(
+            "-- name: user_by_email :one\n\
+             SELECT * FROM {users} WHERE email = $email;\n\n\
+             -- name: user_emails :many\n\
+             SELECT id, email FROM {users} WHERE email <> $excluded;\n\n\
+             -- name: deactivate_user :exec :tx\n\
+             UPDATE {users} SET bio = NULL WHERE id = $1;\n\n\
+             -- name: user_page :batch\n\
+             SELECT * FROM {users} ORDER BY id LIMIT $limit OFFSET $offset;\n\n\
+             -- name: users_after :batch :keyset $cursor=id\n\
+             SELECT * FROM {users} WHERE id > $cursor ORDER BY id LIMIT $limit;\n"
+        ),
+    )
+    .expect("failed to write query fixture");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Queries {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url.clone()),
+                ..Default::default()
+            },
+            querygen: shki::QueriesArgs {
+                config: shki::codegen::queries::QueriesConfig {
+                    output: Some(output.clone()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        },
+    })
+    .await
+    .expect("querygen should describe and write query wrappers");
+
+    let generated = std::fs::read_to_string(output).expect("queries should be written");
+    assert!(generated.contains("pub async fn user_by_email"));
+    assert!(generated.contains("email: String"));
+    assert!(generated.contains("sqlx::Result<Option<"));
+    assert!(!generated.contains("UserByEmailRow"));
+    assert!(generated.contains("pub struct UserEmailsRow"));
+    assert!(generated.contains("pub async fn deactivate_user"));
+    assert!(generated.contains("transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>"));
+    assert!(generated.contains(".execute(&mut **transaction)"));
+    assert!(generated.contains("sqlx::Result<u64>"));
+    assert!(generated.contains("pub struct Pagination"));
+    assert!(generated.contains("sqlx::Result<Page<"));
+    assert!(generated.contains("pub struct KeysetPage"));
+    assert!(generated.contains("sqlx::Result<KeysetPage<"));
+    assert!(generated.contains("CursorPagination::new(row.id.clone())"));
+
+    shadow.cleanup().await;
+    ctx.cleanup().await;
+}
+
 #[tokio::test]
 async fn postgres_catalog_includes_functions_and_triggers() {
     let ctx = PgTestContext::setup("catalog_functions_triggers").await;
