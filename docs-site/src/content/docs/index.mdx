@@ -1,40 +1,58 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
+title: shki
+description: SQL-first declarative schema management and migration tooling for PostgreSQL, MySQL, and SQLite.
+template: splash
 hero:
-  tagline: Congrats on setting up a new Starlight project!
+  tagline: Author your schema in SQL. Let shki work out the migration.
   image:
-    file: ../../assets/houston.webp
+    file: ../../assets/shki-logo.png
   actions:
-    - text: Example Guide
-      link: /guides/example/
+    - text: Get started
+      link: /shki/getting-started/installation/
       icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
+    - text: View on GitHub
+      link: https://github.com/dk0d/shki
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+:::caution
+`shki` is still a work in progress. Declarative Schema support is active, but some
+deeper diff/render coverage and validation workflows are still being built.
+:::
+
+`shki` manages database schema change by comparing an intended database shape with
+recorded schema history and producing migration artifacts. The direction is
+SQL-first and Drizzle-inspired:
+
+- You author a **Declarative Schema** in SQL.
+- `shki` compiles it in a disposable **Shadow Database**.
+- The resulting **Snapshot** is compared with the latest recorded Snapshot from the **Journal**.
+- `shki diff` previews the **Migration Plan**.
+- `shki generate` writes migration SQL, a new Snapshot, and a Journal entry.
+- `shki migrate` applies migration artifacts to the live database.
 
 <CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
+	<Card title="Quick start" icon="rocket">
+		Initialize a project, edit `schema/main.sql`, and generate your first
+		migration. [Quick start](/shki/getting-started/quick-start/)
 	</Card>
-	<Card title="Change page layout" icon="document">
-		Delete `template: splash` in `src/content/docs/index.mdx` to display a
-		sidebar on this page.
+	<Card title="How it works" icon="puzzle">
+		Shadow Database, Snapshots, and the Journal — what shki is actually doing.
+		[How it works](/shki/getting-started/how-it-works/)
 	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
+	<Card title="Declarative Schema" icon="document">
+		Single file or directory, extensions, and Shadow Database setup.
+		[Declarative Schema](/shki/guides/declarative-schema/)
 	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
+	<Card title="Migrations" icon="seti:db">
+		Preview, generate, hand-write, apply, adopt, and roll back.
+		[Migrations](/shki/guides/migrations/)
 	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
+	<Card title="Codegen" icon="seti:rust">
+		Rust, TypeScript, and Protobuf types, plus type-safe sqlx query functions.
+		[Codegen](/shki/guides/codegen/) · [Typed queries](/shki/guides/queries/)
 	</Card>
 </CardGrid>
