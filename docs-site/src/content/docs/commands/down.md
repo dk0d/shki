@@ -16,8 +16,8 @@ candidates; if none of the applied migrations have one, it says so and exits.
 
 ## Options
 
-| Flag                       | Purpose                                        |
-| -------------------------- | ------------------------------------------------ |
+| Flag                       | Purpose                                         |
+| -------------------------- | ----------------------------------------------- |
 | `--dry-run`                | List what would be rolled back; change nothing. |
 | `-T, --table <NAME>`       | Migrations table name.                          |
 | `-u, --database-url <URL>` | Target database. Env: `DATABASE_URL`.           |

@@ -17,11 +17,11 @@ is the safe command to run as often as you like.
 
 ## Options
 
-| Flag                          | Purpose                                                              |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| `--shadow-database-url <URL>` | Use an external Shadow Database. Env: `SHKI_SHADOW_DATABASE_URL`.      |
+| Flag                          | Purpose                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `--shadow-database-url <URL>` | Use an external Shadow Database. Env: `SHKI_SHADOW_DATABASE_URL`.        |
 | `--pg-version <14…18>`        | Embedded PostgreSQL major version. Default `18`. Env: `SHKI_PG_VERSION`. |
-| `-v, --verbose`               | More detail about the compile and diff.                                |
+| `-v, --verbose`               | More detail about the compile and diff.                                  |
 
 ## Examples
 

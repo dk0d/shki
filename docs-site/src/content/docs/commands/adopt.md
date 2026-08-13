@@ -23,12 +23,12 @@ pending.
 ## Options
 
 | Flag                       | Purpose                                                                   |
-| -------------------------- | --------------------------------------------------------------------------- |
-| `--dry-run`                | Show what would be validated, marked, and applied. Changes nothing.        |
-| `--mark-only`              | Mark the baseline applied, but stop before applying newer migrations.      |
-| `--force`                  | Mark applied even when the live shape differs from the baseline Snapshot.  |
-| `--schema <NAME>`          | Schema to introspect for validation (PostgreSQL, default `public`).        |
-| `-u, --database-url <URL>` | Target database. Env: `DATABASE_URL`.                                      |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `--dry-run`                | Show what would be validated, marked, and applied. Changes nothing.       |
+| `--mark-only`              | Mark the baseline applied, but stop before applying newer migrations.     |
+| `--force`                  | Mark applied even when the live shape differs from the baseline Snapshot. |
+| `--schema <NAME>`          | Schema to introspect for validation (PostgreSQL, default `public`).       |
+| `-u, --database-url <URL>` | Target database. Env: `DATABASE_URL`.                                     |
 
 ## Examples
 

@@ -17,20 +17,20 @@ Each migration runs inside a transaction unless it carries the
 
 ## Modes
 
-| Mode              | Behavior                                                     |
-| ----------------- | -------------------------------------------------------------- |
-| *(none)* / `all`  | Apply every pending migration.                                |
-| `steps <N>`       | Apply the next `N` pending migrations.                        |
-| `to <NAME>`       | Apply through the named pending migration, inclusive.         |
+| Mode             | Behavior                                              |
+| ---------------- | ----------------------------------------------------- |
+| _(none)_ / `all` | Apply every pending migration.                        |
+| `steps <N>`      | Apply the next `N` pending migrations.                |
+| `to <NAME>`      | Apply through the named pending migration, inclusive. |
 
 ## Options
 
-| Flag                                | Purpose                                        |
-| ----------------------------------- | ------------------------------------------------ |
-| `--dry`                             | Show what would be applied; change nothing.     |
-| `-T, --table <NAME>`                | Migrations table name.                          |
-| `-u, --database-url <URL>`          | Target database. Env: `DATABASE_URL`.           |
-| `--prefix <index\|timestamp\|unix>` | File name prefix style.                         |
+| Flag                                | Purpose                                     |
+| ----------------------------------- | ------------------------------------------- |
+| `--dry`                             | Show what would be applied; change nothing. |
+| `-T, --table <NAME>`                | Migrations table name.                      |
+| `-u, --database-url <URL>`          | Target database. Env: `DATABASE_URL`.       |
+| `--prefix <index\|timestamp\|unix>` | File name prefix style.                     |
 
 ## Examples
 

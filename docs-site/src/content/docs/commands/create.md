@@ -16,14 +16,14 @@ written — the SQL isn't final yet.
 
 ## Options
 
-| Flag                                | Purpose                                             |
-| ----------------------------------- | ----------------------------------------------------- |
-| `--with-down`                       | Also create a `.down.sql` file.                      |
-| `--sql <SQL>`                       | Seed the migration with inline SQL.                  |
-| `--sql-file <PATH>`                 | Seed the migration from a file.                      |
-| `-e, --edit`                        | Open the created file in `$EDITOR`.                  |
-| `--prefix <index\|timestamp\|unix>` | File name prefix style.                              |
-| `-T, --table <NAME>`                | Migrations table name.                               |
+| Flag                                | Purpose                             |
+| ----------------------------------- | ----------------------------------- |
+| `--with-down`                       | Also create a `.down.sql` file.     |
+| `--sql <SQL>`                       | Seed the migration with inline SQL. |
+| `--sql-file <PATH>`                 | Seed the migration from a file.     |
+| `-e, --edit`                        | Open the created file in `$EDITOR`. |
+| `--prefix <index\|timestamp\|unix>` | File name prefix style.             |
+| `-T, --table <NAME>`                | Migrations table name.              |
 
 ## Examples
 

@@ -33,7 +33,7 @@ cargo nextest run --test querygen       # typed query generation
 ```
 
 Query codegen fixtures live in `tests/fixtures/querygen/<case>/`. Each
-`queries.sql` keeps a `` -- ```rust `` expectation block immediately above its
+`queries.sql` keeps a `-- ```rust` expectation block immediately above its
 query annotation; the default fixture test compares that exact function output
 and parses the generated module:
 

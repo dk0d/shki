@@ -30,10 +30,10 @@ blocks the delete).
 
 ## Options
 
-| Flag                       | Purpose                                                     |
-| -------------------------- | ------------------------------------------------------------- |
-| `-f, --force`              | Skip the database check for applied state.                   |
-| `-u, --database-url <URL>` | Target database used for that check. Env: `DATABASE_URL`.    |
+| Flag                       | Purpose                                                   |
+| -------------------------- | --------------------------------------------------------- |
+| `-f, --force`              | Skip the database check for applied state.                |
+| `-u, --database-url <URL>` | Target database used for that check. Env: `DATABASE_URL`. |
 
 ## Examples
 

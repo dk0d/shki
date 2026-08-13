@@ -23,14 +23,14 @@ becomes a function returning `Result<Option<User>>`, reusing the struct
 ## Options
 
 | Flag                                   | Purpose                                                                    |
-| -------------------------------------- | ---------------------------------------------------------------------------- |
-| `-s, --sources <PATH>`                 | Annotated SQL file or directory. Default `<root>/queries`.                  |
-| `-o, --output <PATH>`                  | Output file. Prints to stdout when omitted.                                 |
-| `-f, --format <file\|module\|modules>` | Output layout, shared with `[codegen]`.                                     |
-| `--models <PATH>`                      | Rust module path for schema types (e.g. `crate::models`). Usually derived.  |
-| `--preview`                            | Print the generated code without writing.                                   |
-| `--shadow-database-url <URL>`          | External Shadow Database.                                                   |
-| `--pg-version <14…18>`                 | Embedded PostgreSQL major version.                                          |
+| -------------------------------------- | -------------------------------------------------------------------------- |
+| `-s, --sources <PATH>`                 | Annotated SQL file or directory. Default `<root>/queries`.                 |
+| `-o, --output <PATH>`                  | Output file. Prints to stdout when omitted.                                |
+| `-f, --format <file\|module\|modules>` | Output layout, shared with `[codegen]`.                                    |
+| `--models <PATH>`                      | Rust module path for schema types (e.g. `crate::models`). Usually derived. |
+| `--preview`                            | Print the generated code without writing.                                  |
+| `--shadow-database-url <URL>`          | External Shadow Database.                                                  |
+| `--pg-version <14…18>`                 | Embedded PostgreSQL major version.                                         |
 
 ## Examples
 
@@ -42,14 +42,14 @@ shki queries --sources db/queries --preview
 
 ## Annotations at a glance
 
-| Tag        | Returns                                             |
-| ---------- | ----------------------------------------------------- |
-| `:one`     | `Result<Option<Row>>`                                |
-| `:many`    | `Result<Vec<Row>>`                                   |
-| `:exec`    | `Result<u64>` (rows affected)                        |
-| `:batch`   | Paginated `:many` — `Result<Page<Row>>`              |
-| `:tx`      | Modifier: require a `sqlx::Transaction` executor     |
-| `:keyset`  | Modifier on `:batch`: cursor/keyset pagination       |
+| Tag       | Returns                                          |
+| --------- | ------------------------------------------------ |
+| `:one`    | `Result<Option<Row>>`                            |
+| `:many`   | `Result<Vec<Row>>`                               |
+| `:exec`   | `Result<u64>` (rows affected)                    |
+| `:batch`  | Paginated `:many` — `Result<Page<Row>>`          |
+| `:tx`     | Modifier: require a `sqlx::Transaction` executor |
+| `:keyset` | Modifier on `:batch`: cursor/keyset pagination   |
 
 Parameters can be positional (`$1`) or named (`$email`), but not both in one
 query.

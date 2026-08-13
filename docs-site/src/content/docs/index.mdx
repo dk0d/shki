@@ -16,7 +16,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid } from "@astrojs/starlight/components";
 
 :::caution
 `shki` is still a work in progress. Declarative Schema support is active, but some
@@ -35,24 +35,24 @@ SQL-first and Drizzle-inspired:
 - `shki migrate` applies migration artifacts to the live database.
 
 <CardGrid stagger>
-	<Card title="Quick start" icon="rocket">
-		Initialize a project, edit `schema/main.sql`, and generate your first
-		migration. [Quick start](/shki/getting-started/quick-start/)
-	</Card>
-	<Card title="How it works" icon="puzzle">
-		Shadow Database, Snapshots, and the Journal — what shki is actually doing.
-		[How it works](/shki/getting-started/how-it-works/)
-	</Card>
-	<Card title="Declarative Schema" icon="document">
-		Single file or directory, extensions, and Shadow Database setup.
-		[Declarative Schema](/shki/guides/declarative-schema/)
-	</Card>
-	<Card title="Migrations" icon="seti:db">
-		Preview, generate, hand-write, apply, adopt, and roll back.
-		[Migrations](/shki/guides/migrations/)
-	</Card>
-	<Card title="Codegen" icon="seti:rust">
-		Rust, TypeScript, and Protobuf types, plus type-safe sqlx query functions.
-		[Codegen](/shki/guides/codegen/) · [Typed queries](/shki/guides/queries/)
-	</Card>
+  <Card title="Quick start" icon="rocket">
+    Initialize a project, edit `schema/main.sql`, and generate your first migration. [Quick
+    start](/shki/getting-started/quick-start/)
+  </Card>
+  <Card title="How it works" icon="puzzle">
+    Shadow Database, Snapshots, and the Journal — what shki is actually doing. [How it
+    works](/shki/getting-started/how-it-works/)
+  </Card>
+  <Card title="Declarative Schema" icon="document">
+    Single file or directory, extensions, and Shadow Database setup. [Declarative
+    Schema](/shki/guides/declarative-schema/)
+  </Card>
+  <Card title="Migrations" icon="seti:db">
+    Preview, generate, hand-write, apply, adopt, and roll back.
+    [Migrations](/shki/guides/migrations/)
+  </Card>
+  <Card title="Codegen" icon="seti:rust">
+    Rust, TypeScript, and Protobuf types, plus type-safe sqlx query functions.
+    [Codegen](/shki/guides/codegen/) · [Typed queries](/shki/guides/queries/)
+  </Card>
 </CardGrid>

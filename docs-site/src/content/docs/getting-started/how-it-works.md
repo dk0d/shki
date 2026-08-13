@@ -3,38 +3,41 @@ title: How It Works
 description: The Declarative Schema, Shadow Database, Snapshot, and Journal model behind shki.
 ---
 
-Most migration tools ask you to write the *change*. `shki` asks you to write the
-*destination* — the schema you want — and works out the change by comparing that
+Most migration tools ask you to write the _change_. `shki` asks you to write the
+_destination_ — the schema you want — and works out the change by comparing that
 destination to what it already knows about your database's history.
 
 ## The pieces
 
-| Term                    | What it is                                                                                                     |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Declarative Schema**  | SQL you author and commit describing the intended shape: `CREATE TABLE`, `CREATE INDEX`, extensions, and so on. |
-| **Shadow Database**     | A disposable PostgreSQL instance where the Declarative Schema is executed so it can be introspected.            |
-| **Snapshot**            | A JSON record of a database shape, captured by introspecting the Shadow Database.                               |
-| **Journal**             | `migrations/_meta/_journal.json` — the ordered index relating each migration to its Snapshot.                    |
-| **Migration Plan**      | The object-level change set computed by diffing two Snapshots.                                                  |
-| **Custom Migration**    | Hand-written SQL for anything the Declarative Schema can't express (backfills, operational SQL).                 |
+| Term                   | What it is                                                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Declarative Schema** | SQL you author and commit describing the intended shape: `CREATE TABLE`, `CREATE INDEX`, extensions, and so on. |
+| **Shadow Database**    | A disposable PostgreSQL instance where the Declarative Schema is executed so it can be introspected.            |
+| **Snapshot**           | A JSON record of a database shape, captured by introspecting the Shadow Database.                               |
+| **Journal**            | `migrations/_meta/_journal.json` — the ordered index relating each migration to its Snapshot.                   |
+| **Migration Plan**     | The object-level change set computed by diffing two Snapshots.                                                  |
+| **Custom Migration**   | Hand-written SQL for anything the Declarative Schema can't express (backfills, operational SQL).                |
 
 ## The loop
 
-```text
-schema/main.sql          (what you want)
-      │
-      │  compile in Shadow Database, introspect
-      ▼
-   Snapshot  ───┐
-                │  diff
-latest Snapshot ┘  (from the Journal — what the database should already be)
-      │
-      ▼
- Migration Plan ──► shki diff      prints a preview, writes nothing
-                └─► shki generate  writes migration SQL + Snapshot + Journal entry
-                                        │
-                                        ▼
-                                   shki migrate  applies pending SQL to the live DB
+```mermaid
+flowchart TD
+    schema["schema/main.sql<br/>(what you want)"]
+    shadow[["Shadow Database<br/>compile + introspect"]]
+    new["Snapshot<br/>(intended shape)"]
+    journal[("Journal<br/>latest Snapshot")]
+    plan{{"Migration Plan"}}
+    diff["shki diff<br/>preview only, writes nothing"]
+    generate["shki generate<br/>migration SQL + Snapshot + Journal entry"]
+    migrate["shki migrate<br/>applies pending SQL"]
+    db[("Live database")]
+
+    schema --> shadow --> new --> plan
+    journal -- baseline --> plan
+    plan --> diff
+    plan --> generate
+    generate -- records --> journal
+    generate --> migrate --> db
 ```
 
 Two things follow from this design:

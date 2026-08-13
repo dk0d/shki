@@ -20,12 +20,12 @@ migrations table.
 
 ## Options
 
-| Flag                       | Purpose                                                        |
-| -------------------------- | ---------------------------------------------------------------- |
-| `--dry-run`                | Show what would be generated without writing files.             |
-| `--force`                  | Run even when migrations or Snapshots already exist locally.     |
-| `--schema <NAME>`          | Schema to bootstrap (PostgreSQL, default `public`).              |
-| `-u, --database-url <URL>` | Database to introspect. Env: `DATABASE_URL`.                     |
+| Flag                       | Purpose                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `--dry-run`                | Show what would be generated without writing files.          |
+| `--force`                  | Run even when migrations or Snapshots already exist locally. |
+| `--schema <NAME>`          | Schema to bootstrap (PostgreSQL, default `public`).          |
+| `-u, --database-url <URL>` | Database to introspect. Env: `DATABASE_URL`.                 |
 
 ## Examples
 

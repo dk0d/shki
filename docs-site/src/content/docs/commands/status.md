@@ -16,11 +16,11 @@ is the command to run before `migrate` in an unfamiliar environment.
 
 ## Options
 
-| Flag                       | Purpose                                     |
-| -------------------------- | --------------------------------------------- |
-| `-T, --table <NAME>`       | Migrations table name.                       |
-| `-u, --database-url <URL>` | Target database. Env: `DATABASE_URL`.        |
-| `-v, --verbose`            | More detail per migration.                   |
+| Flag                       | Purpose                               |
+| -------------------------- | ------------------------------------- |
+| `-T, --table <NAME>`       | Migrations table name.                |
+| `-u, --database-url <URL>` | Target database. Env: `DATABASE_URL`. |
+| `-v, --verbose`            | More detail per migration.            |
 
 ## Examples
 

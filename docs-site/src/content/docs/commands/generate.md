@@ -24,15 +24,15 @@ applied to the live database — that's [`shki migrate`](/shki/commands/migrate/
 
 ## Options
 
-| Flag                          | Purpose                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| `--down`                      | Also write a Down Migration.                                             |
-| `--custom`                    | Create a Custom Migration instead (same as [`shki create`](/shki/commands/create/)). |
-| `-T, --table <NAME>`          | Migrations table name.                                                   |
-| `--prefix <index\|timestamp\|unix>` | File name prefix style. Default `index`.                           |
-| `--generate-down`             | Config-equivalent of `--down`.                                           |
-| `--shadow-database-url <URL>` | External Shadow Database.                                                |
-| `--pg-version <14…18>`        | Embedded PostgreSQL major version.                                       |
+| Flag                                | Purpose                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `--down`                            | Also write a Down Migration.                                                         |
+| `--custom`                          | Create a Custom Migration instead (same as [`shki create`](/shki/commands/create/)). |
+| `-T, --table <NAME>`                | Migrations table name.                                                               |
+| `--prefix <index\|timestamp\|unix>` | File name prefix style. Default `index`.                                             |
+| `--generate-down`                   | Config-equivalent of `--down`.                                                       |
+| `--shadow-database-url <URL>`       | External Shadow Database.                                                            |
+| `--pg-version <14…18>`              | Embedded PostgreSQL major version.                                                   |
 
 Set `[migrations] generate_down = true` in `shki.toml` to make Down Migrations
 the default.

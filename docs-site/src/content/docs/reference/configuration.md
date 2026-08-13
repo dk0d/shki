@@ -47,21 +47,21 @@ prefix = "index"           # index | timestamp | unix
 generate_down = false
 ```
 
-| Key                   | Default              | Purpose                                                            |
-| --------------------- | -------------------- | ------------------------------------------------------------------ |
-| `root`                | config file's dir    | Base for relative paths.                                           |
-| `dialect`             | –                    | `postgres`, `mysql`, or `sqlite`.                                  |
-| `database_url`        | `$DATABASE_URL`      | Live database connection URL.                                      |
-| `schema`              | `schema`             | Declarative Schema file or directory entrypoint.                   |
-| `migrations_dir`      | `migrations`         | Migration output/read directory. Alias: `out`.                     |
-| `shadow_database_url` | embedded PostgreSQL  | External Shadow Database. Must differ from `database_url`.         |
-| `pg_version`          | `18`                 | Embedded PostgreSQL major version: 14–18.                          |
-| `timeout_seconds`     | `2`                  | Database connection timeout.                                       |
-| `breakpoints`         | `true`               | Emit statement breakpoints in generated migration SQL.             |
-| `migrations.table`    | `__shki_migrations`  | Table recording applied migrations.                                |
-| `migrations.schema`   | `shki`               | Schema holding that table (PostgreSQL).                            |
-| `migrations.prefix`   | `index`              | File name prefix style: `index`, `timestamp`, or `unix`.           |
-| `migrations.generate_down` | `false`         | Write Down Migrations alongside up migrations.                     |
+| Key                        | Default             | Purpose                                                    |
+| -------------------------- | ------------------- | ---------------------------------------------------------- |
+| `root`                     | config file's dir   | Base for relative paths.                                   |
+| `dialect`                  | –                   | `postgres`, `mysql`, or `sqlite`.                          |
+| `database_url`             | `$DATABASE_URL`     | Live database connection URL.                              |
+| `schema`                   | `schema`            | Declarative Schema file or directory entrypoint.           |
+| `migrations_dir`           | `migrations`        | Migration output/read directory. Alias: `out`.             |
+| `shadow_database_url`      | embedded PostgreSQL | External Shadow Database. Must differ from `database_url`. |
+| `pg_version`               | `18`                | Embedded PostgreSQL major version: 14–18.                  |
+| `timeout_seconds`          | `2`                 | Database connection timeout.                               |
+| `breakpoints`              | `true`              | Emit statement breakpoints in generated migration SQL.     |
+| `migrations.table`         | `__shki_migrations` | Table recording applied migrations.                        |
+| `migrations.schema`        | `shki`              | Schema holding that table (PostgreSQL).                    |
+| `migrations.prefix`        | `index`             | File name prefix style: `index`, `timestamp`, or `unix`.   |
+| `migrations.generate_down` | `false`             | Write Down Migrations alongside up migrations.             |
 
 MySQL and SQLite remain supported for migration-runner workflows:
 

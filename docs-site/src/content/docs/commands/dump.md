@@ -12,23 +12,23 @@ never modifies the database, and it does not touch migrations or the Journal.
 
 ## Output modes
 
-| Invocation                              | Result                                                      |
-| --------------------------------------- | ------------------------------------------------------------- |
-| `shki dump`                             | SQL to stdout.                                               |
-| `shki dump --format json --output f.json` | A JSON Snapshot, the same format shki records internally.  |
-| `shki dump --dirs --output schema`      | A Directory Schema: `main.sql`, `extensions/`, and schema-scoped object directories. |
-| `shki dump --dirs`                      | Preview of that directory layout, written nowhere.            |
+| Invocation                                | Result                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `shki dump`                               | SQL to stdout.                                                                       |
+| `shki dump --format json --output f.json` | A JSON Snapshot, the same format shki records internally.                            |
+| `shki dump --dirs --output schema`        | A Directory Schema: `main.sql`, `extensions/`, and schema-scoped object directories. |
+| `shki dump --dirs`                        | Preview of that directory layout, written nowhere.                                   |
 
 ## Options
 
-| Flag                       | Purpose                                              |
-| -------------------------- | ------------------------------------------------------ |
+| Flag                       | Purpose                                               |
+| -------------------------- | ----------------------------------------------------- |
 | `-f, --format <json\|sql>` | Output format. Default `sql`.                         |
 | `--output <PATH>`          | Output file or directory. Defaults to stdout/preview. |
-| `--dirs`                   | Emit a Directory Schema instead of a single file.      |
-| `--force`                  | Overwrite file collisions in directory mode.           |
-| `--schema <NAME>`          | Schema to dump (PostgreSQL, default `public`).         |
-| `-u, --database-url <URL>` | Database to introspect. Env: `DATABASE_URL`.           |
+| `--dirs`                   | Emit a Directory Schema instead of a single file.     |
+| `--force`                  | Overwrite file collisions in directory mode.          |
+| `--schema <NAME>`          | Schema to dump (PostgreSQL, default `public`).        |
+| `-u, --database-url <URL>` | Database to introspect. Env: `DATABASE_URL`.          |
 
 ## Examples
 
@@ -44,7 +44,7 @@ shki dump --schema billing                       # a non-public schema
 - Works on PostgreSQL, MySQL, and SQLite; PostgreSQL has the richest catalog
   coverage.
 - To adopt an existing database, prefer [`shki bootstrap`](/shki/commands/bootstrap/),
-  which writes the Directory Schema *and* the baseline migration, Snapshot, and
+  which writes the Directory Schema _and_ the baseline migration, Snapshot, and
   Journal entry in one step.
 
 See also: [Declarative Schema](/shki/guides/declarative-schema/).
