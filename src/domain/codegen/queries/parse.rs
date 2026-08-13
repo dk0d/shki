@@ -32,6 +32,14 @@ pub enum Cardinality {
     Batch,
 }
 
+/// A keyset bind parameter and the selected result field that supplies its next
+/// cursor value, e.g. `$1=id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeysetParam {
+    pub parameter: String,
+    pub field: String,
+}
+
 impl Cardinality {
     fn parse(tag: &str) -> Option<Self> {
         match tag {
@@ -50,9 +58,9 @@ pub struct QuerySpec {
     /// The author-provided name; becomes the function name.
     pub name: String,
     pub cardinality: Cardinality,
-    /// Keyset cursor parameter references from a `:keyset` modifier (e.g.
-    /// `["$1", "$2"]`), in cursor-key order. Empty unless `:batch :keyset ...`.
-    pub keyset: Vec<String>,
+    /// Keyset cursor parameter/result-field mappings from a `:keyset` modifier
+    /// (e.g. `$1=id $2=created_at`), in cursor-key order.
+    pub keyset: Vec<KeysetParam>,
     /// The SQL body, with the annotation line stripped and trimmed.
     pub sql: String,
     /// The file this query came from (for diagnostics).
@@ -90,15 +98,15 @@ pub fn parse_query_dir(dir: &Path) -> Result<Vec<QuerySpec>> {
 
 /// Parse a single query file's contents.
 pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySpec>> {
-    // e.g. `-- name: active_users :many` or `-- name: page :batch :keyset $1 $2`
+    // e.g. `-- name: active_users :many` or `-- name: page :batch :keyset $1=id $2=created_at`
     let marker =
         Regex::new(r"^\s*--\s*name:\s*(?P<name>\S+)\s+(?P<rest>:.*?)\s*$").expect("valid regex");
 
     let mut specs: Vec<QuerySpec> = Vec::new();
-    let mut current: Option<(String, Cardinality, Vec<String>)> = None;
+    let mut current: Option<(String, Cardinality, Vec<KeysetParam>)> = None;
     let mut body: Vec<&str> = Vec::new();
 
-    let flush = |current: &mut Option<(String, Cardinality, Vec<String>)>,
+    let flush = |current: &mut Option<(String, Cardinality, Vec<KeysetParam>)>,
                  body: &mut Vec<&str>,
                  specs: &mut Vec<QuerySpec>| {
         if let Some((name, cardinality, keyset)) = current.take() {
@@ -148,8 +156,13 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
 }
 
 /// Parse the directive portion of a marker line (everything after the name),
-/// e.g. `:batch :keyset $1 $2`, into a cardinality and optional keyset refs.
-fn parse_directives(rest: &str, name: &str, file: &Path) -> Result<(Cardinality, Vec<String>)> {
+/// e.g. `:batch :keyset $1=id $2=created_at`, into a cardinality and optional
+/// keyset mappings.
+fn parse_directives(
+    rest: &str,
+    name: &str,
+    file: &Path,
+) -> Result<(Cardinality, Vec<KeysetParam>)> {
     let mut tokens = rest.split_whitespace().peekable();
 
     let card_tag = tokens
@@ -180,19 +193,30 @@ fn parse_directives(rest: &str, name: &str, file: &Path) -> Result<(Cardinality,
                         break;
                     }
                     let reference = tokens.next().expect("peeked token");
-                    if !reference.starts_with('$') {
+                    let Some((parameter, field)) = reference.split_once('=') else {
                         return Err(ShkiError::config(format!(
-                            "keyset reference '{}' for query '{}' in {} must be a parameter like $1 or $name",
+                            "keyset mapping '{}' for query '{}' in {} must be $parameter=result_field, like $1=id",
+                            reference,
+                            name,
+                            file.display()
+                        )));
+                    };
+                    if !parameter.starts_with('$') || field.is_empty() {
+                        return Err(ShkiError::config(format!(
+                            "keyset mapping '{}' for query '{}' in {} must be $parameter=result_field, like $1=id",
                             reference,
                             name,
                             file.display()
                         )));
                     }
-                    keyset.push(reference.to_string());
+                    keyset.push(KeysetParam {
+                        parameter: parameter.to_string(),
+                        field: field.to_string(),
+                    });
                 }
                 if keyset.is_empty() {
                     return Err(ShkiError::config(format!(
-                        "':keyset' for query '{}' in {} requires at least one parameter reference (e.g. :keyset $1 $2)",
+                        "':keyset' for query '{}' in {} requires at least one mapping (e.g. :keyset $1=id $2=created_at)",
                         name,
                         file.display()
                     )));
@@ -270,19 +294,45 @@ UPDATE users SET active = false WHERE id = $1;
 
     #[test]
     fn parses_keyset_modifier() {
-        let content = "-- name: users_page :batch :keyset $1 $2\n\
+        let content = "-- name: users_page :batch :keyset $1=id $2=created_at\n\
                        SELECT * FROM users WHERE (id, created_at) > ($1, $2) ORDER BY id LIMIT $3;";
         let specs = parse_query_file(content, Path::new("q.sql")).expect("parse");
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].cardinality, Cardinality::Batch);
-        assert_eq!(specs[0].keyset, vec!["$1".to_string(), "$2".to_string()]);
+        assert_eq!(
+            specs[0].keyset,
+            vec![
+                KeysetParam {
+                    parameter: "$1".to_string(),
+                    field: "id".to_string()
+                },
+                KeysetParam {
+                    parameter: "$2".to_string(),
+                    field: "created_at".to_string()
+                },
+            ]
+        );
     }
 
     #[test]
     fn rejects_keyset_without_batch() {
-        let content = "-- name: bad :many :keyset $1\nSELECT 1;";
+        let content = "-- name: bad :many :keyset $1=id\nSELECT 1;";
         let err = parse_query_file(content, Path::new("q.sql")).expect_err("should reject");
         assert!(err.to_string().contains("only valid with :batch"));
+    }
+
+    #[test]
+    fn rejects_keyset_mapping_without_a_result_field() {
+        let content = "-- name: bad :batch :keyset $1\nSELECT 1;";
+        let err = parse_query_file(content, Path::new("q.sql")).expect_err("should reject");
+        assert!(err.to_string().contains("$parameter=result_field"));
+    }
+
+    #[test]
+    fn rejects_keyset_mapping_without_a_parameter() {
+        let content = "-- name: bad :batch :keyset id=id\nSELECT 1;";
+        let err = parse_query_file(content, Path::new("q.sql")).expect_err("should reject");
+        assert!(err.to_string().contains("$parameter=result_field"));
     }
 
     #[test]

@@ -195,11 +195,11 @@ one of two modes:
   (`page: &Pagination`) and binds its fields to those placeholders, and returns
   `Result<Page<Row>>`. `Pagination` and `Page<T>` are emitted **once** and reused
   by every limit/offset batch query.
-- **Cursor (keyset)** — selected by a `:keyset` modifier listing the cursor's
-  bind parameters, e.g. `:batch :keyset $1 $2` for:
+- **Cursor (keyset)** — selected by a `:keyset` modifier mapping the cursor bind
+  parameters to selected result fields, e.g. `:batch :keyset $1=id $2=created_at` for:
 
   ```sql
-  -- name: events_after :batch :keyset $1 $2
+   -- name: events_after :batch :keyset $1=id $2=created_at
   SELECT * FROM events
   WHERE (id, created_at) > ($1, $2)
   ORDER BY id, created_at
@@ -211,7 +211,8 @@ one of two modes:
   `(i32, DateTime<Utc>)`). The function takes a shared
   `cursor: &CursorPagination<K>` and binds `cursor.key` (or `cursor.key.0`,
   `cursor.key.1`, …) to those placeholders; any non-keyset parameters (e.g. the
-  `LIMIT`) stay ordinary arguments. `CursorPagination<K>` is emitted once.
+  `LIMIT`) stay ordinary arguments. `CursorPagination<K>` is emitted once. The
+  field mappings let shki derive `KeysetPage<Row, K>::next` from the final row.
 
 The mode is explicit, not inferred: `:keyset` ⇒ cursor, otherwise an `$offset`
 placeholder ⇒ limit/offset; a `:batch` query with neither is an error.
@@ -219,11 +220,6 @@ placeholder ⇒ limit/offset; a `:batch` query with neither is an error.
 Each pagination type is emitted only when a query needs it (`Pagination`/`Page`
 for limit/offset, `CursorPagination` for keyset).
 
-**Not yet implemented:** cursor mode currently returns `Result<Vec<Row>>` and
-does not derive the *next* cursor from the last row (that requires mapping
-keyset params to result columns); `CursorPagination`'s `next`/`prev` fields are
-caller-managed for now. Producing the next cursor — and a richer keyset `Page` —
-is the remaining follow-up.
 
 ### 5. Dialect scope: PostgreSQL first
 
@@ -279,12 +275,6 @@ Negative / risks:
 - Where query codegen sits in the CLI: a `codegen queries` subcommand vs folding
   into the existing `codegen` flow.
 - Override syntax for forcing nullability / custom types per column.
-- Keyset next-cursor extraction: deriving the next cursor from the last row
-  requires mapping keyset bind params to their result columns (e.g. by name or
-  an extended `:keyset` syntax). Until then keyset `:batch` returns `Vec<Row>`
-  and the caller manages `next`/`prev`.
-- The keyset `Page` shape once next-cursor extraction lands (e.g. a
-  `KeysetPage<Row, K>` carrying rows + the next `CursorPagination<K>`).
 - Whether to allow naming positional `$1` parameters (e.g. via an annotation)
   for queries that cannot or prefer not to use `$name` placeholders.
 
@@ -295,6 +285,3 @@ Negative / risks:
   `User` struct — primarily to derisk nullability inference and type reuse.
 - Named arguments (`$name` → `$n` rewrite) as a slice on top of the core
   positional support; additive and independently testable.
-- Keyset next-cursor extraction and a richer keyset `Page` (the keyset input
-  side — `:keyset` annotation, tuple `CursorPagination<K>`, and binding — is
-  implemented; output-side next-cursor remains).
