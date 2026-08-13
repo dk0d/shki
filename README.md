@@ -218,11 +218,11 @@ Global options:
 Command-scoped options:
 
 - `diff`, `generate`, and `codegen` accept `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
-- Experimental query generation, enabled with `--features querygen`, also accepts `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
+- `queries` also accepts `--shadow-database-url <URL>` and `--pg-version <14|15|16|17|18>`.
 - `create`, `generate`, `migrate`, `status`, and `down` accept migration options such as `--table <NAME>`, `--prefix <index|timestamp|unix>`, and `--generate-down` where applicable.
 - `migrate` accepts `--dry` and optional mode subcommands: `all`, `steps <NUM>`, and `to <NAME>`.
 - `codegen` accepts codegen options such as `--output <PATH>`, `--format <single|singlemodule|modules>`, and the tri-state derive toggles `--serde[=<bool>]` and `--sqlx[=<bool>]` (bare flag enables; `=false` disables).
-- Experimental `queries` accepts `--sources <PATH>`, `--output <PATH>`, `--format <single|singlemodule|modules>`, `--models <PATH>`, and `--preview`.
+- `queries` accepts `--sources <PATH>`, `--output <PATH>`, `--format <single|singlemodule|modules>`, `--models <PATH>`, and `--preview`.
 
 | Command                    | Alias      | Purpose                                                                                                                    |
 | -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -239,7 +239,7 @@ Command-scoped options:
 | `status`                   | `s`        | Show migration status and checksum issues                                                                                  |
 | `down [count]`             | -          | Apply Down Migrations for local rollback                                                                                   |
 | `codegen`                  | `code`     | Generate Rust, TypeScript, or Protobuf code from schema shape                                                              |
-| `queries`                  | `q`        | Experimental `querygen` feature: generate type-safe Rust query functions from annotated PostgreSQL files                   |
+| `queries`                  | `q`        | Generate type-safe Rust query functions from annotated PostgreSQL files                                                       |
 | `drop [migration]`         | -          | Remove a local migration, Down Migration, Snapshot, and Journal entry                                                      |
 
 ## Usage Patterns
@@ -500,11 +500,10 @@ Name resolution order is: explicit rename, default casing, then pattern. Struct 
 
 ### Generate Typed Queries (PostgreSQL)
 
-Query generation is experimental and excluded from default builds. Enable it
-explicitly:
+`queries` is enabled by default:
 
 ```bash
-cargo run --features querygen -- queries
+shki queries
 ```
 
 `queries` turns annotated `*.sql` files into type-safe Rust functions backed by `sqlx`. Each query becomes a function with typed parameters and a typed result. Unlike `sqlx::query!`, the types are resolved at generation time by **describing** each query against the Shadow Database (the same embedded/external PostgreSQL used by `diff`/`generate`), so **no live production database is required at your compile time** and the generated code uses sqlx's runtime API — it is not re-checked against `DATABASE_URL`.
@@ -530,6 +529,9 @@ SELECT * FROM users WHERE id = $1;
 SELECT id, email FROM users WHERE active = true;
 
 -- name: deactivate_user :exec
+UPDATE users SET active = false WHERE id = $1;
+
+-- name: deactivate_user_in_tx :exec :tx
 UPDATE users SET active = false WHERE id = $1;
 
 -- name: user_by_email :one
@@ -563,7 +565,7 @@ Limitations:
 - **Unsupported runtime mappings fail generation.** Types that the Rust schema generator renders as `String` but sqlx cannot decode as `String` (such as `NUMERIC`, ranges, network, geometric, and interval types) require a compatible `[codegen.type_overrides]` entry.
 - The Shadow Database is started for the describe step, so query codegen pays the same startup cost as `diff`/`generate`.
 
-With `querygen` enabled, configure in `[queries]`:
+Configure query generation in `[queries]`:
 
 ```toml
 [queries]
@@ -583,6 +585,21 @@ format = "single"                # output layout, as in [codegen]
 | `models`  | Rust module path imported as `use <path>::*;` so generated functions can name your schema structs/enums. **Optional** — derived from the `[codegen]`/`[queries]` output paths when unset (sibling files share a directory, so e.g. `models.rs` + `queries.rs` → `super::models`). Set it (e.g. `crate::models`) only to override that for non-standard layouts; it must be a Rust module path, not a file path. |
 
 The schema type mapping, naming/rename config, output modes, and `--preview` are shared with `[codegen]`; see [ADR 0001](docs/adr/0001-typed-query-codegen.md) for the full design.
+
+Querygen fixtures live in `tests/fixtures/querygen/<case>/`. Each `queries.sql`
+keeps a `-- \`\`\`rust` expectation block immediately above its query annotation;
+the default fixture test compares that exact function output and parses the
+generated module. Run it with:
+
+```bash
+cargo nextest run --test querygen -E 'test(generated_query_code_is_valid_rust)'
+```
+
+The slower Cargo type-check is ignored by default:
+
+```bash
+cargo nextest run --test querygen -E 'test(generated_query_code_compiles)' --run-ignored ignored-only
+```
 
 ## Configuration
 
