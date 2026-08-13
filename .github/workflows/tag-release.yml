@@ -20,20 +20,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: release
-        name: Detect release commit
+        name: Detect merged release PR
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          subject="$(git log -1 --format=%s)"
-          pr_title="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" --jq '.[0].title // empty' 2>/dev/null || true)"
-          for candidate in "$subject" "$pr_title"; do
-            if [[ "$candidate" =~ ^release:\ ([0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.+-]+)?)$ ]]; then
-              echo "tag=v${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
+          pr_number="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" --jq '.[0].number // empty' 2>/dev/null || true)"
+          [[ -n "$pr_number" ]] || exit 0
+          labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" --jq '.[].name')"
+          grep -Fxq release <<< "$labels" || exit 0
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - name: Create release tag
         if: steps.release.outputs.tag != ''
         env:

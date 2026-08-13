@@ -39,7 +39,7 @@ tasks:
 
   cargo-release:
     internal: true
-    desc: Prepare a cargo-release commit on the current branch
+    desc: Prepare a release commit; merge its PR with the `release` label to tag and publish
     cmds:
       - branch="$(git branch --show-current)" && cargo release {{.BUMP}} --workspace --no-publish --no-tag --allow-branch "$branch" --execute
     requires:
