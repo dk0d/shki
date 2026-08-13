@@ -35,9 +35,27 @@ export default defineConfig({
 					items: [
 						{ label: "Declarative Schema", slug: "guides/declarative-schema" },
 						{ label: "Migrations", slug: "guides/migrations" },
-						{ label: "Dump A Live Database", slug: "guides/dump" },
 						{ label: "Code Generation", slug: "guides/codegen" },
 						{ label: "Typed Queries", slug: "guides/queries" },
+					],
+				},
+				{
+					label: "Commands",
+					items: [
+						{ label: "config", slug: "commands/config" },
+						{ label: "init", slug: "commands/init" },
+						{ label: "diff", slug: "commands/diff" },
+						{ label: "generate", slug: "commands/generate" },
+						{ label: "create", slug: "commands/create" },
+						{ label: "migrate", slug: "commands/migrate" },
+						{ label: "status", slug: "commands/status" },
+						{ label: "down", slug: "commands/down" },
+						{ label: "drop", slug: "commands/drop" },
+						{ label: "dump", slug: "commands/dump" },
+						{ label: "bootstrap", slug: "commands/bootstrap" },
+						{ label: "adopt", slug: "commands/adopt" },
+						{ label: "codegen", slug: "commands/codegen" },
+						{ label: "queries", slug: "commands/queries" },
 					],
 				},
 				{
