@@ -8,7 +8,7 @@ use shki::compiler::{ExternalShadowDBCompiler, SchemaCompiler};
 use shki::config::Config;
 use shki::domain::migrate::manager::ApplyMigrationMode;
 use shki::dump::SchemaExportFormat;
-use shki::migrate::journal::{Journal, MigrationKind};
+use shki::migrate::journal::{Journal, JournalEntry, MigrationKind};
 use shki::models::iden::Iden;
 use shki::run;
 use shki::schema::{Column, DataType, DbEnum, Table};
@@ -441,6 +441,45 @@ async fn scenario_cli_migrate_applies_pending<T: TestBackend>(ctx: T) {
 
     assert!(ctx.table_exists(&table_name).await);
     assert_eq!(ctx.applied_names(&manager).await, vec!["0001_create_posts"]);
+
+    ctx.cleanup().await;
+}
+
+async fn scenario_cli_migrate_does_not_write_migration_files<T: TestBackend>(ctx: T) {
+    let manager = ctx.manager();
+    let table_name = ctx.unique_name("immutable_migrations");
+    let migration = ctx.write_migration(
+        "0001_create_immutable_migrations.sql",
+        &ctx.create_table_sql(&table_name, &[]),
+    );
+    std::fs::create_dir_all(manager.meta_dir()).expect("create migration metadata dir");
+    let journal = Journal {
+        version: "1".to_string(),
+        entries: vec![JournalEntry {
+            index: 0,
+            migration: "0001_create_immutable_migrations".to_string(),
+            kind: MigrationKind::Custom,
+            checksum: "stale-checksum".to_string(),
+        }],
+    };
+    journal
+        .save(&manager.journal_path())
+        .expect("write migration journal");
+
+    run(ctx.migrate_cli(ctx.write_config()))
+        .await
+        .expect("migrate should not need to write its input directory");
+
+    assert!(ctx.table_exists(&table_name).await);
+    assert_eq!(
+        manager
+            .load_journal()
+            .expect("read unchanged migration journal")
+            .entries[0]
+            .checksum,
+        "stale-checksum"
+    );
+    assert!(migration.exists());
 
     ctx.cleanup().await;
 }
@@ -1606,6 +1645,14 @@ macro_rules! backend_suite {
             }
 
             #[tokio::test]
+            async fn cli_migrate_does_not_write_migration_files() {
+                scenario_cli_migrate_does_not_write_migration_files(
+                    <$backend as TestBackend>::setup("cli_migrate_immutable").await,
+                )
+                .await;
+            }
+
+            #[tokio::test]
             async fn cli_create_records_custom_migration_in_journal() {
                 scenario_cli_create_records_custom_migration_in_journal(
                     <$backend as TestBackend>::setup("cli_create_journal").await,
@@ -1891,6 +1938,82 @@ async fn codegen_compiles_current_declarative_schema_with_shadow_database() {
         .expect("generated interface should be written");
     assert!(user.contains("interface"));
     assert!(user.contains("email"));
+
+    shadow.cleanup().await;
+    ctx.cleanup().await;
+}
+
+#[cfg(feature = "querygen")]
+#[tokio::test]
+async fn querygen_describes_and_writes_typed_wrappers() {
+    let ctx = PgTestContext::setup("querygen").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let output = ctx.root_dir().join("queries.rs");
+    let users = ctx.unique_name("users");
+
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!("CREATE TABLE {users} (id integer primary key, email text not null, bio text);\n"),
+    )
+    .expect("failed to write declarative schema");
+    let query_dir = ctx.root_dir().join("queries");
+    std::fs::create_dir(&query_dir).expect("failed to create query dir");
+    std::fs::write(
+        query_dir.join("users.sql"),
+        format!(
+            "-- name: user_by_email :one\n\
+             SELECT * FROM {users} WHERE email = $email;\n\n\
+             -- name: user_emails :many\n\
+             SELECT id, email FROM {users} WHERE email <> $excluded;\n\n\
+             -- name: deactivate_user :exec :tx\n\
+             UPDATE {users} SET bio = NULL WHERE id = $1;\n\n\
+             -- name: user_page :batch\n\
+             SELECT * FROM {users} ORDER BY id LIMIT $limit OFFSET $offset;\n\n\
+             -- name: users_after :batch :keyset $cursor=id\n\
+             SELECT * FROM {users} WHERE id > $cursor ORDER BY id LIMIT $limit;\n"
+        ),
+    )
+    .expect("failed to write query fixture");
+
+    run(Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Queries {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url.clone()),
+                ..Default::default()
+            },
+            querygen: shki::QueriesArgs {
+                config: shki::codegen::queries::QueriesConfig {
+                    output: Some(output.clone()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        },
+    })
+    .await
+    .expect("querygen should describe and write query wrappers");
+
+    let generated = std::fs::read_to_string(output).expect("queries should be written");
+    assert!(generated.contains("pub async fn user_by_email"));
+    assert!(generated.contains("email: String"));
+    assert!(generated.contains("sqlx::Result<Option<"));
+    assert!(!generated.contains("UserByEmailRow"));
+    assert!(generated.contains("pub struct UserEmailsRow"));
+    assert!(generated.contains("pub async fn deactivate_user"));
+    assert!(generated.contains("transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>"));
+    assert!(generated.contains(".execute(&mut **transaction)"));
+    assert!(generated.contains("sqlx::Result<u64>"));
+    assert!(generated.contains("pub struct Pagination"));
+    assert!(generated.contains("sqlx::Result<Page<"));
+    assert!(generated.contains("pub struct KeysetPage"));
+    assert!(generated.contains("sqlx::Result<KeysetPage<"));
+    assert!(generated.contains("CursorPagination::new(row.id.clone())"));
 
     shadow.cleanup().await;
     ctx.cleanup().await;

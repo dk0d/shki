@@ -1,0 +1,58 @@
+name: Tag Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        name: Detect release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          subject="$(git log -1 --format=%s)"
+          pr_title="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" --jq '.[0].title // empty' 2>/dev/null || true)"
+          for candidate in "$subject" "$pr_title"; do
+            if [[ "$candidate" =~ ^release:\ ([0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.+-]+)?)$ ]]; then
+              echo "tag=v${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+      - name: Create release tag
+        if: steps.release.outputs.tag != ''
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ -z "$RELEASE_TOKEN" ]]; then
+            echo "RELEASE_TOKEN is required to push release tags and trigger cargo-dist" >&2
+            exit 1
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            [[ "$(git rev-list -n1 "$TAG")" == "$SHA" ]] || {
+              echo "${TAG} already points to another commit" >&2
+              exit 1
+            }
+            exit 0
+          fi
+          git tag "$TAG" "$SHA"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}"

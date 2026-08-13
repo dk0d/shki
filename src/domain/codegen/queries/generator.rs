@@ -139,20 +139,22 @@ fn cursor_pagination_types() -> TokenStream {
     quote! {
         /// Keyset cursor input shared by generated `:batch :keyset` queries.
         ///
-        /// `key` is the current cursor position bound into the keyset predicate.
-        /// `next`/`prev` are caller-managed bookkeeping (next-cursor extraction
-        /// from results is not generated yet).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct CursorPagination<K> {
             pub key: K,
-            pub next: Option<K>,
-            pub prev: Option<K>,
         }
 
         impl<K> CursorPagination<K> {
             pub fn new(key: K) -> Self {
-                Self { key, next: None, prev: None }
+                Self { key }
             }
+        }
+
+        /// One page of results from a keyset `:batch` query.
+        #[derive(Debug, Clone)]
+        pub struct KeysetPage<T, K> {
+            pub items: Vec<T>,
+            pub next: Option<CursorPagination<K>>,
         }
     }
 }
@@ -241,7 +243,7 @@ fn build_args_and_binds(
             }
             ParamBinding::PageLimit => binds.push(quote! { .bind(page.limit) }),
             ParamBinding::PageOffset => binds.push(quote! { .bind(page.offset) }),
-            ParamBinding::Cursor { key_index } => {
+            ParamBinding::Cursor { key_index, .. } => {
                 // Cursor keys live behind `&CursorPagination`; clone so non-Copy
                 // key types (e.g. String) can be bound by value.
                 let access = if keyset_len <= 1 {
@@ -270,7 +272,7 @@ fn cursor_key_type(
     let mut keys: Vec<(usize, &QueryParam)> = params
         .iter()
         .filter_map(|param| match param.binding {
-            ParamBinding::Cursor { key_index } => Some((key_index, param)),
+            ParamBinding::Cursor { key_index, .. } => Some((key_index, param)),
             _ => None,
         })
         .collect();
@@ -293,6 +295,21 @@ fn cursor_key_type(
     })
 }
 
+/// Field accesses for the next cursor, in keyset annotation order.
+fn cursor_key_fields(params: &[QueryParam]) -> Vec<Ident> {
+    let mut keys: Vec<(usize, Ident)> = params
+        .iter()
+        .filter_map(|param| match &param.binding {
+            ParamBinding::Cursor { key_index, field } => {
+                Some((*key_index, ident_from(&make_safe_field_name(field))))
+            }
+            _ => None,
+        })
+        .collect();
+    keys.sort_by_key(|(key_index, _)| *key_index);
+    keys.into_iter().map(|(_, field)| field).collect()
+}
+
 fn build_fn(
     generator: &RustGenerator,
     query: &DescribedQuery,
@@ -311,6 +328,23 @@ fn build_fn(
 
     let (mut arg_decls, binds) =
         build_args_and_binds(generator, &query.params, enums, composites, config);
+    let executor = if query.spec.transaction {
+        arg_decls.insert(
+            0,
+            quote! { transaction: &mut sqlx::Transaction<'_, sqlx::Postgres> },
+        );
+        quote! { &mut **transaction }
+    } else {
+        arg_decls.insert(0, quote! { executor: E });
+        quote! { executor }
+    };
+    let generic = (!query.spec.transaction).then(|| quote! { <'e, E> });
+    let where_clause = (!query.spec.transaction).then(|| {
+        quote! {
+            where
+                E: sqlx::PgExecutor<'e>,
+        }
+    });
 
     // `:batch` adds a pagination input after the data arguments: a keyset cursor
     // when the query has a `:keyset` annotation, otherwise the limit/offset page.
@@ -329,13 +363,12 @@ fn build_fn(
     if let QueryResult::Exec = &query.result {
         return quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<u64>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<u64>
+            #where_clause
             {
                 let result = sqlx::query(#sql)
                     #(#binds)*
-                    .execute(executor)
+                    .execute(#executor)
                     .await?;
                 Ok(result.rows_affected())
             }
@@ -354,52 +387,62 @@ fn build_fn(
     match query.spec.cardinality {
         Cardinality::One => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Option<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Option<#elem>>
+            #where_clause
             {
                 sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_optional(executor)
+                    .fetch_optional(#executor)
                     .await
             }
         },
         Cardinality::Many => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Vec<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Vec<#elem>>
+            #where_clause
             {
                 sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_all(executor)
+                    .fetch_all(#executor)
                     .await
             }
         },
-        // Keyset `:batch`: bind the cursor keys, return the page rows. Next-cursor
-        // extraction from the last row is not generated yet (see the ADR).
-        Cardinality::Batch if cursor_key.is_some() => quote! {
-            #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Vec<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
-            {
-                sqlx::query_as::<_, #elem>(#sql)
-                    #(#binds)*
-                    .fetch_all(executor)
-                    .await
+        Cardinality::Batch if cursor_key.is_some() => {
+            let cursor_key: TokenStream = cursor_key
+                .as_ref()
+                .expect("keyset batch has a cursor key")
+                .parse()
+                .expect("cursor key type should be valid Rust");
+            let fields = cursor_key_fields(&query.params);
+            let next_key = if fields.len() == 1 {
+                let field = &fields[0];
+                quote! { row.#field.clone() }
+            } else {
+                quote! { (#(row.#fields.clone()),*) }
+            };
+            quote! {
+                #[doc = #doc]
+                pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<KeysetPage<#elem, #cursor_key>>
+                #where_clause
+                {
+                    let items = sqlx::query_as::<_, #elem>(#sql)
+                        #(#binds)*
+                        .fetch_all(#executor)
+                        .await?;
+                    let next = items.last().map(|row| CursorPagination::new(#next_key));
+                    Ok(KeysetPage { items, next })
+                }
             }
-        },
+        }
         // Limit/offset `:batch`: return a `Page` carrying the pagination used.
         Cardinality::Batch => quote! {
             #[doc = #doc]
-            pub async fn #fn_name<'e, E>(executor: E, #(#arg_decls),*) -> sqlx::Result<Page<#elem>>
-            where
-                E: sqlx::PgExecutor<'e>,
+            pub async fn #fn_name #generic(#(#arg_decls),*) -> sqlx::Result<Page<#elem>>
+            #where_clause
             {
                 let items = sqlx::query_as::<_, #elem>(#sql)
                     #(#binds)*
-                    .fetch_all(executor)
+                    .fetch_all(#executor)
                     .await?;
                 Ok(Page {
                     items,
@@ -454,6 +497,7 @@ mod tests {
                 name: "q".to_string(),
                 cardinality,
                 keyset: Vec::new(),
+                transaction: false,
                 sql: "SELECT n FROM t".to_string(),
                 source_file: PathBuf::from("q.sql"),
             },
@@ -514,11 +558,17 @@ mod tests {
             vec![
                 QueryParam {
                     data_type: DataType::Integer,
-                    binding: ParamBinding::Cursor { key_index: 0 },
+                    binding: ParamBinding::Cursor {
+                        key_index: 0,
+                        field: "id".to_string(),
+                    },
                 },
                 QueryParam {
                     data_type: DataType::Text,
-                    binding: ParamBinding::Cursor { key_index: 1 },
+                    binding: ParamBinding::Cursor {
+                        key_index: 1,
+                        field: "email".to_string(),
+                    },
                 },
                 // page size
                 QueryParam {
@@ -532,8 +582,8 @@ mod tests {
         assert!(out.contains("cursor: &CursorPagination<(i32, String)>"));
         assert!(out.contains("cursor.key.0"));
         assert!(out.contains("cursor.key.1"));
-        // Keyset batch returns the rows directly; no limit/offset Page type.
-        assert!(out.contains("sqlx::Result<Vec<QRow>>"));
+        assert!(out.contains("sqlx::Result<KeysetPage<QRow, (i32, String)>>"));
+        assert!(out.contains("CursorPagination::new((row.id.clone(), row.email.clone()))"));
         assert!(!out.contains("struct Pagination"));
     }
 
@@ -544,7 +594,10 @@ mod tests {
             vec![
                 QueryParam {
                     data_type: DataType::Integer,
-                    binding: ParamBinding::Cursor { key_index: 0 },
+                    binding: ParamBinding::Cursor {
+                        key_index: 0,
+                        field: "n".to_string(),
+                    },
                 },
                 QueryParam {
                     data_type: DataType::BigInt,
@@ -554,6 +607,7 @@ mod tests {
         )]);
         assert!(out.contains("cursor: &CursorPagination<i32>"));
         assert!(out.contains(".bind(cursor.key.clone())"));
+        assert!(out.contains("CursorPagination::new(row.n.clone())"));
         assert!(!out.contains("cursor.key.0"));
     }
 }

@@ -1,0 +1,15 @@
+-- ```rust
+-- pub async fn archive_user(
+--     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+--     arg1: i32,
+-- ) -> sqlx::Result<u64>
+-- {
+--     let result = sqlx::query("UPDATE users SET archived = true WHERE id = $1")
+--         .bind(arg1)
+--         .execute(&mut **transaction)
+--         .await?;
+--     Ok(result.rows_affected())
+-- }
+-- ```
+-- name: archive_user :exec :tx
+UPDATE users SET archived = true WHERE id = $1;

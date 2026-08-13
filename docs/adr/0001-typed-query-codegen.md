@@ -1,6 +1,6 @@
 # ADR 0001: Typed Query Codegen
 
-- Status: Proposed (feature-gated behind `querygen`)
+- Status: Accepted
 - Date: 2026-06-16
 - Deciders: shki maintainers
 
@@ -17,9 +17,8 @@ SQL queries into a directory and shki generates **type-safe functions that wrap
 those queries**, using `sqlx` as the execution runtime. Each query becomes a
 function with typed parameters and a typed result.
 
-Until the type/runtime contract and integration coverage are complete, this
-capability is excluded from default builds and must be enabled with Cargo's
-`querygen` feature.
+The initial Rust/PostgreSQL implementation is enabled by default. The
+`querygen` Cargo feature remains available for consumers that want to opt out.
 
 Two observations make this a good fit for shki specifically rather than a
 generic codegen exercise:
@@ -115,7 +114,7 @@ squirrel.
 ### 4. Query file convention and cardinality: sqlc-style annotations
 
 Queries are authored in `*.sql` files under a configured directory (default
-`db/queries/`). Each query is annotated, sqlc-style:
+`<root>/queries/`). Each query is annotated, sqlc-style:
 
 ```sql
 -- name: user_by_id :one
@@ -127,6 +126,9 @@ SELECT id, email FROM users WHERE active = true;
 -- name: deactivate_user :exec
 UPDATE users SET active = false WHERE id = $1;
 
+-- name: deactivate_user_in_tx :exec :tx
+UPDATE users SET active = false WHERE id = $1;
+
 -- name: item_from_id :one
 SELECT * FROM items WHERE id = $id;
 ```
@@ -136,6 +138,8 @@ SELECT * FROM items WHERE id = $id;
 - `:exec` → `Result<u64>` (rows affected)
 - `:batch` → a paginated `:many`: returns `Result<Page<Row>>` and takes
   pagination input. See **Pagination (`:batch`)** below.
+- `:tx` → requires `&mut sqlx::Transaction<'_, sqlx::Postgres>` instead of a
+  generic `PgExecutor`; the query is executed through that transaction.
 
 The fourth example (`item_from_id`) uses a **named argument** (`$id`) in the SQL
 body rather than a positional `$1`. Named arguments are orthogonal to
@@ -179,10 +183,17 @@ names exist only in the Rust signature.
 - Positional `$1` queries are unchanged and keep generating positional `argN`
   parameters, so named arguments are additive and opt-in per query.
 - Names are normalized with the same `heck` casing as the rest of codegen.
-- `$name` must be distinguished from dollar-quoted strings (`$tag$...$tag$`): a
+ - `$name` must be distinguished from dollar-quoted strings (`$tag$...$tag$`): a
   `$ident` run is a parameter only when it is **not** immediately followed by
   another `$`. The scanner also skips quoted strings and comments so `$name`
-  inside them is left untouched.
+   inside them is left untouched.
+
+#### Transaction-bound queries
+
+By default, generated functions take a generic `E: sqlx::PgExecutor<'e>`. Add
+`:tx` when the query must not run outside a transaction. The generated function then takes only
+`&mut sqlx::Transaction<'_, sqlx::Postgres>` and dereferences it to the executor
+used by sqlx.
 
 #### Pagination (`:batch`)
 
@@ -195,11 +206,11 @@ one of two modes:
   (`page: &Pagination`) and binds its fields to those placeholders, and returns
   `Result<Page<Row>>`. `Pagination` and `Page<T>` are emitted **once** and reused
   by every limit/offset batch query.
-- **Cursor (keyset)** — selected by a `:keyset` modifier listing the cursor's
-  bind parameters, e.g. `:batch :keyset $1 $2` for:
+- **Cursor (keyset)** — selected by a `:keyset` modifier mapping the cursor bind
+  parameters to selected result fields, e.g. `:batch :keyset $1=id $2=created_at` for:
 
   ```sql
-  -- name: events_after :batch :keyset $1 $2
+   -- name: events_after :batch :keyset $1=id $2=created_at
   SELECT * FROM events
   WHERE (id, created_at) > ($1, $2)
   ORDER BY id, created_at
@@ -211,7 +222,8 @@ one of two modes:
   `(i32, DateTime<Utc>)`). The function takes a shared
   `cursor: &CursorPagination<K>` and binds `cursor.key` (or `cursor.key.0`,
   `cursor.key.1`, …) to those placeholders; any non-keyset parameters (e.g. the
-  `LIMIT`) stay ordinary arguments. `CursorPagination<K>` is emitted once.
+  `LIMIT`) stay ordinary arguments. `CursorPagination<K>` is emitted once. The
+  field mappings let shki derive `KeysetPage<Row, K>::next` from the final row.
 
 The mode is explicit, not inferred: `:keyset` ⇒ cursor, otherwise an `$offset`
 placeholder ⇒ limit/offset; a `:batch` query with neither is an error.
@@ -219,11 +231,6 @@ placeholder ⇒ limit/offset; a `:batch` query with neither is an error.
 Each pagination type is emitted only when a query needs it (`Pagination`/`Page`
 for limit/offset, `CursorPagination` for keyset).
 
-**Not yet implemented:** cursor mode currently returns `Result<Vec<Row>>` and
-does not derive the *next* cursor from the last row (that requires mapping
-keyset params to result columns); `CursorPagination`'s `next`/`prev` fields are
-caller-managed for now. Producing the next cursor — and a richer keyset `Page` —
-is the remaining follow-up.
 
 ### 5. Dialect scope: PostgreSQL first
 
@@ -238,8 +245,8 @@ system. Today: `Snapshot -> types`. New: `query files -> described types ->
 typed functions`, sharing the type mapping, writers, preview, and config.
 
 ```text
-db/queries/*.sql
-  -> parse annotations (name, cardinality)
+<root>/queries/*.sql
+  -> parse annotations (name, cardinality, :tx, :keyset)
   -> apply Declarative Schema to shadow DB (existing compiler path)
   -> Parse + Describe each query  => param OIDs, RowDescription
   -> resolve types via Snapshot:
@@ -250,8 +257,7 @@ db/queries/*.sql
 ```
 
 New config lives alongside `CodegenConfig`: a queries source directory and any
-query-specific overrides. Multi-language reach (TS, etc.) comes "for free" via
-the existing writer trait, though only Rust/sqlx is in scope for the first cut.
+query-specific overrides. Rust/sqlx is the implemented output target.
 
 ## Consequences
 
@@ -272,29 +278,11 @@ Negative / risks:
   clear, documented scheme.
 - sqlx runtime-API codegen couples generated output to a sqlx major version.
 
-## Open Questions
+## Current Limits
 
-- How aggressively to collapse "looks like table X" projections onto the table
-  struct vs always synthesizing a row type for projections.
-- Where query codegen sits in the CLI: a `codegen queries` subcommand vs folding
-  into the existing `codegen` flow.
-- Override syntax for forcing nullability / custom types per column.
-- Keyset next-cursor extraction: deriving the next cursor from the last row
-  requires mapping keyset bind params to their result columns (e.g. by name or
-  an extended `:keyset` syntax). Until then keyset `:batch` returns `Vec<Row>`
-  and the caller manages `next`/`prev`.
-- The keyset `Page` shape once next-cursor extraction lands (e.g. a
-  `KeysetPage<Row, K>` carrying rows + the next `CursorPagination<K>`).
-- Whether to allow naming positional `$1` parameters (e.g. via an annotation)
-  for queries that cannot or prefer not to use `$name` placeholders.
-
-## Follow-ups
-
-- Vertical-slice prototype: one `:one` query, described against the shadow pool,
-  generating a Rust function returning `Option<User>` by reusing the existing
-  `User` struct — primarily to derisk nullability inference and type reuse.
-- Named arguments (`$name` → `$n` rewrite) as a slice on top of the core
-  positional support; additive and independently testable.
-- Keyset next-cursor extraction and a richer keyset `Page` (the keyset input
-  side — `:keyset` annotation, tuple `CursorPagination<K>`, and binding — is
-  implemented; output-side next-cursor remains).
+- PostgreSQL and Rust/sqlx are the only supported query generation target.
+- Per-column nullability/type override annotations and named positional
+  placeholders are not implemented; use named `$name` placeholders when a
+  meaningful parameter name is required.
+- Projections and joins always synthesize a row type unless the result covers a
+  known table's full column set.

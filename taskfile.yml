@@ -37,25 +37,6 @@ tasks:
     cmds:
       - cargo llvm-cov nextest --open
 
-  # From: https://axodotdev.github.io/cargo-dist/book/workspaces/cargo-release-guide.html#using-cargo-release-with-pull-requests
-  #
-  # This will:
-  #  * tag the commit
-  #  * push the tag
-  #  * trigger dist when it sees the tag (if applicable)
-  #
-  # THIS WON'T CREATE NEW COMMITS
-  #
-  # running "dist plan" is totally optional, but this is is the best time to check
-  # that your dist release CI will produce the desired result when you push the tag
-  tag:release:
-    desc: Final release step to tag main with version
-    cmds:
-      - git checkout main
-      - git pull
-      - dist plan
-      - cargo release --execute
-
   cargo-release:
     internal: true
     desc: Prepare a cargo-release commit on the current branch
@@ -85,3 +66,10 @@ tasks:
       - task: cargo-release
         vars:
           BUMP: patch
+
+  rc:
+    desc: Prepare the next rc cargo-release commit on the current branch
+    cmds:
+      - task: cargo-release
+        vars:
+          BUMP: rc

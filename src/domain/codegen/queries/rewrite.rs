@@ -234,6 +234,16 @@ mod tests {
     }
 
     #[test]
+    fn skips_block_comments_and_quoted_identifiers() {
+        let r = rewrite("SELECT \"$column\" /* $ignored */ FROM t WHERE x = $value");
+        assert_eq!(
+            r.sql,
+            "SELECT \"$column\" /* $ignored */ FROM t WHERE x = $1"
+        );
+        assert_eq!(r.names, Some(vec!["value".to_string()]));
+    }
+
+    #[test]
     fn skips_dollar_quoted_body() {
         let r = rewrite("SELECT $$ $notparam $$, $real FROM t");
         assert_eq!(r.sql, "SELECT $$ $notparam $$, $1 FROM t");

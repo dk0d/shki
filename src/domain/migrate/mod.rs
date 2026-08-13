@@ -27,7 +27,6 @@ pub async fn cmd_migrate(
         return Ok(());
     }
 
-    manager.refresh_custom_journal_checksums()?;
     let applied = manager.apply(mode.unwrap_or_default()).await?;
 
     println!(

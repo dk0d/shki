@@ -16,7 +16,7 @@ use crate::schema::{DataType, Table};
 use crate::snapshots::Snapshot;
 use crate::{Result, ShkiError};
 
-use super::parse::{Cardinality, QuerySpec};
+use super::parse::{Cardinality, KeysetParam, QuerySpec};
 use super::rewrite::rewrite_named_params;
 
 /// How a parameter's value is supplied to the generated function.
@@ -32,7 +32,7 @@ pub enum ParamBinding {
     /// Bound from the `CursorPagination` input's key at `key_index` (batch
     /// keyset). `key_index` is the parameter's position in the `:keyset`
     /// annotation, i.e. its slot in the cursor key tuple.
-    Cursor { key_index: usize },
+    Cursor { key_index: usize, field: String },
 }
 
 /// A query parameter (`$1`, `$2`, ...) and how the generated function sources it.
@@ -185,6 +185,8 @@ pub async fn describe_query(
         resolve_result(&described, snapshot, &tables)
     };
 
+    validate_keyset_fields(&spec, &result, snapshot)?;
+
     Ok(DescribedQuery {
         spec,
         sql: rewritten.sql,
@@ -272,25 +274,27 @@ fn unsupported_query_type(data_type: &DataType, spec: &QuerySpec, context: &str)
     )))
 }
 
-/// Resolve `:keyset` parameter references to a map of parameter index → cursor
-/// key slot (the reference's position in the annotation).
+/// Resolve `:keyset` mappings to parameter index → cursor key slot/result field.
 fn resolve_keyset(
-    refs: &[String],
+    refs: &[KeysetParam],
     names: Option<&[String]>,
     query: &str,
-) -> Result<HashMap<usize, usize>> {
+) -> Result<HashMap<usize, (usize, String)>> {
     let mut map = HashMap::new();
     for (key_index, reference) in refs.iter().enumerate() {
-        let raw = reference.strip_prefix('$').ok_or_else(|| {
+        let raw = reference.parameter.strip_prefix('$').ok_or_else(|| {
             ShkiError::config(format!(
                 "keyset reference '{}' in query '{}' must start with $",
-                reference, query
+                reference.parameter, query
             ))
         })?;
 
         let param_index = if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_digit()) {
             let n: usize = raw.parse().map_err(|_| {
-                ShkiError::config(format!("invalid keyset reference '{}'", reference))
+                ShkiError::config(format!(
+                    "invalid keyset reference '{}'",
+                    reference.parameter
+                ))
             })?;
             if n == 0 {
                 return Err(ShkiError::config(
@@ -303,17 +307,17 @@ fn resolve_keyset(
                 ShkiError::config(format!(
                     "keyset reference '{}' names a parameter, but query '{}' uses positional \
                      placeholders",
-                    reference, query
+                    reference.parameter, query
                 ))
             })?;
             names.iter().position(|name| name == raw).ok_or_else(|| {
                 ShkiError::config(format!(
                     "keyset reference '{}' does not match any parameter in query '{}'",
-                    reference, query
+                    reference.parameter, query
                 ))
             })?
         };
-        map.insert(param_index, key_index);
+        map.insert(param_index, (key_index, reference.field.clone()));
     }
     Ok(map)
 }
@@ -327,10 +331,13 @@ fn param_binding(
     idx: usize,
     is_batch: bool,
     is_keyset: bool,
-    keyset_pos: &HashMap<usize, usize>,
+    keyset_pos: &HashMap<usize, (usize, String)>,
 ) -> ParamBinding {
-    if let Some(&key_index) = keyset_pos.get(&idx) {
-        return ParamBinding::Cursor { key_index };
+    if let Some((key_index, field)) = keyset_pos.get(&idx) {
+        return ParamBinding::Cursor {
+            key_index: *key_index,
+            field: field.clone(),
+        };
     }
     match names.and_then(|names| names.get(idx)) {
         Some(name) if is_batch && !is_keyset && name == "limit" => ParamBinding::PageLimit,
@@ -338,6 +345,35 @@ fn param_binding(
         Some(name) => ParamBinding::Arg(Some(name.clone())),
         None => ParamBinding::Arg(None),
     }
+}
+
+fn validate_keyset_fields(
+    spec: &QuerySpec,
+    result: &QueryResult,
+    snapshot: &Snapshot,
+) -> Result<()> {
+    if spec.keyset.is_empty() {
+        return Ok(());
+    }
+    let fields: Vec<String> = match result {
+        QueryResult::Row { columns } => columns.iter().map(|column| column.name.clone()).collect(),
+        QueryResult::Reuse { table_name } => snapshot
+            .tables()
+            .into_iter()
+            .find(|(iden, _)| iden.name == *table_name)
+            .map(|(_, table)| table.columns.keys().cloned().collect())
+            .unwrap_or_default(),
+        QueryResult::Exec => Vec::new(),
+    };
+    for keyset in &spec.keyset {
+        if !fields.contains(&keyset.field) {
+            return Err(ShkiError::config(format!(
+                "keyset field '{}' for query '{}' is not a selected result column",
+                keyset.field, spec.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Build a lookup from unqualified table name to its schema definition. Column
@@ -537,6 +573,7 @@ mod tests {
             name: "example".to_string(),
             cardinality: Cardinality::One,
             keyset: Vec::new(),
+            transaction: false,
             sql: "SELECT 1".to_string(),
             source_file: PathBuf::from("queries/example.sql"),
         }
@@ -581,5 +618,30 @@ mod tests {
             "parameter $1",
         )
         .expect("an explicit compatible override should be accepted");
+    }
+
+    #[test]
+    fn rejects_unselected_keyset_field() {
+        let mut spec = spec();
+        spec.keyset.push(KeysetParam {
+            parameter: "$1".to_string(),
+            field: "missing".to_string(),
+        });
+        let result = QueryResult::Row {
+            columns: vec![ResultColumn {
+                name: "id".to_string(),
+                data_type: DataType::Integer,
+                nullable: false,
+            }],
+        };
+
+        let error = validate_keyset_fields(
+            &spec,
+            &result,
+            &Snapshot::new(crate::schema::SqlDialect::Postgres),
+        )
+        .expect_err("unselected keyset fields must fail generation");
+
+        assert!(error.to_string().contains("not a selected result column"));
     }
 }
