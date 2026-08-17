@@ -41,6 +41,18 @@ impl Constraint {
             Constraint::Exclusion(c) => c.name.as_deref(),
         }
     }
+
+    /// Set the constraint name in place
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        let name = Some(name.into());
+        match self {
+            Constraint::PrimaryKey(c) => c.name = name,
+            Constraint::Unique(c) => c.name = name,
+            Constraint::ForeignKey(c) => c.name = name,
+            Constraint::Check(c) => c.name = name,
+            Constraint::Exclusion(c) => c.name = name,
+        }
+    }
 }
 
 /// Primary key constraint

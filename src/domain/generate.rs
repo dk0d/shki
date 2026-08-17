@@ -8,7 +8,7 @@ use crate::compiler::compiler_from_config;
 use crate::config::Config;
 use crate::create;
 use crate::diff::rename::{RenameDecision, RenameKind, RenameScenario};
-use crate::diff::{detect_nested_renames, diff_preview, diff_snapshots};
+use crate::diff::{apply_rename_decisions, detect_nested_renames, diff_preview, diff_snapshots};
 use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::migrate::utils::sanitize_migration_name;
@@ -52,8 +52,7 @@ pub async fn cmd_generate(
             decisions.extend(nested_decisions);
         }
 
-        diff.rename_scenarios.extend(nested);
-        diff = diff.apply_rename_decisions(&decisions)?;
+        diff = apply_rename_decisions(&baseline, &desired, &decisions)?;
     }
 
     let generator = SqlRenderer::new(&config.dialect());

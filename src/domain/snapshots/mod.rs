@@ -356,6 +356,54 @@ impl Snapshot {
         self.set_tables(tables);
     }
 
+    /// Remove a table by its flat identifier (as returned by [`Self::tables`]).
+    pub fn remove_table(&mut self, id: &Iden) -> Option<Table> {
+        self.catalog
+            .schemas
+            .get_mut(&catalog_schema(&id.schema, &None))?
+            .tables
+            .shift_remove(&id.name)
+    }
+
+    /// Mutable access to a table by its flat identifier.
+    pub fn table_mut(&mut self, id: &Iden) -> Option<&mut Table> {
+        self.catalog
+            .schemas
+            .get_mut(&catalog_schema(&id.schema, &None))?
+            .tables
+            .get_mut(&id.name)
+    }
+
+    /// Remove an enum by its flat identifier (as returned by [`Self::enums`]).
+    pub fn remove_enum(&mut self, id: &Iden) -> Option<DbEnum> {
+        self.catalog
+            .schemas
+            .get_mut(&catalog_schema(&id.schema, &None))?
+            .enums
+            .shift_remove(&id.name)
+    }
+
+    pub fn insert_enum(&mut self, id: Iden, db_enum: DbEnum) {
+        let mut enums = IndexMap::new();
+        enums.insert(id, db_enum);
+        self.set_enums(enums);
+    }
+
+    /// Remove a composite type by its flat identifier.
+    pub fn remove_composite_type(&mut self, id: &Iden) -> Option<CompositeType> {
+        self.catalog
+            .schemas
+            .get_mut(&catalog_schema(&id.schema, &None))?
+            .composite_types
+            .shift_remove(&id.name)
+    }
+
+    pub fn insert_composite_type(&mut self, id: Iden, composite_type: CompositeType) {
+        let mut composite_types = IndexMap::new();
+        composite_types.insert(id, composite_type);
+        self.set_composite_types(composite_types);
+    }
+
     pub fn parse(content: &str) -> crate::Result<Self> {
         Ok(serde_json::from_str(content)?)
     }

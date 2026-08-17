@@ -10,7 +10,9 @@ use crate::config::Config;
 use crate::migrate::manager::MigrationManager;
 use crate::{Result, ShkiError};
 
-use self::rename::RenameScenario;
+use self::rename::{RenameDecision, RenameKind, RenameMap, RenameScenario};
+use crate::models::iden::Iden;
+use crate::schema::{Constraint, ForeignKeyConstraint, IndexColumn};
 
 use super::schema::Table;
 use super::snapshots::Snapshot;
@@ -231,6 +233,174 @@ pub fn diff_snapshots(from: &Snapshot, to: &Snapshot) -> Result<SchemaDiff> {
         statements,
         rename_scenarios,
     })
+}
+
+/// Resolve rename decisions by applying them to the baseline Snapshot and
+/// re-diffing against the desired Snapshot. Renamed objects become in-place
+/// modifications, so the single diff implementation handles everything else
+/// that changed alongside the rename (column types, index definitions, ...).
+/// The rename statements themselves are prepended in dependency order.
+pub fn apply_rename_decisions(
+    from: &Snapshot,
+    to: &Snapshot,
+    decisions: &[RenameDecision],
+) -> Result<SchemaDiff> {
+    let mut renames: Vec<&RenameMap> = decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            RenameDecision::Rename(rename) => Some(rename),
+            RenameDecision::Drop(_) => None,
+        })
+        .collect();
+    // Parents before children: nested renames address objects by the new table name.
+    renames.sort_by_key(|rename| match rename.source.kind {
+        RenameKind::Type => 0,
+        RenameKind::Table => 1,
+        RenameKind::Column => 2,
+        RenameKind::Index => 3,
+        RenameKind::Constraint => 4,
+    });
+
+    let mut renamed = from.clone();
+    for rename in &renames {
+        apply_rename_to_snapshot(&mut renamed, rename)?;
+    }
+
+    let mut diff = diff_snapshots(&renamed, to)?;
+    let mut statements = renames
+        .iter()
+        .map(|rename| rename_statement(rename))
+        .collect::<Result<Vec<_>>>()?;
+    statements.append(&mut diff.statements);
+    diff.statements = statements;
+    Ok(diff)
+}
+
+fn apply_rename_to_snapshot(snapshot: &mut Snapshot, rename: &RenameMap) -> Result<()> {
+    let source = &rename.source;
+    let target = &rename.target;
+    let missing = || {
+        ShkiError::diff(format!(
+            "rename source ({}) {} not found in baseline Snapshot",
+            source.kind, source.name
+        ))
+    };
+
+    match source.kind {
+        RenameKind::Type => {
+            if let Some(mut db_enum) = snapshot.remove_enum(&source.table) {
+                db_enum.name = target.name.clone();
+                snapshot.insert_enum(target.table.clone(), db_enum);
+                return Ok(());
+            }
+            let mut composite = snapshot
+                .remove_composite_type(&source.table)
+                .ok_or_else(missing)?;
+            composite.name = target.name.clone();
+            snapshot.insert_composite_type(target.table.clone(), composite);
+            Ok(())
+        }
+        RenameKind::Table => {
+            let mut table = snapshot.remove_table(&source.table).ok_or_else(missing)?;
+            table.name = target.name.clone();
+            snapshot.insert_table(target.table.clone(), table);
+            // Postgres follows table renames in foreign keys; mirror that so the
+            // re-diff doesn't drop and recreate every referencing constraint.
+            for_each_foreign_key(snapshot, |fk| {
+                if same_object(&fk.references, &source.table) {
+                    fk.references = target.table.clone();
+                }
+            });
+            Ok(())
+        }
+        RenameKind::Column => {
+            let table = snapshot.table_mut(&source.table).ok_or_else(missing)?;
+            let mut column = table
+                .columns
+                .shift_remove(&source.name)
+                .ok_or_else(missing)?;
+            column.name = target.name.clone();
+            table.columns.insert(target.name.clone(), column);
+            // Postgres follows column renames in indexes and constraints; mirror
+            // that so the re-diff doesn't rebuild them.
+            for index in table.indexes.values_mut() {
+                for index_column in &mut index.columns {
+                    if let IndexColumn::Column { name, .. } = index_column
+                        && name == &source.name
+                    {
+                        *name = target.name.clone();
+                    }
+                }
+            }
+            for constraint in &mut table.constraints {
+                rename_constraint_column(constraint, &source.name, &target.name);
+            }
+            for_each_foreign_key(snapshot, |fk| {
+                if same_object(&fk.references, &source.table) {
+                    for referenced in &mut fk.references_columns {
+                        if referenced == &source.name {
+                            *referenced = target.name.clone();
+                        }
+                    }
+                }
+            });
+            Ok(())
+        }
+        RenameKind::Index => {
+            let table = snapshot.table_mut(&source.table).ok_or_else(missing)?;
+            let mut index = table
+                .indexes
+                .shift_remove(&source.name)
+                .ok_or_else(missing)?;
+            index.name = target.name.clone();
+            table.indexes.insert(target.name.clone(), index);
+            Ok(())
+        }
+        RenameKind::Constraint => {
+            let table = snapshot.table_mut(&source.table).ok_or_else(missing)?;
+            table
+                .constraints
+                .iter_mut()
+                .find(|constraint| constraint.name() == Some(source.name.as_str()))
+                .ok_or_else(missing)?
+                .set_name(target.name.clone());
+            Ok(())
+        }
+    }
+}
+
+fn for_each_foreign_key(snapshot: &mut Snapshot, mut f: impl FnMut(&mut ForeignKeyConstraint)) {
+    for schema in snapshot.catalog.schemas.values_mut() {
+        for table in schema.tables.values_mut() {
+            for constraint in &mut table.constraints {
+                if let Constraint::ForeignKey(fk) = constraint {
+                    f(fk);
+                }
+            }
+        }
+    }
+}
+
+fn rename_constraint_column(constraint: &mut Constraint, from: &str, to: &str) {
+    let columns = match constraint {
+        Constraint::PrimaryKey(c) => &mut c.columns,
+        Constraint::Unique(c) => &mut c.columns,
+        Constraint::ForeignKey(c) => &mut c.columns,
+        // ponytail: check/exclusion embed columns in expressions; the re-diff
+        // falls back to drop+recreate for those.
+        Constraint::Check(_) | Constraint::Exclusion(_) => return,
+    };
+    for column in columns {
+        if column == from {
+            *column = to.to_string();
+        }
+    }
+}
+
+/// Iden equality with the default schema normalized (None == Some("public")).
+fn same_object(a: &Iden, b: &Iden) -> bool {
+    a.name == b.name
+        && a.schema.as_deref().unwrap_or("public") == b.schema.as_deref().unwrap_or("public")
 }
 
 pub fn detect_nested_renames(
@@ -636,12 +806,15 @@ mod tests {
                 && scenario.created.contains_key("event_status")
         }));
 
-        let diff = diff
-            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::type_(
+        let diff = apply_rename_decisions(
+            &from,
+            &to,
+            &[RenameDecision::Rename(RenameMap::type_(
                 Iden::new("eventstatus", Some("public".to_string())),
                 Iden::new("event_status", Some("public".to_string())),
-            ))])
-            .expect("rename decision should apply");
+            ))],
+        )
+        .expect("rename decision should apply");
 
         assert_eq!(diff.statements.len(), 1);
         assert!(matches!(
@@ -692,12 +865,15 @@ mod tests {
                 && scenario.created.contains_key("coordinate")
         }));
 
-        let diff = diff
-            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::type_(
+        let diff = apply_rename_decisions(
+            &from,
+            &to,
+            &[RenameDecision::Rename(RenameMap::type_(
                 Iden::new("geo_point", Some("public".to_string())),
                 Iden::new("coordinate", Some("public".to_string())),
-            ))])
-            .expect("rename decision should apply");
+            ))],
+        )
+        .expect("rename decision should apply");
 
         assert_eq!(diff.statements.len(), 1);
         assert!(matches!(
@@ -719,12 +895,15 @@ mod tests {
         assert_eq!(diff.rename_scenarios.len(), 1);
         assert_eq!(diff.statements.len(), 2);
 
-        let resolved = diff
-            .apply_rename_decisions(&[RenameDecision::Rename(RenameMap::table(
+        let resolved = apply_rename_decisions(
+            &from,
+            &to,
+            &[RenameDecision::Rename(RenameMap::table(
                 Iden::new("accounts", None),
                 Iden::new("users", None),
-            ))])
-            .expect("rename decision should apply");
+            ))],
+        )
+        .expect("rename decision should apply");
 
         assert!(matches!(
             &resolved.statements[..],
@@ -755,8 +934,10 @@ mod tests {
             false,
         );
 
-        let resolved = diff
-            .apply_rename_decisions(&[
+        let resolved = apply_rename_decisions(
+            &from,
+            &to,
+            &[
                 RenameDecision::Rename(RenameMap::table(
                     Iden::new("accounts", None),
                     Iden::new("users", None),
@@ -766,8 +947,9 @@ mod tests {
                     "email",
                     "primary_email",
                 )),
-            ])
-            .expect("rename decisions should apply");
+            ],
+        )
+        .expect("rename decisions should apply");
 
         assert!(matches!(
             &resolved.statements[..],
