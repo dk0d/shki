@@ -318,7 +318,7 @@ fn build_fn(
     composites: &IndexMap<Iden, CompositeType>,
 ) -> TokenStream {
     let fn_name = Ident::new(&query.spec.name.to_snake_case(), Span::call_site());
-    let sql = Literal::string(&query.sql);
+    let sql = raw_sql_literal(&query.sql);
     let doc = format!(
         " `{}` ({}). Generated from {}.",
         query.spec.name,
@@ -457,6 +457,19 @@ fn build_fn(
     }
 }
 
+/// Emit the SQL as a raw string literal (`r#"..."#`) so multiline queries stay
+/// readable instead of collapsing into `\n`-escaped strings. Uses as many `#`s
+/// as needed in case the SQL itself contains `"#`.
+fn raw_sql_literal(sql: &str) -> Literal {
+    let mut hashes = String::from("#");
+    while sql.contains(&format!("\"{hashes}")) {
+        hashes.push('#');
+    }
+    format!("r{hashes}\"{sql}\"{hashes}")
+        .parse()
+        .expect("raw string literal should be a valid token")
+}
+
 /// Build an identifier, honoring a leading `r#` raw-identifier prefix.
 fn ident_from(name: &str) -> Ident {
     match name.strip_prefix("r#") {
@@ -520,6 +533,16 @@ mod tests {
             &CodegenConfig::default(),
             None,
         )
+    }
+
+    #[test]
+    fn sql_is_emitted_as_raw_string() {
+        let mut query = described(Cardinality::One, vec![]);
+        query.sql = "SELECT n\nFROM t\nWHERE note = '\"#'".to_string();
+        let out = render(&[query]);
+        // Multiline SQL stays literal (no \n escapes), with enough hashes to
+        // survive an embedded `"#`.
+        assert!(out.contains("r##\"SELECT n\nFROM t\nWHERE note = '\"#'\"##"));
     }
 
     #[test]
