@@ -32,9 +32,10 @@ jobs:
             grep -Fxq release <<< "$labels" || exit 0
           else
             # Direct push to main (admins only, enforced by branch protection):
-            # release when the head commit subject matches the release convention.
-            subject="$(git log -1 --format=%s "$SHA")"
-            [[ "$subject" =~ ^release:\ [0-9]+\.[0-9]+\.[0-9]+([-.+][A-Za-z0-9_.+-]+)?$ ]] || exit 0
+            # release when any commit since the last release tag matches the convention.
+            last_tag="$(git describe --tags --abbrev=0 --match 'v*' "$SHA" 2>/dev/null || true)"
+            git log --format=%s "${last_tag:+${last_tag}..}${SHA}" \
+              | grep -Eq '^release: [0-9]+\.[0-9]+\.[0-9]+([-.+][A-Za-z0-9_.+-]+)?$' || exit 0
           fi
           version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
