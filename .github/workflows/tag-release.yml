@@ -27,9 +27,15 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           pr_number="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" --jq '.[0].number // empty' 2>/dev/null || true)"
-          [[ -n "$pr_number" ]] || exit 0
-          labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" --jq '.[].name')"
-          grep -Fxq release <<< "$labels" || exit 0
+          if [[ -n "$pr_number" ]]; then
+            labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" --jq '.[].name')"
+            grep -Fxq release <<< "$labels" || exit 0
+          else
+            # Direct push to main (admins only, enforced by branch protection):
+            # release when the head commit subject matches the release convention.
+            subject="$(git log -1 --format=%s "$SHA")"
+            [[ "$subject" =~ ^release:\ [0-9]+\.[0-9]+\.[0-9]+([-.+][A-Za-z0-9_.+-]+)?$ ]] || exit 0
+          fi
           version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - name: Create release tag
