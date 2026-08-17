@@ -1107,7 +1107,14 @@ fn replacement_for_rename(
                 &statements[drop_idx],
                 &statements[create_idx],
             )?);
-            (vec![drop_idx, create_idx], additions)
+            // The created table also emitted standalone CreateIndex/AddConstraint
+            // statements (see lower_table_diffs); nested_table_statements re-derives
+            // the ones still needed, so remove the originals to avoid duplicates.
+            let mut removals = vec![drop_idx, create_idx];
+            removals.extend(statements.iter().enumerate().filter_map(|(idx, stmt)| {
+                matches_table_child_creation(stmt, &rename.target).then_some(idx)
+            }));
+            (removals, additions)
         }
         RenameKind::Column => (
             vec![
@@ -1141,7 +1148,7 @@ fn replacement_for_rename(
     removals.sort_unstable();
     removals.dedup();
 
-    if removals.len() != 2 {
+    if removals.len() < 2 {
         return Err(ShkiError::diff(format!(
             "rename possibility no longer matches diff statements: {:?}",
             rename
@@ -1314,6 +1321,16 @@ fn matches_drop_table(stmt: &DiffStatement, id: &RenameId) -> bool {
 
 fn matches_create_table(stmt: &DiffStatement, id: &RenameId) -> bool {
     matches!(stmt, DiffStatement::CreateTable { table } if table.name == id.name && table.schema == id.table.schema)
+}
+
+fn matches_table_child_creation(stmt: &DiffStatement, id: &RenameId) -> bool {
+    match stmt {
+        DiffStatement::CreateIndex { table, schema, .. }
+        | DiffStatement::AddConstraint { table, schema, .. } => {
+            table == &id.name && schema == &id.table.schema
+        }
+        _ => false,
+    }
 }
 
 fn matches_drop_column(stmt: &DiffStatement, id: &RenameId) -> bool {
