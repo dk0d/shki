@@ -66,13 +66,33 @@ jobs:
           fi
           git tag "$TAG" "$SHA"
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}"
+      - name: Generate changelog
+        if: steps.release.outputs.tag != ''
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --latest --strip all
+        env:
+          OUTPUT: ${{ runner.temp }}/changelog.md
       - name: Create draft release
         if: steps.release.outputs.tag != ''
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
+          SHA: ${{ steps.release.outputs.sha }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
           # create-release = false in dist-workspace.toml: the Release workflow expects
           # this draft to exist, uploads artifacts to it, and undrafts it.
+          # Notes: git-cliff changelog section + dist's install/download body.
           gh release view "$TAG" >/dev/null 2>&1 && exit 0
-          gh release create "$TAG" --draft --title "$TAG" --generate-notes
+          dist_version="$(grep cargo-dist-version dist-workspace.toml | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')"
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${dist_version}/cargo-dist-installer.sh" | sh
+          git checkout -q "$SHA"
+          {
+            cat "$CHANGELOG"
+            echo
+            ~/.cargo/bin/dist plan --tag="$TAG" --output-format=json | jq -r '.announcement_github_body'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --draft --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"

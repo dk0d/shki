@@ -1,0 +1,19 @@
+# git-cliff config — release notes for the draft release created in tag-release.yml.
+# [changelog] section is omitted on purpose: git-cliff's default template renders these groups.
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+# <!-- N --> prefixes control section order (stripped by the template)
+commit_parsers = [
+  { message = "^release", skip = true },
+  { message = "^Merge", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+  { message = "^doc", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Testing" },
+  { message = "^chore|^ci", group = "<!-- 6 -->Miscellaneous" },
+  { message = ".*", group = "<!-- 7 -->Other" },
+]
