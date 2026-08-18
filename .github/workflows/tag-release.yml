@@ -30,21 +30,26 @@ jobs:
           if [[ -n "$pr_number" ]]; then
             labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" --jq '.[].name')"
             grep -Fxq release <<< "$labels" || exit 0
+            version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
+            echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+            echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           else
             # Direct push to main (admins only, enforced by branch protection):
-            # release when any commit since the last release tag matches the convention.
+            # tag the newest release commit since the last release tag, at that commit,
+            # with the version taken from its subject line.
             last_tag="$(git describe --tags --abbrev=0 --match 'v*' "$SHA" 2>/dev/null || true)"
-            git log --format=%s "${last_tag:+${last_tag}..}${SHA}" \
-              | grep -Eq '^release: [0-9]+\.[0-9]+\.[0-9]+([-.+][A-Za-z0-9_.+-]+)?$' || exit 0
+            release="$(git log --format='%H %s' "${last_tag:+${last_tag}..}${SHA}" \
+              | grep -E '^[0-9a-f]+ release: [0-9]+\.[0-9]+\.[0-9]+([-.+][A-Za-z0-9_.+-]+)?$' | head -1)"
+            [[ -n "$release" ]] || exit 0
+            echo "tag=v${release#* release: }" >> "$GITHUB_OUTPUT"
+            echo "sha=${release%% *}" >> "$GITHUB_OUTPUT"
           fi
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
-          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - name: Create release tag
         if: steps.release.outputs.tag != ''
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ steps.release.outputs.sha }}
         run: |
           if [[ -z "$RELEASE_TOKEN" ]]; then
             echo "RELEASE_TOKEN is required to push release tags and trigger cargo-dist" >&2
