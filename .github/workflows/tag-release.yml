@@ -66,3 +66,13 @@ jobs:
           fi
           git tag "$TAG" "$SHA"
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}"
+      - name: Create draft release
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # create-release = false in dist-workspace.toml: the Release workflow expects
+          # this draft to exist, uploads artifacts to it, and undrafts it.
+          gh release view "$TAG" >/dev/null 2>&1 && exit 0
+          gh release create "$TAG" --draft --title "$TAG" --generate-notes
