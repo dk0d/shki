@@ -8,13 +8,12 @@ use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
 use testcontainers::ImageExt;
-use testcontainers::ReuseDirective;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mysql::Mysql as MysqlContainer;
 use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 
-use super::TestBackend;
+use super::{TestBackend, remove_container_on_exit};
 use shki::engines::Engine;
 use shki::engines::mysql::Mysql;
 use shki::migrate::manager::MigrationManager;
@@ -36,14 +35,13 @@ async fn shared_mysql_server() -> &'static SharedMysqlServer {
         .get_or_init(|| async {
             let image = MysqlContainer::default()
                 .with_tag("8.0.34")
-                .with_container_name("shki-mysql-tests-v2")
-                .with_reuse(ReuseDirective::Always)
                 .with_startup_timeout(Duration::from_secs(120));
 
             let container = image
                 .start()
                 .await
                 .expect("failed to start shared mysql test container");
+            remove_container_on_exit(container.id());
 
             let host = container
                 .get_host()

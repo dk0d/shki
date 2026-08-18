@@ -14,6 +14,34 @@ use shki::{Cli, Commands, CommonArgs};
 use sqlx::{AssertSqlSafe, Executor, Pool, Postgres};
 use std::path::{Path, PathBuf};
 
+/// Shared server containers live in statics, so testcontainers' `Drop`-based
+/// cleanup never runs for them. Register their IDs here; an `atexit` hook
+/// removes them when the test process exits.
+pub fn remove_container_on_exit(id: &str) {
+    use std::sync::{LazyLock, Mutex, Once};
+
+    static IDS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(Mutex::default);
+    static HOOK: Once = Once::new();
+
+    unsafe extern "C" {
+        fn atexit(cb: extern "C" fn()) -> i32;
+    }
+    // ponytail: shells out to the docker CLI; switch to the bollard client if
+    // a docker-CLI-less environment ever runs these tests.
+    extern "C" fn remove_all() {
+        for id in IDS.lock().unwrap().drain(..) {
+            let _ = std::process::Command::new("docker")
+                .args(["rm", "-f", "-v", &id])
+                .output();
+        }
+    }
+
+    HOOK.call_once(|| unsafe {
+        atexit(remove_all);
+    });
+    IDS.lock().unwrap().push(id.to_string());
+}
+
 pub trait TestBackend: Sized {
     async fn setup(name: &str) -> Self;
 

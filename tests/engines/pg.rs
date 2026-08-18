@@ -7,12 +7,11 @@ use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::ContainerAsync;
 use testcontainers::ImageExt;
-use testcontainers::ReuseDirective;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres as PostgresContainer;
 use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 
-use super::{TestBackend, cleanup_postgres_schema};
+use super::{TestBackend, cleanup_postgres_schema, remove_container_on_exit};
 use shki::engines::Engine;
 use shki::engines::pg::Postgres as PostgresEngine;
 use shki::migrate::manager::MigrationManager;
@@ -37,14 +36,13 @@ async fn shared_postgres_server() -> &'static SharedPostgresServer {
                 .with_db_name("postgres")
                 .with_user("postgres")
                 .with_password("postgres")
-                .with_tag("16-alpine")
-                .with_container_name("shki-postgres-tests-v2")
-                .with_reuse(ReuseDirective::Always);
+                .with_tag("16-alpine");
 
             let container = image
                 .start()
                 .await
                 .expect("failed to start shared postgres test container");
+            remove_container_on_exit(container.id());
 
             let host = container
                 .get_host()
