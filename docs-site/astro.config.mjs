@@ -38,7 +38,11 @@ export default defineConfig({
             { label: "Declarative Schema", slug: "guides/declarative-schema" },
             { label: "Migrations", slug: "guides/migrations" },
             { label: "Code Generation", slug: "guides/codegen" },
-            { label: "Typed Queries", slug: "guides/queries" },
+            {
+              label: "Typed Queries",
+              slug: "guides/queries",
+              badge: { text: "Alpha", variant: "caution" },
+            },
           ],
         },
         {
@@ -57,7 +61,11 @@ export default defineConfig({
             { label: "bootstrap", slug: "commands/bootstrap" },
             { label: "adopt", slug: "commands/adopt" },
             { label: "codegen", slug: "commands/codegen" },
-            { label: "queries", slug: "commands/queries" },
+            {
+              label: "queries",
+              slug: "commands/queries",
+              badge: { text: "Alpha", variant: "caution" },
+            },
           ],
         },
         {

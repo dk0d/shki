@@ -3,6 +3,11 @@ title: shki queries
 description: Generate type-safe Rust query functions from annotated SQL.
 ---
 
+:::caution[Alpha]
+Query codegen is in alpha: annotation syntax and generated output may change
+between releases.
+:::
+
 ```bash
 shki queries [--sources PATH] [--output PATH] [--format file|module|modules] [--preview]
 ```

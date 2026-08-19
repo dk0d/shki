@@ -3,6 +3,11 @@ title: Typed Queries
 description: Generate type-safe Rust query functions from annotated PostgreSQL files.
 ---
 
+:::caution[Alpha]
+Query codegen is in alpha: annotation syntax and generated output may change
+between releases.
+:::
+
 :::note
 PostgreSQL only. Describe-based typing relies on PostgreSQL; MySQL/SQLite query
 codegen is not implemented.
@@ -117,6 +122,29 @@ Cardinality controls the return shape:
   Parameter order follows first appearance in the SQL. A `$name` inside a
   string literal, comment, or dollar-quoted body is left alone — only real
   placeholders are rewritten.
+
+- **Nullable arguments.** Writing a named parameter with a `?` prefix
+  (`?name` instead of `$name`) marks it nullable: the generated argument
+  becomes `Option<T>` and binds SQL `NULL` when `None`. Marking any occurrence
+  marks the parameter — `$status` and `?status` in one query are the same
+  (nullable) parameter. Write the SQL so `NULL` means what you want (e.g. an
+  optional filter):
+
+  ```sql
+  -- name: users_by_optional_status :many
+  SELECT * FROM users
+  WHERE status = ?status OR $status::user_status IS NULL;
+  ```
+
+  ```rust
+  users_by_optional_status(executor, status: Option<UserStatus>) -> Result<Vec<User>>
+  ```
+
+  Only plain arguments can be nullable — `?limit`/`?offset` and keyset cursor
+  parameters are rejected. Positional (`$1`) queries have no nullable form; use
+  named parameters. A `?` not directly followed by an identifier (like the
+  JSONB `data ? 'key'` operator) is left alone — but keep a space after
+  operator uses of `?` so they aren't read as a parameter.
 - **Transactions.** Add `:tx` to require a
   `&mut sqlx::Transaction<'_, sqlx::Postgres>` instead of a generic executor,
   e.g. `-- name: deactivate_user :exec :tx`. The generated wrapper executes only
