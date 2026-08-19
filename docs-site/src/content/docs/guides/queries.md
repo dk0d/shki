@@ -137,6 +137,4 @@ format = "file"                  # output layout, as in [codegen]
 | `models`  | Rust module path imported as `use <path>::*;` so generated functions can name your schema structs/enums. **Optional** — derived from the `[codegen]`/`[queries]` output paths when unset (sibling files share a directory, so e.g. `models.rs` + `queries.rs` → `super::models`). Set it (e.g. `crate::models`) only to override that for non-standard layouts; it must be a Rust module path, not a file path. |
 
 The schema type mapping, naming/rename config, output modes, and `--preview` are
-shared with `[codegen]`; see
-[ADR 0001](https://github.com/dk0d/shki/blob/main/docs/adr/0001-typed-query-codegen.md)
-for the full design.
+shared with `[codegen]`;

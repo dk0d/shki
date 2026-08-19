@@ -49,10 +49,7 @@ cargo nextest run --test querygen -E 'test(generated_query_code_compiles)' --run
 
 ## Design decisions
 
-Architecture decision records live in
-[`docs/adr/`](https://github.com/dk0d/shki/tree/main/docs/adr) — start there
-before reworking a subsystem. Typed query codegen is described in
-[ADR 0001](https://github.com/dk0d/shki/blob/main/docs/adr/0001-typed-query-codegen.md).
+Architecture decision records live in [`docs/adr/`](https://github.com/dk0d/shki/tree/main/docs/adr) — start there before reworking a subsystem.
 
 ## Docs site
 
