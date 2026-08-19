@@ -1,5 +1,5 @@
 use crate::models::iden::Iden;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

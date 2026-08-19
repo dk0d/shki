@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
 

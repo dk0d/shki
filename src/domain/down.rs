@@ -1,4 +1,4 @@
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use dialoguer::theme::ColorfulTheme;
 
 use crate::migrate::manager::MigrationManager;

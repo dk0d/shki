@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::migrate::manager::MigrationManager;
 use crate::utils::resolve_path;
 use crate::{Result, ShkiError};
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 /// Create a blank migration file for manual editing
 pub async fn cmd_create(

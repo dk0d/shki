@@ -1,5 +1,5 @@
 use clap::Parser;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use shki::cli::Cli;
 
 #[tokio::main]

@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::config::Config;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use super::display::tables::display_migrations;
 use super::migrate::manager::MigrationManager;

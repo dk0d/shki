@@ -38,7 +38,6 @@ querygen = []
 anyhow = "1.0.100"
 chrono = { version = "0.4.43", features = ["serde"] }
 clap = { version = "4.5.55", features = ["derive", "string", "env"] }
-colored = "3.1.1"
 figment = { version = "0.10.19", features = ["env", "toml", "serde_json"] }
 indexmap = { version = "2.13.0", features = ["serde"] }
 thiserror = "2.0.18"
@@ -95,6 +94,7 @@ rand = "0.10.1"
 hex-literal = "1.1.0"
 digest = "0.11.3"
 regex = "1.12.4"
+owo-colors = "4.3.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"

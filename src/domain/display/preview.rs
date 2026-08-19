@@ -1,4 +1,4 @@
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 /// A single file the writer would produce, used to render previews that mirror
 /// the on-disk layout without writing anything.

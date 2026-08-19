@@ -16,7 +16,7 @@ use crate::sql::statements::{
 use crate::utils::resolve_path;
 use crate::{Config, Result, ShkiError};
 
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 

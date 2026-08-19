@@ -4,7 +4,7 @@ use crate::diff::rename::RenameMap;
 use crate::{Result, ShkiError};
 
 use super::diff::rename::{RenameDecision, RenameKind, RenameScenario, RenameSelection};
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use inquire::Select;
 
 pub async fn select_rename<Opt: Display>(

@@ -17,7 +17,7 @@ use crate::{
 #[cfg(feature = "querygen")]
 use crate::{QueriesArgs, codegen::queries::QueriesConfig};
 use clap::ValueEnum;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 const PROJECT_ROOT_MARKERS: [&str; 2] = ["shki.toml", ".git"];
 

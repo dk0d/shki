@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::Result;
 use crate::config::Config;
 use crate::migrate::manager::{MigrationManager, MigrationRow};
-use colored::Colorize;
+use owo_colors::OwoColorize;
 use tabled::Tabled;
 use tabled::settings::Alignment;
 use tabled::settings::object::Rows;
@@ -57,9 +57,9 @@ pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> 
                 .unwrap_or("unknown");
 
             let status = if applied_set.contains(name) {
-                "✔".green()
+                "✔".green().to_string()
             } else {
-                "~".yellow()
+                "~".yellow().to_string()
             };
 
             let has_down = manager.has_down_migration(name);

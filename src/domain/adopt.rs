@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use crate::config::Config;
 use crate::diff::{diff_preview, diff_snapshots, load_snapshot_by_name};

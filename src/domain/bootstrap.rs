@@ -1,7 +1,7 @@
 //! Create a baseline migration to start authoring migrations from an exising database.
 //!
 //! Use [`crate::adopt`] to apply the baseline and any new migrations on top.
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use crate::config::Config;
 use crate::diff::diff_snapshots;

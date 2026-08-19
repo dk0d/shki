@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use chrono::Utc;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use crate::compiler::compiler_from_config;
 use crate::config::Config;

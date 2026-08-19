@@ -38,7 +38,7 @@ where
             let text = val.to_string();
             if text.len() > limit {
                 let text = tabled::settings::width::Truncate::truncate(&text, limit);
-                return format!("{}...", &text);
+                return format!("{}...", text);
             }
             text
         }

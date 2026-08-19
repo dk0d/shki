@@ -8,7 +8,7 @@ use crate::config::Config;
 
 use crate::Result;
 use crate::display::tables::display_migrations;
-use colored::Colorize;
+use owo_colors::OwoColorize;
 
 use self::manager::{ApplyMigrationMode, MigrationManager};
 
