@@ -84,6 +84,39 @@ Cardinality controls the return shape:
   rewrites `$name` to `$n` before describing; the names exist only in the Rust
   signature. A single query must use one style or the other — mixing `$name` and
   `$1` is rejected.
+
+  ```sql
+  -- name: create_user :one
+  INSERT INTO users (email, name, active)
+  VALUES ($email, $name, $active)
+  RETURNING *;
+
+  -- name: users_by_status :many
+  SELECT id, email FROM users
+  WHERE active = $active AND created_at >= $since;
+
+  -- Repeating a name binds one parameter to every occurrence:
+  -- search(executor, term: String) — a single `term` argument.
+  -- name: search :many
+  SELECT * FROM users
+  WHERE email ILIKE $term OR name ILIKE $term;
+
+  -- name: rename_user :exec :tx
+  UPDATE users SET name = $new_name WHERE id = $user_id;
+  ```
+
+  These generate:
+
+  ```rust
+  create_user(executor, email: String, name: String, active: bool) -> Result<Option<User>>
+  users_by_status(executor, active: bool, since: DateTime<Utc>) -> Result<Vec<UsersByStatusRow>>
+  search(executor, term: String) -> Result<Vec<User>>
+  rename_user(tx: &mut Transaction<'_, Postgres>, new_name: String, user_id: i64) -> Result<u64>
+  ```
+
+  Parameter order follows first appearance in the SQL. A `$name` inside a
+  string literal, comment, or dollar-quoted body is left alone — only real
+  placeholders are rewritten.
 - **Transactions.** Add `:tx` to require a
   `&mut sqlx::Transaction<'_, sqlx::Postgres>` instead of a generic executor,
   e.g. `-- name: deactivate_user :exec :tx`. The generated wrapper executes only
