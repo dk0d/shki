@@ -80,7 +80,10 @@ applied).
 Each migration runs inside a single transaction, so a failure rolls the whole
 file back. Some PostgreSQL statements refuse to run that way — most commonly
 `CREATE INDEX CONCURRENTLY`, the non-blocking way to add an index to a large,
-live table. Add the `shki:no-transaction` directive to opt a migration out:
+live table. Declare the index `CONCURRENTLY` in the Declarative Schema and
+[`shki generate`](/shki/commands/generate/#concurrent-indexes) writes this
+rollout for you; for hand-written migrations, add the `shki:no-transaction`
+directive to opt a migration out:
 
 ```sql
 -- shki:no-transaction

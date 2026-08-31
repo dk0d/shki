@@ -391,9 +391,7 @@ fn render_table_file(
     let mut statements = vec![create_table(dialect, table).to_string(None)];
 
     for index in table.indexes.values() {
-        statements.push(
-            create_index(dialect, &table.name, &table.schema, index, false, false).to_string(),
-        );
+        statements.push(create_index(dialect, &table.name, &table.schema, index).to_string());
     }
 
     for trigger in triggers {

@@ -148,18 +148,10 @@ impl ToSql for DiffStatement {
                 table,
                 schema,
                 index,
-                concurrently,
-                if_not_exists,
-            } => Ok(
-                create_index(dialect, table, schema, index, *concurrently, *if_not_exists).into(),
-            ),
+            } => Ok(create_index(dialect, table, schema, index).into()),
             DiffStatement::DropIndex {
-                name,
-                schema,
-                concurrently,
-                if_exists,
-                ..
-            } => Ok(drop_index(dialect, name, schema, *concurrently, *if_exists).into()),
+                name, schema, prev, ..
+            } => Ok(drop_index(dialect, name, schema, prev.concurrently).into()),
             DiffStatement::RenameIndex {
                 schema, from, to, ..
             } => Ok(rename_index(dialect, from, schema, to).into()),
@@ -324,14 +316,13 @@ mod tests {
         .where_clause("email IS NOT NULL")
         .include(vec!["id", "tenant_id"])
         .tablespace("fastspace")
-        .option("fillfactor", "80");
+        .option("fillfactor", "80")
+        .concurrently();
 
         let create_index = DiffStatement::CreateIndex {
             table: "users".to_string(),
             schema: Some("app".to_string()),
             index,
-            concurrently: true,
-            if_not_exists: true,
         };
         assert_eq!(
             create_index
@@ -345,9 +336,7 @@ mod tests {
             table: "users".to_string(),
             name: "users_email_idx".to_string(),
             schema: Some("app".to_string()),
-            concurrently: true,
-            if_exists: true,
-            prev: Index::new("users_email_idx", vec!["email"]),
+            prev: Index::new("users_email_idx", vec!["email"]).concurrently(),
         };
         assert_eq!(
             drop_index

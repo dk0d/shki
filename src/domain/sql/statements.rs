@@ -909,8 +909,6 @@ pub fn create_index(
     table: &str,
     schema: &Option<String>,
     index: &Index,
-    concurrently: bool,
-    if_not_exists: bool,
 ) -> SqlStmt {
     let renderer = get_renderer(dialect);
     let mut sql = String::from("CREATE ");
@@ -921,12 +919,12 @@ pub fn create_index(
 
     sql.push_str("INDEX ");
 
-    if concurrently {
-        sql.push_str("CONCURRENTLY ");
-    }
-
-    if if_not_exists {
-        sql.push_str("IF NOT EXISTS ");
+    // CONCURRENTLY is Postgres-only. It always pairs with IF NOT EXISTS: the
+    // build runs in a no-transaction migration, which replays from the top
+    // after a partial failure and therefore must be idempotent. Everything
+    // else is strict DDL — a name collision should fail loudly.
+    if index.concurrently && matches!(dialect, SqlDialect::Postgres) {
+        sql.push_str("CONCURRENTLY IF NOT EXISTS ");
     }
 
     sql.push_str(&renderer.quote_identifier(&index.name));
@@ -989,17 +987,14 @@ pub fn drop_index(
     name: &str,
     schema: &Option<String>,
     concurrently: bool,
-    if_exists: bool,
 ) -> SqlStmt {
     let renderer = get_renderer(dialect);
     let mut sql = String::from("DROP INDEX ");
 
-    if concurrently {
-        sql.push_str("CONCURRENTLY ");
-    }
-
-    if if_exists {
-        sql.push_str("IF EXISTS ");
+    // Postgres-only, paired with IF EXISTS for the same idempotency reason as
+    // `create_index`'s CONCURRENTLY IF NOT EXISTS.
+    if concurrently && matches!(dialect, SqlDialect::Postgres) {
+        sql.push_str("CONCURRENTLY IF EXISTS ");
     }
 
     sql.push_str(&renderer.qualified_name(name, schema));

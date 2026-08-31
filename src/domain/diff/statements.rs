@@ -524,20 +524,18 @@ pub enum DiffStatement {
         prev_comment: Option<String>,
     },
 
-    // Index operations
+    // Index operations. Execution style (CONCURRENTLY, and the IF NOT EXISTS /
+    // IF EXISTS guards it needs) is derived from `Index::concurrently` at
+    // render time, not stored here.
     CreateIndex {
         table: String,
         schema: Option<String>,
         index: Index,
-        concurrently: bool,
-        if_not_exists: bool,
     },
     DropIndex {
         table: String,
         name: String,
         schema: Option<String>,
-        concurrently: bool,
-        if_exists: bool,
         prev: Index,
     },
     RenameIndex {
@@ -904,29 +902,21 @@ impl DiffStatement {
                 table,
                 schema,
                 index,
-                concurrently,
-                if_not_exists,
             } => Some(DiffStatement::DropIndex {
                 table: table.clone(),
                 name: index.name.clone(),
                 schema: schema.clone(),
-                concurrently: *concurrently,
-                if_exists: *if_not_exists,
                 prev: index.clone(),
             }),
             DiffStatement::DropIndex {
                 table,
                 schema,
-                concurrently,
-                if_exists,
                 prev,
                 ..
             } => Some(DiffStatement::CreateIndex {
                 table: table.clone(),
                 schema: schema.clone(),
                 index: prev.clone(),
-                concurrently: *concurrently,
-                if_not_exists: *if_exists,
             }),
             DiffStatement::RenameIndex {
                 table,

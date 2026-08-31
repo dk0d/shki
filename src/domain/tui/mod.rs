@@ -4,8 +4,15 @@ use crate::diff::rename::RenameMap;
 use crate::{Result, ShkiError};
 
 use super::diff::rename::{RenameDecision, RenameKind, RenameScenario, RenameSelection};
+use inquire::{Confirm, Select};
 use owo_colors::OwoColorize;
-use inquire::Select;
+
+pub async fn confirm(prompt: impl Into<String>) -> Result<bool> {
+    Confirm::new(&prompt.into())
+        .with_default(true)
+        .prompt()
+        .map_err(ShkiError::Input)
+}
 
 pub async fn select_rename<Opt: Display>(
     prompt: impl Into<String>,

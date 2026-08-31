@@ -648,8 +648,6 @@ fn diff_indexes(
                 table: table.to_string(),
                 schema: schema.clone(),
                 index: idx_to.clone(),
-                concurrently: false,
-                if_not_exists: false,
             });
         },
         |statements, name, idx_from| {
@@ -657,8 +655,6 @@ fn diff_indexes(
                 table: table.to_string(),
                 name: name.clone(),
                 schema: schema.clone(),
-                concurrently: false,
-                if_exists: false,
                 prev: idx_from.clone(),
             });
         },
@@ -669,16 +665,12 @@ fn diff_indexes(
                     table: table.to_string(),
                     name: name.clone(),
                     schema: schema.clone(),
-                    concurrently: false,
-                    if_exists: false,
                     prev: idx_from.clone(),
                 });
                 statements.push(DiffStatement::CreateIndex {
                     table: table.to_string(),
                     schema: schema.clone(),
                     index: idx_to.clone(),
-                    concurrently: false,
-                    if_not_exists: false,
                 });
             }
         },
@@ -1113,6 +1105,31 @@ mod tests {
                 DiffStatement::DropIndex { .. },
                 DiffStatement::CreateIndex { .. }
             ]
+        ));
+    }
+
+    #[test]
+    fn index_diff_carries_declared_concurrently_through_to_statements() {
+        let from = IndexMap::new();
+        let mut to = IndexMap::new();
+        to.insert(
+            "users_email_idx".to_string(),
+            Index::new("users_email_idx", vec!["email"]),
+        );
+        to.insert(
+            "users_name_idx".to_string(),
+            Index::new("users_name_idx", vec!["name"]).concurrently(),
+        );
+
+        let mut statements = Vec::new();
+        diff_indexes(&from, &to, "users", &None, &mut statements);
+
+        assert!(matches!(
+            &statements[..],
+            [
+                DiffStatement::CreateIndex { index: plain, .. },
+                DiffStatement::CreateIndex { index: concurrent, .. }
+            ] if !plain.concurrently && concurrent.concurrently
         ));
     }
 

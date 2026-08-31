@@ -32,8 +32,12 @@ pub struct Index {
     #[serde(default)]
     pub is_constraint: bool,
 
-    /// Concurrently create the index
-    #[serde(default)]
+    /// Concurrently create the index.
+    ///
+    /// A creation strategy, not schema state: Postgres catalogs don't record
+    /// it, so it's excluded from Snapshots and index comparison (`serde(skip)`)
+    /// and only carried in memory from the Declarative Schema to the diff.
+    #[serde(skip)]
     pub concurrently: bool,
 
     /// Include columns (PostgreSQL covering indexes)

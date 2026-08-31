@@ -8,7 +8,7 @@ use sqlx::{AssertSqlSafe, Executor};
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::declarative::{load_declarative_schema, normalize_declarative_apply_sql};
+use crate::declarative::{load_declarative_schema, plan_declarative_apply_sql};
 use crate::diff::{diff_snapshots, load_latest_snapshot, load_snapshot_by_name};
 use crate::engines::Engine;
 use crate::engines::pg::Postgres;
@@ -294,10 +294,12 @@ async fn compile_with_pool(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Snapshot> {
     reset_shadow_database(&pool).await?;
-    apply_declarative_schema_sql(&pool, schema_sql).await?;
+    let concurrent_indexes = apply_declarative_schema_sql(&pool, schema_sql).await?;
 
     let engine = Postgres::new(pool, config.migrations.entity());
-    introspect_all_schemas(config, &engine).await
+    let mut snapshot = introspect_all_schemas(config, &engine).await?;
+    mark_concurrent_indexes(&mut snapshot, &concurrent_indexes);
+    Ok(snapshot)
 }
 
 /// Compile the Declarative Schema into a shadow database, then hand the caller
@@ -459,11 +461,19 @@ async fn backfill_pending_snapshots(config: &Config) -> Result<()> {
     .await
 }
 
+/// Apply the Declarative Schema to the Shadow Database and return the names of
+/// indexes the schema declared `CONCURRENTLY` (stripped for the apply — see
+/// [`plan_declarative_apply_sql`]).
 async fn apply_declarative_schema_sql(
     pool: &sqlx::Pool<sqlx::Postgres>,
     schema_sql: &str,
-) -> Result<()> {
-    let apply_sql = normalize_declarative_apply_sql(schema_sql)?;
+) -> Result<Vec<String>> {
+    let plan = plan_declarative_apply_sql(schema_sql)?;
+    let apply_sql = [plan.setup_sql, plan.deferred_sql]
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
     sqlx::raw_sql(AssertSqlSafe(apply_sql))
         .execute(pool)
         .await
@@ -474,7 +484,28 @@ async fn apply_declarative_schema_sql(
             ))
         })?;
 
-    Ok(())
+    Ok(plan.concurrent_indexes)
+}
+
+/// Re-mark introspected indexes that the Declarative Schema declared
+/// `CONCURRENTLY` — the flag is a creation strategy, not catalog state, so it
+/// only exists in the declared SQL.
+fn mark_concurrent_indexes(snapshot: &mut Snapshot, concurrent_indexes: &[String]) {
+    if concurrent_indexes.is_empty() {
+        return;
+    }
+    for (id, mut table) in snapshot.tables() {
+        let mut changed = false;
+        for index in table.indexes.values_mut() {
+            if concurrent_indexes.contains(&index.name) {
+                index.concurrently = true;
+                changed = true;
+            }
+        }
+        if changed {
+            snapshot.insert_table(id, table);
+        }
+    }
 }
 
 async fn validate_generated_diff_sql_with_pool(

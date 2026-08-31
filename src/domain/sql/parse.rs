@@ -226,6 +226,67 @@ pub fn rewrite_create_table_foreign_keys(statement: &str) -> Result<Option<Rewri
     }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RewrittenCreateIndex {
+    /// The statement with `CONCURRENTLY` removed, safe to run inside the
+    /// Shadow Database's single implicit transaction.
+    pub sql: String,
+    /// The declared index name, folded the way Postgres stores it (unquoted
+    /// identifiers lowercased) so it matches introspected names.
+    pub index_name: String,
+}
+
+/// Detect `CREATE [UNIQUE] INDEX CONCURRENTLY [IF NOT EXISTS] <name> ...`.
+///
+/// `CONCURRENTLY` refuses to run inside a transaction block, so a Declarative
+/// Schema declaring it can't be applied to the Shadow Database verbatim — and
+/// the flag isn't recorded in Postgres catalogs, so it wouldn't survive
+/// introspection anyway. This strips the keyword for the apply and hands back
+/// the index name so the compiler can re-mark the introspected index.
+pub fn rewrite_create_index_concurrently(statement: &str) -> Option<RewrittenCreateIndex> {
+    let tokens = lex_sql(statement).ok()?;
+    let mut iter = SqlTokenIter::new(&tokens);
+
+    let mut token = iter.next()?;
+    if !token.is_keyword("CREATE") {
+        return None;
+    }
+    token = iter.next()?;
+    if token.is_keyword("UNIQUE") {
+        token = iter.next()?;
+    }
+    if !token.is_keyword("INDEX") {
+        return None;
+    }
+    let concurrently = iter.next()?;
+    if !concurrently.is_keyword("CONCURRENTLY") {
+        return None;
+    }
+
+    let mut name_token = iter.next()?;
+    if name_token.is_keyword("IF") {
+        if !iter.next()?.is_keyword("NOT") || !iter.next()?.is_keyword("EXISTS") {
+            return None;
+        }
+        name_token = iter.next()?;
+    }
+
+    let index_name = if name_token.text.starts_with('"') {
+        unquote_identifier(name_token.text)
+    } else {
+        name_token.text.to_lowercase()
+    };
+
+    Some(RewrittenCreateIndex {
+        sql: format!(
+            "{}{}",
+            &statement[..concurrently.start],
+            statement[concurrently.end..].trim_start()
+        ),
+        index_name,
+    })
+}
+
 pub fn split_sql_statements(sql: &str) -> Result<Vec<String>> {
     let tokens = lex_sql(sql)?;
     let mut statements = Vec::new();
@@ -534,4 +595,47 @@ fn is_name_token(kind: &squawk_lexer::TokenKind) -> bool {
 
 fn matches_any_keyword(token: &SqlToken<'_>, keywords: &[&str]) -> bool {
     keywords.iter().any(|keyword| token.is_keyword(keyword))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_create_index_concurrently_variants() {
+        let cases = [
+            (
+                "CREATE INDEX CONCURRENTLY users_email_idx ON users (email)",
+                "CREATE INDEX users_email_idx ON users (email)",
+                "users_email_idx",
+            ),
+            (
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \"MyIdx\" ON app.users (email)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS \"MyIdx\" ON app.users (email)",
+                "MyIdx",
+            ),
+            (
+                "create index concurrently Folded_Name on t (c)",
+                "create index Folded_Name on t (c)",
+                "folded_name",
+            ),
+        ];
+        for (input, sql, name) in cases {
+            let rewritten =
+                rewrite_create_index_concurrently(input).expect("should detect CONCURRENTLY");
+            assert_eq!(rewritten.sql, sql);
+            assert_eq!(rewritten.index_name, name);
+        }
+    }
+
+    #[test]
+    fn plain_statements_are_not_rewritten() {
+        for statement in [
+            "CREATE INDEX users_email_idx ON users (email)",
+            "CREATE TABLE concurrently (id int)",
+            "DROP INDEX CONCURRENTLY users_email_idx",
+        ] {
+            assert!(rewrite_create_index_concurrently(statement).is_none());
+        }
+    }
 }

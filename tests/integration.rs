@@ -888,6 +888,67 @@ async fn cli_generate_writes_schema_migration_snapshot_and_journal_entry() {
 }
 
 #[tokio::test]
+async fn cli_generate_with_concurrent_index_requires_confirmation() {
+    let ctx = PgTestContext::setup("cli_generate_concurrent").await;
+    let shadow = engines::pg::TestDatabase::start().await;
+    let config_path = ctx.write_config();
+    let table_name = ctx.unique_name("concurrent_users");
+    std::fs::write(
+        ctx.root_dir().join("schema"),
+        format!(
+            "CREATE TABLE {table_name} (id integer primary key, email text not null);\n\
+             CREATE INDEX CONCURRENTLY {table_name}_email_idx ON {table_name} (email);\n"
+        ),
+    )
+    .expect("failed to write declarative schema");
+
+    // A declared CONCURRENTLY index splits generation into a second
+    // no-transaction migration, which must be confirmed interactively. The
+    // test harness has no terminal, so the whole generation must fail — and
+    // the declared intent must survive the shadow-compile round trip for the
+    // error to fire at all.
+    let error = run(shki::Cli {
+        config: config_path,
+        common: CommonArgs {
+            dialect: Some(shki::schema::SqlDialect::Postgres),
+            ..CommonArgs::default()
+        },
+        command: Commands::Generate {
+            shadow: shki::ShadowArgs {
+                shadow_database_url: Some(shadow.database_url.clone()),
+                ..Default::default()
+            },
+            migrations: Default::default(),
+            name: "add concurrent email index".to_string(),
+            custom: false,
+            with_down: true,
+        },
+    })
+    .await
+    .expect_err("generate should require interactive confirmation");
+
+    let message = error.to_string();
+    assert!(message.contains("CONCURRENTLY"), "{message}");
+    assert!(message.contains("no-transaction"), "{message}");
+
+    let leftovers: Vec<_> = std::fs::read_dir(ctx.migrations_dir())
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "sql"))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        leftovers.is_empty(),
+        "declined generation must write no migrations: {leftovers:?}"
+    );
+
+    shadow.cleanup().await;
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
 async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
     let ctx = PgTestContext::setup("cli_generate_after_custom").await;
     let shadow = engines::pg::TestDatabase::start().await;

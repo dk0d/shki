@@ -10,7 +10,7 @@ use crate::{Result, ShkiError};
 use super::sql::parse::{
     create_statement_object_type, create_statement_operation, create_table_info,
     is_alter_table_add_foreign_key, join_sql_statements, parse_include_directive,
-    rewrite_create_table_foreign_keys, split_sql_statements,
+    rewrite_create_index_concurrently, rewrite_create_table_foreign_keys, split_sql_statements,
 };
 
 pub const DIRECTORY_SCHEMA_ENTRYPOINT: &str = "main.sql";
@@ -25,6 +25,11 @@ pub struct DeclarativeSchema {
 pub struct DeclarativeApplySql {
     pub setup_sql: String,
     pub deferred_sql: String,
+    /// Names of indexes declared `CREATE INDEX CONCURRENTLY`. The keyword is
+    /// stripped from the apply SQL (it can't run in the Shadow Database's
+    /// transaction and isn't recorded in catalogs), so the declared intent is
+    /// carried here instead.
+    pub concurrent_indexes: Vec<String>,
 }
 
 pub fn normalize_declarative_apply_sql(sql: &str) -> Result<String> {
@@ -39,8 +44,16 @@ pub fn normalize_declarative_apply_sql(sql: &str) -> Result<String> {
 pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
     let mut setup = Vec::new();
     let mut deferred = Vec::new();
+    let mut concurrent_indexes = Vec::new();
 
     for (idx, statement) in split_sql_statements(sql)?.into_iter().enumerate() {
+        let statement = match rewrite_create_index_concurrently(&statement) {
+            Some(rewritten) => {
+                concurrent_indexes.push(rewritten.index_name);
+                rewritten.sql
+            }
+            None => statement,
+        };
         if let Some(rewritten) = rewrite_create_table_foreign_keys(&statement)? {
             setup.push(plan_setup_statement(idx, rewritten.create_table_sql)?);
             deferred.extend(
@@ -61,6 +74,7 @@ pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
     Ok(DeclarativeApplySql {
         setup_sql: join_sql_statements(&setup),
         deferred_sql: join_sql_statements(&deferred),
+        concurrent_indexes,
     })
 }
 
@@ -188,6 +202,22 @@ fn canonicalize_existing_file(path: &Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn strips_concurrently_from_apply_sql_and_records_index_names() {
+        let sql = r#"
+CREATE TABLE users (id int PRIMARY KEY, email text);
+CREATE INDEX CONCURRENTLY users_email_idx ON users (email);
+CREATE INDEX users_id_idx ON users (id);
+"#;
+
+        let plan = plan_declarative_apply_sql(sql).expect("sql should normalize");
+
+        assert_eq!(plan.concurrent_indexes, vec!["users_email_idx".to_string()]);
+        assert!(!plan.setup_sql.contains("CONCURRENTLY"));
+        assert!(plan.setup_sql.contains("CREATE INDEX users_email_idx"));
+        assert!(plan.setup_sql.contains("CREATE INDEX users_id_idx"));
+    }
 
     #[test]
     fn loads_single_sql_file() {
