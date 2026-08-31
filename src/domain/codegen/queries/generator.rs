@@ -235,7 +235,7 @@ fn build_args_and_binds(
                     None => Ident::new(&format!("arg{}", idx + 1), Span::call_site()),
                 };
                 let ty: TokenStream = generator
-                    .sql_type_to_rust(&param.data_type, false, enums, composites, config)
+                    .sql_type_to_rust(&param.data_type, param.nullable, enums, composites, config)
                     .parse()
                     .expect("mapped param type should be valid Rust");
                 arg_decls.push(quote! { #ident: #ty });
@@ -546,6 +546,27 @@ mod tests {
     }
 
     #[test]
+    fn nullable_param_becomes_option_argument() {
+        let out = render(&[described(
+            Cardinality::Many,
+            vec![
+                QueryParam {
+                    data_type: DataType::Text,
+                    binding: ParamBinding::Arg(Some("email".to_string())),
+                    nullable: true,
+                },
+                QueryParam {
+                    data_type: DataType::Boolean,
+                    binding: ParamBinding::Arg(Some("active".to_string())),
+                    nullable: false,
+                },
+            ],
+        )]);
+        assert!(out.contains("email: Option<String>"));
+        assert!(out.contains("active: bool"));
+    }
+
+    #[test]
     fn omits_pagination_types_when_no_query_needs_them() {
         let out = render(&[described(Cardinality::One, vec![])]);
         assert!(!out.contains("struct Pagination"));
@@ -561,10 +582,12 @@ mod tests {
                 QueryParam {
                     data_type: DataType::BigInt,
                     binding: ParamBinding::PageLimit,
+                    nullable: false,
                 },
                 QueryParam {
                     data_type: DataType::BigInt,
                     binding: ParamBinding::PageOffset,
+                    nullable: false,
                 },
             ],
         )]);
@@ -585,6 +608,7 @@ mod tests {
                         key_index: 0,
                         field: "id".to_string(),
                     },
+                    nullable: false,
                 },
                 QueryParam {
                     data_type: DataType::Text,
@@ -592,11 +616,13 @@ mod tests {
                         key_index: 1,
                         field: "email".to_string(),
                     },
+                    nullable: false,
                 },
                 // page size
                 QueryParam {
                     data_type: DataType::BigInt,
                     binding: ParamBinding::Arg(None),
+                    nullable: false,
                 },
             ],
         )]);
@@ -621,10 +647,12 @@ mod tests {
                         key_index: 0,
                         field: "n".to_string(),
                     },
+                    nullable: false,
                 },
                 QueryParam {
                     data_type: DataType::BigInt,
                     binding: ParamBinding::Arg(None),
+                    nullable: false,
                 },
             ],
         )]);

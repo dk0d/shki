@@ -82,7 +82,15 @@ Cardinality controls the return shape:
   it is inferred from the Declarative Schema: a column traced to a base-table
   column honors its `NOT NULL` constraint (`T` vs `Option<T>`); anything the
   schema cannot prove (expressions, function results, outer-join columns)
-  defaults to `Option<T>`.
+  defaults to `Option<T>`. Where inference cannot reach — e.g. `UNION` output
+  columns, which lose their table origin — force it with an sqlx-style alias
+  marker: `AS "id!"` forces `T`, `AS "note?"` forces `Option<T>`; the marker is
+  stripped from the field name.
+
+  ```sql
+  -- name: all_account_ids :many
+  SELECT id AS "id!" FROM users UNION ALL SELECT id FROM service_accounts;
+  ```
 - **Named arguments.** A query may bind parameters as `$name` (e.g. `$email`)
   instead of positional `$1`, producing a self-documenting signature
   (`user_by_email(executor, email: String)`) rather than positional `arg1`. shki
@@ -123,9 +131,25 @@ Cardinality controls the return shape:
   string literal, comment, or dollar-quoted body is left alone — only real
   placeholders are rewritten.
 
-- **Nullable arguments.** Writing a named parameter with a `?` prefix
-  (`?name` instead of `$name`) marks it nullable: the generated argument
-  becomes `Option<T>` and binds SQL `NULL` when `None`. Marking any occurrence
+- **Nullable arguments.** A parameter written whole into a nullable column —
+  `INSERT INTO t (a) VALUES ($a)` or `UPDATE t SET a = $a`, including
+  `ON CONFLICT ... DO UPDATE SET` — is inferred nullable from the Declarative
+  Schema automatically: the generated argument is `Option<T>`, binding SQL
+  `NULL` when `None`.
+
+  ```sql
+  -- annotation is a nullable column, so this generates
+  -- upsert_annotation(executor, id: i64, name: String, annotation: Option<String>)
+  -- name: upsert_annotation :exec
+  INSERT INTO attributes (id, name, annotation)
+  VALUES ($id, $name, $annotation)
+  ON CONFLICT (id) DO UPDATE SET annotation = EXCLUDED.annotation;
+  ```
+
+  Inference only reaches parameters that are the entire value for a column;
+  everywhere else (comparisons, expressions, casts), writing a named parameter
+  with a `?` prefix (`?name` instead of `$name`) marks it nullable explicitly:
+  the generated argument becomes `Option<T>` and binds SQL `NULL` when `None`. Marking any occurrence
   marks the parameter — `$status` and `?status` in one query are the same
   (nullable) parameter. Write the SQL so `NULL` means what you want (e.g. an
   optional filter):

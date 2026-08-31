@@ -1,0 +1,17 @@
+-- A `?name` parameter is nullable: the generated argument is `Option<T>`.
+-- expect:
+-- pub async fn users_by_optional_status<'e, E>(
+--     executor: E,
+--     status: Option<UserStatus>,
+-- ) -> sqlx::Result<Vec<User>>
+-- where
+--     E: sqlx::PgExecutor<'e>,
+-- {
+--     sqlx::query_as::<_, User>(r#"SELECT * FROM users WHERE status = $1"#)
+--         .bind(status)
+--         .fetch_all(executor)
+--         .await
+-- }
+-- end expect
+-- name: users_by_optional_status :many
+SELECT * FROM users WHERE status = ?status;

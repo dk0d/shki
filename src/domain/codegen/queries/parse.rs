@@ -112,6 +112,14 @@ pub fn parse_query_file(content: &str, source_file: &Path) -> Result<Vec<QuerySp
                  body: &mut Vec<&str>,
                  specs: &mut Vec<QuerySpec>| {
         if let Some((name, cardinality, keyset, transaction)) = current.take() {
+            // Trailing comment/blank lines after the statement annotate the
+            // NEXT query (doc comments, test expectations), not this SQL.
+            while body.last().is_some_and(|line| {
+                let trimmed = line.trim();
+                trimmed.is_empty() || trimmed.starts_with("--")
+            }) {
+                body.pop();
+            }
             let sql = body
                 .join("\n")
                 .trim()
@@ -283,6 +291,19 @@ UPDATE users SET active = false WHERE id = $1;
         assert!(specs[1].sql.contains("WHERE active = true"));
 
         assert_eq!(specs[2].cardinality, Cardinality::Exec);
+    }
+
+    #[test]
+    fn trailing_comment_lines_annotate_the_next_query() {
+        let content = "-- name: first :one\n\
+                       SELECT 1;\n\
+                       \n\
+                       -- doc comment for the second query\n\
+                       -- name: second :one\n\
+                       SELECT 2 -- inline comment stays\n";
+        let specs = parse_query_file(content, Path::new("q.sql")).expect("parse");
+        assert_eq!(specs[0].sql, "SELECT 1");
+        assert_eq!(specs[1].sql, "SELECT 2 -- inline comment stays");
     }
 
     #[test]

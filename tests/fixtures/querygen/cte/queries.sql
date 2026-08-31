@@ -1,3 +1,6 @@
+-- Both CTE output columns trace to NOT NULL base columns and stay non-optional.
+-- expect-contains: pub id: i32,
+-- expect-contains: pub email: String,
 -- ```rust
 -- pub async fn active_user_emails<'e, E>(
 --     executor: E,

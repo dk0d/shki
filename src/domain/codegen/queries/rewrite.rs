@@ -10,6 +10,8 @@
 //! `$tag$...$tag$` dollar quoting (a `$ident` run followed by another `$`). See
 //! `docs/adr/0001-typed-query-codegen.md`.
 
+use std::collections::HashSet;
+
 use crate::{Result, ShkiError};
 
 /// Result of scanning a query for parameter placeholders.
@@ -21,6 +23,9 @@ pub struct Rewritten {
     /// Parameter names in `$1..$n` order, or `None` when the query uses
     /// positional `$n` placeholders (no named parameters).
     pub names: Option<Vec<String>>,
+    /// Names marked nullable with a `?name` placeholder on any occurrence; the
+    /// generated argument becomes `Option<T>`.
+    pub nullable: HashSet<String>,
 }
 
 /// Rewrite `$name` placeholders to `$n`, returning the rewritten SQL and the
@@ -32,6 +37,7 @@ pub fn rewrite_named_params(sql: &str) -> Result<Rewritten> {
     let chars: Vec<char> = sql.chars().collect();
     let mut out = String::with_capacity(sql.len());
     let mut names: Vec<String> = Vec::new();
+    let mut nullable: HashSet<String> = HashSet::new();
     let mut saw_positional = false;
     let mut i = 0;
 
@@ -48,6 +54,14 @@ pub fn rewrite_named_params(sql: &str) -> Result<Rewritten> {
             '/' if chars.get(i + 1) == Some(&'*') => i = copy_block_comment(&chars, i, &mut out),
             // `$1` positional, `$name` parameter, or `$tag$...$tag$` dollar quote.
             '$' => i = handle_dollar(&chars, i, &mut out, &mut names, &mut saw_positional),
+            // `?name` is a nullable named parameter. A bare `?` (e.g. the JSONB
+            // exists operator followed by a space) is copied verbatim.
+            '?' if chars.get(i + 1).copied().is_some_and(is_ident_char) => {
+                let (run, after) = read_ident(&chars, i + 1);
+                nullable.insert(run.clone());
+                emit_named(&mut out, &mut names, run);
+                i = after;
+            }
             _ => {
                 out.push(c);
                 i += 1;
@@ -64,6 +78,7 @@ pub fn rewrite_named_params(sql: &str) -> Result<Rewritten> {
     Ok(Rewritten {
         sql: out,
         names: (!names.is_empty()).then_some(names),
+        nullable,
     })
 }
 
@@ -130,6 +145,20 @@ fn copy_block_comment(chars: &[char], start: usize, out: &mut String) -> usize {
     i
 }
 
+/// Append the `$n` placeholder for named parameter `run`, assigning the next
+/// index on first appearance and reusing it on repeats.
+fn emit_named(out: &mut String, names: &mut Vec<String>, run: String) {
+    let idx = match names.iter().position(|existing| existing == &run) {
+        Some(pos) => pos + 1,
+        None => {
+            names.push(run);
+            names.len()
+        }
+    };
+    out.push('$');
+    out.push_str(&idx.to_string());
+}
+
 /// Handle a `$`: a positional placeholder (`$1`), a named parameter (`$name`), a
 /// dollar-quoted string (`$$...$$` / `$tag$...$tag$`), or a bare `$`.
 fn handle_dollar(
@@ -173,15 +202,7 @@ fn handle_dollar(
 
     // `$name` (not followed by `$`) is a named parameter.
     if !run.is_empty() {
-        let idx = match names.iter().position(|existing| existing == &run) {
-            Some(pos) => pos + 1,
-            None => {
-                names.push(run);
-                names.len()
-            }
-        };
-        out.push('$');
-        out.push_str(&idx.to_string());
+        emit_named(out, names, run);
         return after;
     }
 
@@ -255,6 +276,33 @@ mod tests {
         let r = rewrite("SELECT $tag$ body $tag$, $p FROM t");
         assert_eq!(r.sql, "SELECT $tag$ body $tag$, $1 FROM t");
         assert_eq!(r.names, Some(vec!["p".to_string()]));
+    }
+
+    #[test]
+    fn nullable_marker_is_rewritten_and_recorded() {
+        let r = rewrite("SELECT * FROM users WHERE email = ?email AND active = $active");
+        assert_eq!(
+            r.sql,
+            "SELECT * FROM users WHERE email = $1 AND active = $2"
+        );
+        assert_eq!(r.names, Some(vec!["email".to_string(), "active".to_string()]));
+        assert!(r.nullable.contains("email"));
+        assert!(!r.nullable.contains("active"));
+    }
+
+    #[test]
+    fn nullable_marker_on_any_occurrence_marks_the_name() {
+        let r = rewrite("SELECT * FROM t WHERE a = $x OR b = ?x");
+        assert_eq!(r.sql, "SELECT * FROM t WHERE a = $1 OR b = $1");
+        assert!(r.nullable.contains("x"));
+    }
+
+    #[test]
+    fn bare_question_mark_is_not_a_parameter() {
+        // The JSONB exists operator (followed by a non-identifier) passes through.
+        let r = rewrite("SELECT * FROM t WHERE data ? 'key' AND id = $id");
+        assert_eq!(r.sql, "SELECT * FROM t WHERE data ? 'key' AND id = $1");
+        assert!(r.nullable.is_empty());
     }
 
     #[test]

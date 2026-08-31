@@ -40,6 +40,8 @@ pub enum ParamBinding {
 pub struct QueryParam {
     pub data_type: DataType,
     pub binding: ParamBinding,
+    /// Marked `$name?` in the SQL: the generated argument is `Option<T>`.
+    pub nullable: bool,
 }
 
 /// One column of a query's result row.
@@ -117,21 +119,42 @@ pub async fn describe_query(
 
     let tables = table_index(snapshot);
 
+    // Parameters written whole into a nullable column (INSERT VALUES / UPDATE
+    // SET) become Option<T> without needing an explicit `?name`.
+    let inferred_nullable = super::infer::nullable_target_params(&rewritten.sql, |table, column| {
+        tables
+            .get(table)
+            .and_then(|table| table.columns.get(column))
+            .map(|column| column.nullable)
+    });
+
     let params: Vec<QueryParam> = match described.parameters {
         Some(Either::Left(ref type_infos)) => type_infos
             .iter()
             .enumerate()
-            .map(|(idx, ti)| QueryParam {
-                data_type: pg_type_to_data_type(ti, snapshot),
-                binding: param_binding(
-                    rewritten.names.as_deref(),
-                    idx,
-                    is_batch,
-                    is_keyset,
-                    &keyset_pos,
-                ),
+            .map(|(idx, ti)| {
+                let names = rewritten.names.as_deref();
+                let binding = param_binding(names, idx, is_batch, is_keyset, &keyset_pos);
+                let marked = names
+                    .and_then(|names| names.get(idx))
+                    .is_some_and(|name| rewritten.nullable.contains(name));
+                if marked && !matches!(binding, ParamBinding::Arg(_)) {
+                    return Err(ShkiError::config(format!(
+                        "parameter ${} in query '{}' is marked nullable (?name), but \
+                         pagination and keyset cursor parameters cannot be nullable",
+                        idx + 1,
+                        spec.name
+                    )));
+                }
+                let inferred =
+                    inferred_nullable.contains(&idx) && matches!(binding, ParamBinding::Arg(_));
+                Ok(QueryParam {
+                    data_type: pg_type_to_data_type(ti, snapshot),
+                    binding,
+                    nullable: marked || inferred,
+                })
             })
-            .collect(),
+            .collect::<Result<_>>()?,
         // `Either::Right(n)` only reports a parameter count without types. Do
         // not emit a wrapper that cannot bind its required arguments.
         Some(Either::Right(count)) => {
@@ -396,12 +419,9 @@ fn resolve_result(
         .iter()
         .enumerate()
         .map(|(idx, column)| {
-            let describe_nullable = described
-                .nullable
-                .get(idx)
-                .copied()
-                .flatten()
-                .unwrap_or(true);
+            // sqlx's inference: Some(true) = proven nullable in this query,
+            // Some(false) = proven not null, None = unknown.
+            let describe_nullable = described.nullable.get(idx).copied().flatten();
 
             // Prefer the Declarative Schema's view of a column that traces back to
             // a base table: it carries the authoritative nullability and resolves
@@ -419,20 +439,26 @@ fn resolve_result(
             let (data_type, nullable) = match from_schema {
                 Some(schema_col) => (
                     schema_col.data_type.clone(),
-                    // Nullable if the schema says so OR describe inferred it (e.g.
-                    // a NOT NULL column made nullable by an outer join).
-                    schema_col.nullable || describe_nullable,
+                    // The schema's NOT NULL is authoritative unless describe
+                    // proved the column nullable in this query (e.g. a NOT NULL
+                    // column on the outer side of a join). "Unknown" does not
+                    // override the schema.
+                    schema_col.nullable || describe_nullable == Some(true),
                 ),
                 None => (
                     pg_type_to_data_type(column.type_info(), snapshot),
-                    describe_nullable,
+                    // No schema column to consult: nullable unless proven.
+                    describe_nullable.unwrap_or(true),
                 ),
             };
 
+            // An sqlx-style alias marker overrides inference where it cannot
+            // reach (e.g. UNION output columns lose their table origin).
+            let (name, forced) = nullability_override(column.name());
             ResultColumn {
-                name: column.name().to_string(),
+                name,
                 data_type,
-                nullable,
+                nullable: forced.unwrap_or(nullable),
             }
         })
         .collect();
@@ -441,6 +467,24 @@ fn resolve_result(
         QueryResult::Reuse { table_name }
     } else {
         QueryResult::Row { columns }
+    }
+}
+
+/// Detect an sqlx-style nullability override in a column alias: `AS "id!"`
+/// forces NOT NULL, `AS "note?"` forces nullable. Returns the name with the
+/// marker stripped and the forced nullability, if any. Postgres' default
+/// expression column name `?column?` is not an override.
+fn nullability_override(name: &str) -> (String, Option<bool>) {
+    let forced = if let Some(rest) = name.strip_suffix('!') {
+        (!rest.is_empty()).then_some(false)
+    } else if let Some(rest) = name.strip_suffix('?') {
+        (!rest.is_empty() && !rest.contains('?')).then_some(true)
+    } else {
+        None
+    };
+    match forced {
+        Some(_) => (name[..name.len() - 1].to_string(), forced),
+        None => (name.to_string(), None),
     }
 }
 
@@ -618,6 +662,24 @@ mod tests {
             "parameter $1",
         )
         .expect("an explicit compatible override should be accepted");
+    }
+
+    #[test]
+    fn alias_markers_override_nullability() {
+        assert_eq!(nullability_override("id!"), ("id".to_string(), Some(false)));
+        assert_eq!(
+            nullability_override("note?"),
+            ("note".to_string(), Some(true))
+        );
+        assert_eq!(nullability_override("plain"), ("plain".to_string(), None));
+        // Postgres' default expression column name is not an override.
+        assert_eq!(
+            nullability_override("?column?"),
+            ("?column?".to_string(), None)
+        );
+        // A bare marker has no name to strip to.
+        assert_eq!(nullability_override("!"), ("!".to_string(), None));
+        assert_eq!(nullability_override("?"), ("?".to_string(), None));
     }
 
     #[test]

@@ -1,9 +1,11 @@
 #![cfg(feature = "querygen")]
 
 //! File-backed Querygen fixture. Add a directory under `tests/fixtures/querygen/`
-//! with `schema.sql` and `queries.sql`. Each query's `-- expect:` block declares
-//! its exact generated function; this test generates each fixture into a
-//! standalone crate and verifies those contracts.
+//! with `schema.sql` and `queries.sql`. Annotate each query, directly above its
+//! `-- name:` marker, with an `-- expect:` block declaring its exact generated
+//! function and/or `-- expect-contains: <text>` lines for fragments (e.g. row
+//! struct fields); this test generates each fixture into a standalone crate and
+//! verifies those contracts.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -86,6 +88,17 @@ fn generated_function(generated: &str, name: &str) -> String {
 fn assert_expected(generated: &str, fixture: &Path) {
     let queries = std::fs::read_to_string(fixture.join("queries.sql"))
         .expect("read Querygen fixture queries");
+    // `-- expect-contains: <text>` asserts the generated module contains <text>
+    // verbatim (e.g. a row struct field, which `-- expect:` cannot cover).
+    for line in queries.lines() {
+        if let Some(expected) = line.trim().strip_prefix("-- expect-contains: ") {
+            assert!(
+                generated.contains(expected),
+                "{} generated output missing `{expected}`:\n{generated}",
+                fixture.display(),
+            );
+        }
+    }
     for (name, expected) in expected_functions(&queries) {
         let actual = generated_function(generated, &name);
         assert!(

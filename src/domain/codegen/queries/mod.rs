@@ -8,6 +8,7 @@
 pub mod config;
 pub mod describe;
 pub mod generator;
+pub mod infer;
 pub mod parse;
 pub mod rewrite;
 
