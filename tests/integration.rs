@@ -897,7 +897,8 @@ async fn cli_generate_with_concurrent_index_requires_confirmation() {
         ctx.root_dir().join("schema"),
         format!(
             "CREATE TABLE {table_name} (id integer primary key, email text not null);\n\
-             CREATE INDEX CONCURRENTLY {table_name}_email_idx ON {table_name} (email);\n"
+             CREATE INDEX CONCURRENTLY {table_name}_email_idx ON {table_name} (email);\n\
+             CREATE INDEX CONCURRENTLY ON {table_name} (id);\n"
         ),
     )
     .expect("failed to write declarative schema");

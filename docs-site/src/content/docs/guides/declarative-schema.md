@@ -61,6 +61,34 @@ Shki-owned PostgreSQL image that includes them. Extension type modifiers, such
 as `vector(3)`, `halfvec(384)`, and `geometry(Point, 4326)`, are retained in
 Snapshots and detected by schema diffs.
 
+## Concurrent index builds
+
+Declare an index `CREATE INDEX CONCURRENTLY` to ask for PostgreSQL's
+non-blocking build — the way to add an index to a large, live table without
+taking a write-blocking lock:
+
+```sql
+CREATE TABLE scan (id bigint PRIMARY KEY, captured_at timestamptz NOT NULL);
+CREATE INDEX CONCURRENTLY scan_captured_at_idx ON scan (captured_at);
+```
+
+The keyword is a **creation strategy, not schema state**: PostgreSQL doesn't
+record it in its catalogs, and shki doesn't record it in Snapshots. It changes
+*how* [`shki generate`](/shki/commands/generate/#concurrent-indexes) writes the
+migration — the index build is split into its own `shki:no-transaction`
+migration, after a confirmation prompt — not what the schema *is*. Adding or
+removing `CONCURRENTLY` on an index that already exists diffs as no change.
+
+During compilation the keyword is stripped before the schema is applied to the
+Shadow Database (the shadow apply runs in one implicit transaction, which
+`CONCURRENTLY` refuses; on a fresh shadow there is nothing to build online
+anyway).
+
+The index name is optional, as in plain SQL. An unnamed concurrent index —
+`CREATE INDEX CONCURRENTLY ON hello (id)` — is given a name following
+Postgres's own convention (`hello_id_idx`; expressions contribute `expr`),
+which becomes the index's name in the generated migration.
+
 ## Directory Schemas
 
 A Declarative Schema can be a single SQL file or a directory with a canonical

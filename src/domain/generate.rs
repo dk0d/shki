@@ -16,6 +16,7 @@ use crate::diff::{
 use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::migrate::utils::sanitize_migration_name;
+use crate::models::iden::Iden;
 use crate::snapshots::Snapshot;
 use crate::sql::render::SqlRenderer;
 use crate::tui::{confirm, prompt_for_rename};
@@ -92,14 +93,27 @@ pub async fn cmd_generate(
 
     let with_down = with_down || config.migrations.generate_down();
     let suffix = sanitize_migration_name(name);
+    let split = !main_diff.statements.is_empty() && !concurrent_diff.statements.is_empty();
+    let mut desired = desired;
     let mut planned = Vec::new();
     if !main_diff.statements.is_empty() {
+        // On a split, the main migration's Snapshot is the intermediate state:
+        // desired minus the indexes the second migration hasn't built yet.
+        let snapshot = if split {
+            let intermediate =
+                snapshot_before_concurrent_indexes(&desired, &concurrent_diff.statements);
+            desired.prev_id = Some(intermediate.id.clone());
+            intermediate
+        } else {
+            desired.clone()
+        };
         planned.push(PlannedMigration {
             suffix: suffix.clone(),
             up_sql: main_sql,
             down_sql: with_down
                 .then(|| render_down_sql(&generator, &main_diff))
                 .transpose()?,
+            snapshot,
         });
     }
     if !concurrent_diff.statements.is_empty() {
@@ -119,10 +133,11 @@ pub async fn cmd_generate(
                     render_no_transaction_sql(&generator, &down_diff.statements)
                 })
                 .transpose()?,
+            snapshot: desired,
         });
     }
 
-    write_planned_migrations(&manager, &planned, &desired)?;
+    write_planned_migrations(&manager, &planned)?;
     println!();
     println!("{}", diff_preview(config, &diff)?);
 
@@ -132,9 +147,7 @@ pub async fn cmd_generate(
 fn write_planned_migrations(
     manager: &MigrationManager,
     planned: &[PlannedMigration],
-    desired: &Snapshot,
 ) -> Result<()> {
-    let mut last_migration_name = String::new();
     for migration in planned {
         let migration_name = manager.next_migration_name(Some(&migration.suffix))?;
         let up_path = manager.out_dir.join(format!("{}.sql", migration_name));
@@ -146,18 +159,13 @@ fn write_planned_migrations(
             write_schema_migration(&down_path, &migration_name, down_sql, true)?;
             println!("Down:     {}", down_path.display());
         }
+        let snapshot_path = manager
+            .meta_dir()
+            .join(format!("{}.snapshot.json", migration_name));
+        std::fs::write(&snapshot_path, migration.snapshot.to_json()?)?;
+        println!("Snapshot: {}", snapshot_path.display());
         manager.record_migration_in_journal(&up_path, MigrationKind::Schema)?;
-        last_migration_name = migration_name;
     }
-
-    // The Snapshot describes the state after ALL generated migrations, so it
-    // belongs to the last one; earlier files stay un-snapshotted like custom
-    // migrations do.
-    let snapshot_path = manager
-        .meta_dir()
-        .join(format!("{}.snapshot.json", last_migration_name));
-    std::fs::write(&snapshot_path, desired.to_json()?)?;
-    println!("Snapshot: {}", snapshot_path.display());
     Ok(())
 }
 
@@ -165,6 +173,33 @@ struct PlannedMigration {
     suffix: String,
     up_sql: String,
     down_sql: Option<String>,
+    /// The schema state after this migration runs.
+    snapshot: Snapshot,
+}
+
+/// The intermediate Snapshot on a split generation: the desired state minus
+/// the indexes the no-transaction migration hasn't built yet, with its own id
+/// so the Snapshot chain stays linked (baseline -> intermediate -> desired).
+fn snapshot_before_concurrent_indexes(
+    desired: &Snapshot,
+    concurrent: &[DiffStatement],
+) -> Snapshot {
+    let mut snapshot = desired.clone();
+    snapshot.id = uuid::Uuid::new_v4().to_string();
+    for stmt in concurrent {
+        let DiffStatement::CreateIndex {
+            table,
+            schema,
+            index,
+        } = stmt
+        else {
+            continue;
+        };
+        if let Some(table) = snapshot.table_mut(&Iden::new(table.clone(), schema.clone())) {
+            table.indexes.shift_remove(&index.name);
+        }
+    }
+    snapshot
 }
 
 /// Partition a diff into ordinary statements and `CREATE INDEX CONCURRENTLY`
@@ -392,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn write_planned_migrations_snapshots_only_the_last_migration() {
+    fn write_planned_migrations_snapshots_every_migration() {
         let temp_dir = TempDir::new().expect("failed to create temp dir");
         let manager = MigrationManager::new(
             temp_dir.path(),
@@ -403,37 +438,57 @@ mod tests {
         );
         manager.ensure_dir().expect("dirs should create");
 
+        let mut table = Table::new("users");
+        table.column(Column::new("id", DataType::Integer));
+        table.indexes.insert(
+            "users_id_idx".to_string(),
+            Index::new("users_id_idx", vec!["id"]).concurrently(),
+        );
+        let mut desired = Snapshot::new(SqlDialect::Postgres);
+        desired.insert_table(Iden::new("users", None), table);
+
+        let intermediate = snapshot_before_concurrent_indexes(
+            &desired,
+            &[DiffStatement::CreateIndex {
+                table: "users".to_string(),
+                schema: None,
+                index: Index::new("users_id_idx", vec!["id"]).concurrently(),
+            }],
+        );
+        assert_ne!(intermediate.id, desired.id);
+        assert!(
+            !intermediate.tables()[&Iden::new("users", None)]
+                .indexes
+                .contains_key("users_id_idx"),
+            "intermediate snapshot must not contain the not-yet-built index"
+        );
+
         let planned = vec![
             PlannedMigration {
                 suffix: "add-users".to_string(),
                 up_sql: "CREATE TABLE users (id int);".to_string(),
                 down_sql: Some("DROP TABLE users;".to_string()),
+                snapshot: intermediate,
             },
             PlannedMigration {
                 suffix: "add-users-indexes".to_string(),
                 up_sql: "-- shki:no-transaction\n\nCREATE INDEX CONCURRENTLY IF NOT EXISTS i ON users (id);".to_string(),
                 down_sql: Some("-- shki:no-transaction\n\nDROP INDEX CONCURRENTLY IF EXISTS i;".to_string()),
+                snapshot: desired,
             },
         ];
-        write_planned_migrations(&manager, &planned, &Snapshot::new(SqlDialect::Postgres))
-            .expect("migrations should write");
+        write_planned_migrations(&manager, &planned).expect("migrations should write");
 
         for file in [
             "0000_add-users.sql",
             "0000_add-users.down.sql",
+            "_meta/0000_add-users.snapshot.json",
             "0001_add-users-indexes.sql",
             "0001_add-users-indexes.down.sql",
             "_meta/0001_add-users-indexes.snapshot.json",
         ] {
             assert!(temp_dir.path().join(file).exists(), "{file} should exist");
         }
-        assert!(
-            !temp_dir
-                .path()
-                .join("_meta/0000_add-users.snapshot.json")
-                .exists(),
-            "only the last migration gets the snapshot"
-        );
 
         let journal = manager.load_journal().expect("journal should load");
         assert_eq!(

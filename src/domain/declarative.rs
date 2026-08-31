@@ -47,7 +47,7 @@ pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
     let mut concurrent_indexes = Vec::new();
 
     for (idx, statement) in split_sql_statements(sql)?.into_iter().enumerate() {
-        let statement = match rewrite_create_index_concurrently(&statement) {
+        let statement = match rewrite_create_index_concurrently(&statement)? {
             Some(rewritten) => {
                 concurrent_indexes.push(rewritten.index_name);
                 rewritten.sql

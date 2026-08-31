@@ -243,48 +243,147 @@ pub struct RewrittenCreateIndex {
 /// the flag isn't recorded in Postgres catalogs, so it wouldn't survive
 /// introspection anyway. This strips the keyword for the apply and hands back
 /// the index name so the compiler can re-mark the introspected index.
-pub fn rewrite_create_index_concurrently(statement: &str) -> Option<RewrittenCreateIndex> {
-    let tokens = lex_sql(statement).ok()?;
+///
+/// The declared name is what carries the concurrent intent across the
+/// shadow-compile round trip. An unnamed `CREATE INDEX CONCURRENTLY ON ...`
+/// therefore gets a name injected following Postgres's own convention
+/// (`{table}_{columns}_idx`, expressions as `expr`), which also becomes the
+/// index's name in the generated migration.
+pub fn rewrite_create_index_concurrently(statement: &str) -> Result<Option<RewrittenCreateIndex>> {
+    let Ok(tokens) = lex_sql(statement) else {
+        return Ok(None);
+    };
     let mut iter = SqlTokenIter::new(&tokens);
 
-    let mut token = iter.next()?;
-    if !token.is_keyword("CREATE") {
-        return None;
-    }
-    token = iter.next()?;
-    if token.is_keyword("UNIQUE") {
-        token = iter.next()?;
-    }
-    if !token.is_keyword("INDEX") {
-        return None;
-    }
-    let concurrently = iter.next()?;
-    if !concurrently.is_keyword("CONCURRENTLY") {
-        return None;
-    }
-
-    let mut name_token = iter.next()?;
-    if name_token.is_keyword("IF") {
-        if !iter.next()?.is_keyword("NOT") || !iter.next()?.is_keyword("EXISTS") {
+    let matched = (|| {
+        let mut token = iter.next()?;
+        if !token.is_keyword("CREATE") {
             return None;
         }
-        name_token = iter.next()?;
-    }
+        token = iter.next()?;
+        if token.is_keyword("UNIQUE") {
+            token = iter.next()?;
+        }
+        if !token.is_keyword("INDEX") {
+            return None;
+        }
+        let concurrently = iter.next()?;
+        if !concurrently.is_keyword("CONCURRENTLY") {
+            return None;
+        }
 
-    let index_name = if name_token.text.starts_with('"') {
-        unquote_identifier(name_token.text)
-    } else {
-        name_token.text.to_lowercase()
+        let mut name_token = iter.next()?;
+        if name_token.is_keyword("IF") {
+            if !iter.next()?.is_keyword("NOT") || !iter.next()?.is_keyword("EXISTS") {
+                return None;
+            }
+            name_token = iter.next()?;
+        }
+        Some((concurrently, name_token))
+    })();
+    let Some((concurrently, name_token)) = matched else {
+        return Ok(None);
     };
 
-    Some(RewrittenCreateIndex {
+    if name_token.is_keyword("ON") {
+        // Unnamed index: inject a Postgres-convention name so the concurrent
+        // intent can be tracked (and the generated migration is explicit).
+        let index_name = default_index_name(statement, &name_token)?;
+        return Ok(Some(RewrittenCreateIndex {
+            sql: format!(
+                "{}{index_name} {}",
+                &statement[..concurrently.start],
+                statement[concurrently.end..].trim_start()
+            ),
+            index_name,
+        }));
+    }
+
+    Ok(Some(RewrittenCreateIndex {
         sql: format!(
             "{}{}",
             &statement[..concurrently.start],
             statement[concurrently.end..].trim_start()
         ),
-        index_name,
-    })
+        index_name: fold_identifier(name_token.text),
+    }))
+}
+
+/// Name an unnamed index the way Postgres would: `{table}_{columns}_idx`, with
+/// non-column items (expressions, function calls) contributing `expr`.
+///
+/// ponytail: no collision dedup (Postgres would append `1`) — a duplicate name
+/// fails the shadow apply loudly; name the index explicitly to resolve.
+fn default_index_name(statement: &str, on_token: &SqlToken<'_>) -> Result<String> {
+    let open_paren = find_first_code_char(statement, TokenKind::OpenParen, on_token.end)
+        .ok_or_else(|| {
+            ShkiError::schema(format!("CREATE INDEX has no column list: {statement}"))
+        })?;
+    let close_paren = find_matching_paren(statement, open_paren)?.ok_or_else(|| {
+        ShkiError::schema(format!(
+            "CREATE INDEX has an unclosed column list: {statement}"
+        ))
+    })?;
+
+    // The relation between ON and the column list, minus any trailing
+    // `USING <method>`; the last name token is the (unqualified) table name.
+    let mut table = None;
+    for token in lex_sql(&statement[on_token.end..open_paren])? {
+        if token.is_keyword("USING") {
+            break;
+        }
+        if is_name_token(&token.kind) {
+            table = Some(fold_identifier(token.text));
+        }
+    }
+    let table = table
+        .ok_or_else(|| ShkiError::schema(format!("CREATE INDEX names no table: {statement}")))?;
+
+    let parts = split_top_level_commas(&statement[open_paren + 1..close_paren])?
+        .iter()
+        .map(|item| index_item_name_part(item))
+        .collect::<Vec<_>>()
+        .join("_");
+
+    let mut name = format!("{table}_{parts}_idx");
+    // Postgres truncates identifiers to 63 bytes.
+    if name.len() > 63 {
+        let mut end = 63;
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        name.truncate(end);
+    }
+    Ok(name)
+}
+
+/// A plain column item (optionally with ordering/opclass) contributes its
+/// column name; anything expression-shaped contributes `expr`, like Postgres.
+fn index_item_name_part(item: &str) -> String {
+    let Ok(tokens) = lex_sql(item) else {
+        return "expr".to_string();
+    };
+    let Some(first) = tokens.first() else {
+        return "expr".to_string();
+    };
+    if !is_name_token(&first.kind)
+        || tokens
+            .get(1)
+            .is_some_and(|token| matches!(token.kind, TokenKind::OpenParen))
+    {
+        return "expr".to_string();
+    }
+    fold_identifier(first.text)
+}
+
+/// Fold an identifier the way Postgres stores it: quoted kept verbatim,
+/// unquoted lowercased.
+fn fold_identifier(text: &str) -> String {
+    if text.starts_with('"') {
+        unquote_identifier(text)
+    } else {
+        text.to_lowercase()
+    }
 }
 
 pub fn split_sql_statements(sql: &str) -> Result<Vec<String>> {
@@ -621,8 +720,9 @@ mod tests {
             ),
         ];
         for (input, sql, name) in cases {
-            let rewritten =
-                rewrite_create_index_concurrently(input).expect("should detect CONCURRENTLY");
+            let rewritten = rewrite_create_index_concurrently(input)
+                .expect("should parse")
+                .expect("should detect CONCURRENTLY");
             assert_eq!(rewritten.sql, sql);
             assert_eq!(rewritten.index_name, name);
         }
@@ -632,10 +732,38 @@ mod tests {
     fn plain_statements_are_not_rewritten() {
         for statement in [
             "CREATE INDEX users_email_idx ON users (email)",
+            "CREATE INDEX ON users (email)",
             "CREATE TABLE concurrently (id int)",
             "DROP INDEX CONCURRENTLY users_email_idx",
         ] {
-            assert!(rewrite_create_index_concurrently(statement).is_none());
+            assert!(
+                rewrite_create_index_concurrently(statement)
+                    .expect("should parse")
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn unnamed_concurrent_index_gets_a_postgres_convention_name() {
+        let cases = [
+            (
+                "CREATE INDEX CONCURRENTLY ON hello (id)",
+                "CREATE INDEX hello_id_idx ON hello (id)",
+                "hello_id_idx",
+            ),
+            (
+                "CREATE UNIQUE INDEX CONCURRENTLY ON app.users USING gin (email DESC, lower(name))",
+                "CREATE UNIQUE INDEX users_email_expr_idx ON app.users USING gin (email DESC, lower(name))",
+                "users_email_expr_idx",
+            ),
+        ];
+        for (input, sql, name) in cases {
+            let rewritten = rewrite_create_index_concurrently(input)
+                .expect("should parse")
+                .expect("should detect CONCURRENTLY");
+            assert_eq!(rewritten.sql, sql);
+            assert_eq!(rewritten.index_name, name);
         }
     }
 }

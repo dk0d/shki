@@ -48,16 +48,54 @@ migrations/<prefix>_<name>.sql           # every other change, one transaction
 migrations/<prefix>_<name>-indexes.sql   # -- shki:no-transaction
 ```
 
+For example, adding a column and a concurrent index to the schema:
+
+```sql
+-- schema/main.sql — declare the desired shape, no ALTERs needed
+CREATE TABLE scan (
+  id bigint PRIMARY KEY,
+  payload text NOT NULL,
+  captured_at timestamptz NOT NULL
+);
+CREATE INDEX CONCURRENTLY scan_captured_at_idx ON scan (captured_at);
+```
+
+```bash
+$ shki generate capture-at
+? 1 index(es) are declared CONCURRENTLY and will be written as a separate
+  no-transaction migration (CREATE INDEX CONCURRENTLY IF NOT EXISTS). Continue? (Y/n)
+```
+
+```sql
+-- 0007_capture-at.sql
+ALTER TABLE "scan" ADD COLUMN "captured_at" TIMESTAMPTZ NOT NULL;
+```
+
+```sql
+-- 0008_capture-at-indexes.sql
+-- shki:no-transaction
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "scan_captured_at_idx" ON "scan" ("captured_at");
+```
+
 The second file builds each declared index with
 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, one `--> +statement` segment per
-index, so nothing takes a write-blocking lock on a live table. The guard exists
-only here, where a partial failure replays the file from the top — everything
-else shki generates is strict DDL, so a name collision fails loudly instead of
-silently keeping an index whose definition may not match. Declining the
-prompt fails the whole generation and writes nothing; non-interactive runs fail
-the same way. `CONCURRENTLY` is a creation strategy, not schema state — it
-isn't recorded in the Snapshot, and adding or removing the keyword on an
-already-existing index diffs as no change.
+index, so nothing takes a write-blocking lock on a live table. Its down
+migration is the matching no-transaction `DROP INDEX CONCURRENTLY IF EXISTS`.
+The idempotency guard exists only here, where a partial failure replays the
+file from the top — everything else shki generates is strict DDL, so a name
+collision fails loudly instead of silently keeping an index whose definition
+may not match. Declining the prompt fails the whole generation and writes
+nothing; non-interactive runs fail the same way. If the only change is
+concurrent indexes, just the one no-transaction migration is written. Each
+migration gets its own Snapshot: the first records the intermediate state
+(everything except the not-yet-built indexes), the second records the full
+desired state, keeping the Snapshot chain complete.
+
+`CONCURRENTLY` is a creation strategy, not schema state — it isn't recorded in
+the Snapshot, and adding or removing the keyword on an already-existing index
+diffs as no change. See
+[Declarative Schema](/shki/guides/declarative-schema/#concurrent-index-builds).
 
 ## Renames
 

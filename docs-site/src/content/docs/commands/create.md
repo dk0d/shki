@@ -10,9 +10,13 @@ shki create <NAME> [--with-down] [--sql SQL | --sql-file PATH] [--edit]
 Alias: `shki new`. Equivalent to `shki generate <NAME> --custom`.
 
 Creates an empty (or seeded) migration file for SQL that the Declarative Schema
-can't express: data backfills, operational statements, `CREATE INDEX
-CONCURRENTLY`, and so on. No Shadow Database is started and no Snapshot is
-written — the SQL isn't final yet.
+can't express: data backfills, operational statements, and so on. No Shadow
+Database is started and no Snapshot is written — the SQL isn't final yet.
+
+For `CREATE INDEX CONCURRENTLY` you usually don't need a Custom Migration
+anymore: declare the index `CONCURRENTLY` in the Declarative Schema and
+[`shki generate`](/shki/commands/generate/#concurrent-indexes) writes the
+no-transaction rollout for you.
 
 ## Options
 
