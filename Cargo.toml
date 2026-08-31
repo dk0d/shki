@@ -89,12 +89,13 @@ inquire = { version = "0.9.4", features = ["chrono"] }
 bat = "0.26.1"
 postgresql_embedded = { version = "0.21.0", features = ["tokio"] }
 ariadne = "0.6.0"
-squawk-lexer = "2.59.0"
+squawk-lexer = "2.63.0"
 rand = "0.10.1"
 hex-literal = "1.1.0"
 digest = "0.11.3"
 regex = "1.12.4"
 owo-colors = "4.3.0"
+squawk-syntax = "2.63.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"

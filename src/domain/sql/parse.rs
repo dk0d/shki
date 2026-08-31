@@ -1,9 +1,15 @@
-/// Simplified parser to support declarative sql apply compile in shadow D
-///
-/// May expand to a more formal parser eventually
+//! Statement-level pre-pass over the Declarative Schema, built on
+//! squawk-syntax's lossless, error-tolerant Postgres parse tree.
+//!
+//! The Shadow Database stays the authority on SQL validity: `SourceFile::parse`
+//! always produces a tree (unparseable stretches become error nodes that keep
+//! their text), so statements the grammar doesn't know pass through verbatim
+//! instead of being rejected here.
+
 use std::path::PathBuf;
 
-use squawk_lexer::TokenKind;
+use squawk_syntax::ast::{self, AstNode};
+use squawk_syntax::{SourceFile, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::models::iden::Iden;
 use crate::schema::{Constraint, ForeignKeyConstraint, Table};
@@ -69,47 +75,94 @@ fn unsupported_backslash_command(command: &str) -> ShkiError {
     ))
 }
 
-pub fn create_statement_object_type(statement: &str) -> SqlObjectType {
-    create_statement_object_kind(statement)
-        .and_then(|kind| match kind.as_str() {
-            "SCHEMA" => Some(SqlObjectType::Schema),
-            "EXTENSION" => Some(SqlObjectType::Extension),
-            "TYPE" | "DOMAIN" => Some(SqlObjectType::Type),
-            "FUNCTION" => Some(SqlObjectType::Function),
-            "PROCEDURE" => Some(SqlObjectType::Procedure),
-            "AGGREGATE" => Some(SqlObjectType::Aggregate),
-            "SEQUENCE" => Some(SqlObjectType::Sequence),
-            "VIEW" => Some(SqlObjectType::View),
-            "MATERIALIZED VIEW" => Some(SqlObjectType::MaterializedView),
-            "INDEX" => Some(SqlObjectType::Index),
-            "TRIGGER" => Some(SqlObjectType::Trigger),
-            "POLICY" => Some(SqlObjectType::Policy),
-            _ => None,
+/// Split SQL into statements. Statement boundaries come from the parse tree,
+/// so semicolons inside literals, dollar-quoted bodies, and `BEGIN ATOMIC`
+/// blocks don't split; unparseable stretches survive as their raw text.
+pub fn split_sql_statements(sql: &str) -> Result<Vec<String>> {
+    let parse = SourceFile::parse(sql);
+    Ok(parse
+        .syntax_node()
+        .children()
+        .filter_map(|node| {
+            let text = node.text().to_string();
+            let text = text.trim().trim_end_matches(';').trim_end();
+            (!text.is_empty()).then(|| text.to_string())
         })
-        .unwrap_or(SqlObjectType::Other)
+        .collect())
+}
+
+/// The first statement of `statement`, if the grammar recognizes it.
+fn first_stmt(statement: &str) -> Option<ast::Stmt> {
+    SourceFile::parse(statement).tree().stmts().next()
+}
+
+/// The first statement of `statement` as a specific node type.
+fn typed_stmt<N: AstNode>(statement: &str) -> Option<N> {
+    SourceFile::parse(statement)
+        .syntax_node()
+        .children()
+        .find_map(N::cast)
+}
+
+pub fn create_statement_object_type(statement: &str) -> SqlObjectType {
+    match first_stmt(statement) {
+        Some(ast::Stmt::CreateSchema(_)) => SqlObjectType::Schema,
+        Some(ast::Stmt::CreateExtension(_)) => SqlObjectType::Extension,
+        Some(ast::Stmt::CreateType(_) | ast::Stmt::CreateDomain(_)) => SqlObjectType::Type,
+        Some(ast::Stmt::CreateFunction(_)) => SqlObjectType::Function,
+        Some(ast::Stmt::CreateProcedure(_)) => SqlObjectType::Procedure,
+        Some(ast::Stmt::CreateAggregate(_)) => SqlObjectType::Aggregate,
+        Some(ast::Stmt::CreateSequence(_)) => SqlObjectType::Sequence,
+        Some(ast::Stmt::CreateView(_)) => SqlObjectType::View,
+        Some(ast::Stmt::CreateMaterializedView(_)) => SqlObjectType::MaterializedView,
+        Some(ast::Stmt::CreateIndex(_)) => SqlObjectType::Index,
+        Some(ast::Stmt::CreateTrigger(_)) => SqlObjectType::Trigger,
+        Some(ast::Stmt::CreatePolicy(_)) => SqlObjectType::Policy,
+        _ => SqlObjectType::Other,
+    }
 }
 
 pub fn create_statement_operation(statement: &str) -> SqlOperation {
-    create_statement_object_kind(statement)
-        .map(|_| SqlOperation::Create)
-        .unwrap_or(SqlOperation::Raw)
+    let is_create = first_stmt(statement).is_some_and(|stmt| {
+        first_code_token(stmt.syntax()).is_some_and(|token| token.kind() == SyntaxKind::CREATE_KW)
+    });
+    if is_create {
+        SqlOperation::Create
+    } else {
+        SqlOperation::Raw
+    }
+}
+
+fn first_code_token(node: &SyntaxNode) -> Option<SyntaxToken> {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| !token.kind().is_trivia())
+}
+
+/// Identifier tokens under `node`, unquoted, in source order.
+fn name_parts(node: &SyntaxNode) -> Vec<String> {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::IDENT)
+        .map(|token| unquote_identifier(token.text()))
+        .collect()
+}
+
+/// A `[schema.]name` identifier from a name/path node.
+fn node_iden(node: &SyntaxNode) -> Option<Iden> {
+    let mut parts = name_parts(node);
+    let name = parts.pop()?;
+    Some(Iden::new(name, parts.pop()))
 }
 
 pub fn create_table_info(statement: &str) -> Result<Option<Table>> {
-    let Some(table_keyword_end) = create_table_keyword_end(statement) else {
+    let Some(create) = typed_stmt::<ast::CreateTable>(statement) else {
         return Ok(None);
     };
-
-    let Some(open_paren) = find_first_code_char(statement, TokenKind::OpenParen, table_keyword_end)
+    let Some(table_id) = create
+        .table_name()
+        .and_then(|name| node_iden(name.syntax()))
     else {
-        return Ok(None);
-    };
-    let Some(close_paren) = find_matching_paren(statement, open_paren)? else {
-        return Ok(None);
-    };
-
-    let table_name = create_table_name(statement, table_keyword_end, open_paren);
-    let Some(table_id) = parse_relation_id(&table_name)? else {
         return Ok(None);
     };
 
@@ -118,9 +171,17 @@ pub fn create_table_info(statement: &str) -> Result<Option<Table>> {
         None => Table::new(table_id.name),
     };
 
-    let body = &statement[open_paren + 1..close_paren];
-    for item in split_top_level_commas(body)? {
-        if let Some(referenced) = referenced_table_id(&item)? {
+    for node in create.syntax().descendants() {
+        let referenced = if let Some(fk) = ast::ForeignKeyConstraint::cast(node.clone()) {
+            fk.table_name_ref().and_then(|r| node_iden(r.syntax()))
+        } else if ast::ReferencesConstraint::can_cast(node.kind()) {
+            node.children()
+                .find_map(ast::TableNameRef::cast)
+                .and_then(|r| node_iden(r.syntax()))
+        } else {
+            None
+        };
+        if let Some(referenced) = referenced {
             table.constraint(Constraint::ForeignKey(ForeignKeyConstraint::new(
                 Vec::<String>::new(),
                 referenced,
@@ -132,43 +193,21 @@ pub fn create_table_info(statement: &str) -> Result<Option<Table>> {
     Ok(Some(table))
 }
 
-fn referenced_table_id(item: &str) -> Result<Option<Iden>> {
-    let tokens = lex_sql(item)?;
-    let Some(reference_token) = tokens.iter().find(|token| token.is_keyword("REFERENCES")) else {
-        return Ok(None);
-    };
-
-    parse_relation_id(&item[reference_token.end..])
-}
-
-fn parse_relation_id(sql: &str) -> Result<Option<Iden>> {
-    let tokens = lex_sql(sql)?;
-    let mut parts = Vec::new();
-
-    for token in tokens {
-        if matches!(token.kind, TokenKind::OpenParen) {
-            break;
-        }
-        if is_name_token(&token.kind) {
-            parts.push(unquote_identifier(token.text));
-            if parts.len() == 2 {
-                break;
-            }
-        }
-    }
-
-    Ok(match parts.as_slice() {
-        [name] => Some(Iden::new(name.clone(), None)),
-        [schema, name] => Some(Iden::new(name.clone(), Some(schema.clone()))),
-        _ => None,
-    })
-}
-
 fn unquote_identifier(value: &str) -> String {
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
         value[1..value.len() - 1].replace("\"\"", "\"")
     } else {
         value.to_string()
+    }
+}
+
+/// Fold an identifier the way Postgres stores it: quoted kept verbatim,
+/// unquoted lowercased.
+fn fold_identifier(text: &str) -> String {
+    if text.starts_with('"') {
+        unquote_identifier(text)
+    } else {
+        text.to_lowercase()
     }
 }
 
@@ -179,33 +218,31 @@ pub struct RewrittenCreateTable {
 }
 
 pub fn rewrite_create_table_foreign_keys(statement: &str) -> Result<Option<RewrittenCreateTable>> {
-    let Some(table_keyword_end) = create_table_keyword_end(statement) else {
+    let Some(create) = typed_stmt::<ast::CreateTable>(statement) else {
         return Ok(None);
     };
-
-    let Some(open_paren) = find_first_code_char(statement, TokenKind::OpenParen, table_keyword_end)
+    let (Some(table_name), Some(arg_list)) = (create.table_name(), create.table_arg_list()) else {
+        return Ok(None);
+    };
+    let (Some(open_paren), Some(close_paren)) =
+        (arg_list.l_paren_token(), arg_list.r_paren_token())
     else {
         return Ok(None);
     };
-    let Some(close_paren) = find_matching_paren(statement, open_paren)? else {
-        return Ok(None);
-    };
 
-    let table_name = create_table_name(statement, table_keyword_end, open_paren);
-    if table_name.is_empty() {
-        return Ok(None);
-    }
-
-    let body = &statement[open_paren + 1..close_paren];
-    let items = split_top_level_commas(body)?;
+    let table_name = table_name.syntax().text().to_string();
     let mut inline_items = Vec::new();
     let mut deferred_foreign_keys = Vec::new();
 
-    for item in items {
-        if is_table_level_foreign_key(&item) {
-            deferred_foreign_keys.push(format!("ALTER TABLE {table_name} ADD {}", item.trim()));
-        } else {
-            inline_items.push(item.trim().to_string());
+    for arg in arg_list.args() {
+        match &arg {
+            ast::TableArg::TableConstraint(ast::TableConstraint::ForeignKeyConstraint(fk)) => {
+                deferred_foreign_keys.push(format!(
+                    "ALTER TABLE {table_name} ADD {}",
+                    fk.syntax().text().to_string().trim()
+                ));
+            }
+            other => inline_items.push(other.syntax().text().to_string().trim().to_string()),
         }
     }
 
@@ -213,6 +250,8 @@ pub fn rewrite_create_table_foreign_keys(statement: &str) -> Result<Option<Rewri
         return Ok(None);
     }
 
+    let open_paren = usize::from(open_paren.text_range().start());
+    let close_paren = usize::from(close_paren.text_range().start());
     let mut create_table_sql = String::new();
     create_table_sql.push_str(statement[..open_paren + 1].trim_end());
     create_table_sql.push('\n');
@@ -226,6 +265,18 @@ pub fn rewrite_create_table_foreign_keys(statement: &str) -> Result<Option<Rewri
     }))
 }
 
+pub fn is_alter_table_add_foreign_key(statement: &str) -> bool {
+    typed_stmt::<ast::AlterTable>(statement).is_some_and(|alter| {
+        alter.syntax().descendants().any(|node| {
+            ast::AddConstraint::cast(node)
+                .and_then(|add| add.constraint())
+                .is_some_and(|constraint| {
+                    matches!(constraint, ast::Constraint::ForeignKeyConstraint(_))
+                })
+        })
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RewrittenCreateIndex {
     /// The statement with `CONCURRENTLY` removed, safe to run inside the
@@ -236,7 +287,7 @@ pub struct RewrittenCreateIndex {
     pub index_name: String,
 }
 
-/// Detect `CREATE [UNIQUE] INDEX CONCURRENTLY [IF NOT EXISTS] <name> ...`.
+/// Detect `CREATE [UNIQUE] INDEX CONCURRENTLY [IF NOT EXISTS] [<name>] ...`.
 ///
 /// `CONCURRENTLY` refuses to run inside a transaction block, so a Declarative
 /// Schema declaring it can't be applied to the Shadow Database verbatim — and
@@ -250,63 +301,51 @@ pub struct RewrittenCreateIndex {
 /// (`{table}_{columns}_idx`, expressions as `expr`), which also becomes the
 /// index's name in the generated migration.
 pub fn rewrite_create_index_concurrently(statement: &str) -> Result<Option<RewrittenCreateIndex>> {
-    let Ok(tokens) = lex_sql(statement) else {
+    let Some(create) = typed_stmt::<ast::CreateIndex>(statement) else {
         return Ok(None);
     };
-    let mut iter = SqlTokenIter::new(&tokens);
-
-    let matched = (|| {
-        let mut token = iter.next()?;
-        if !token.is_keyword("CREATE") {
-            return None;
-        }
-        token = iter.next()?;
-        if token.is_keyword("UNIQUE") {
-            token = iter.next()?;
-        }
-        if !token.is_keyword("INDEX") {
-            return None;
-        }
-        let concurrently = iter.next()?;
-        if !concurrently.is_keyword("CONCURRENTLY") {
-            return None;
-        }
-
-        let mut name_token = iter.next()?;
-        if name_token.is_keyword("IF") {
-            if !iter.next()?.is_keyword("NOT") || !iter.next()?.is_keyword("EXISTS") {
-                return None;
-            }
-            name_token = iter.next()?;
-        }
-        Some((concurrently, name_token))
-    })();
-    let Some((concurrently, name_token)) = matched else {
+    let Some(concurrently) = create.concurrently_token() else {
         return Ok(None);
     };
+    let start = usize::from(concurrently.text_range().start());
+    let end = usize::from(concurrently.text_range().end());
+    let stripped = |injected_name: &str| {
+        format!(
+            "{}{injected_name}{}",
+            &statement[..start],
+            statement[end..].trim_start()
+        )
+    };
 
-    if name_token.is_keyword("ON") {
-        // Unnamed index: inject a Postgres-convention name so the concurrent
-        // intent can be tracked (and the generated migration is explicit).
-        let index_name = default_index_name(statement, &name_token)?;
-        return Ok(Some(RewrittenCreateIndex {
-            sql: format!(
-                "{}{index_name} {}",
-                &statement[..concurrently.start],
-                statement[concurrently.end..].trim_start()
-            ),
-            index_name,
-        }));
+    match create.index() {
+        Some(index) => {
+            let name_token = index
+                .syntax()
+                .descendants_with_tokens()
+                .filter_map(|element| element.into_token())
+                .filter(|token| token.kind() == SyntaxKind::IDENT)
+                .last()
+                .ok_or_else(|| {
+                    ShkiError::schema(format!("CREATE INDEX has an unreadable name: {statement}"))
+                })?;
+            Ok(Some(RewrittenCreateIndex {
+                sql: stripped(""),
+                index_name: fold_identifier(name_token.text()),
+            }))
+        }
+        None => {
+            // Unnamed index: inject a Postgres-convention name so the
+            // concurrent intent can be tracked (and the generated migration
+            // is explicit).
+            let index_name = default_index_name(&create).ok_or_else(|| {
+                ShkiError::schema(format!("CREATE INDEX names no table: {statement}"))
+            })?;
+            Ok(Some(RewrittenCreateIndex {
+                sql: stripped(&format!("{index_name} ")),
+                index_name,
+            }))
+        }
     }
-
-    Ok(Some(RewrittenCreateIndex {
-        sql: format!(
-            "{}{}",
-            &statement[..concurrently.start],
-            statement[concurrently.end..].trim_start()
-        ),
-        index_name: fold_identifier(name_token.text),
-    }))
 }
 
 /// Name an unnamed index the way Postgres would: `{table}_{columns}_idx`, with
@@ -314,36 +353,27 @@ pub fn rewrite_create_index_concurrently(statement: &str) -> Result<Option<Rewri
 ///
 /// ponytail: no collision dedup (Postgres would append `1`) — a duplicate name
 /// fails the shadow apply loudly; name the index explicitly to resolve.
-fn default_index_name(statement: &str, on_token: &SqlToken<'_>) -> Result<String> {
-    let open_paren = find_first_code_char(statement, TokenKind::OpenParen, on_token.end)
-        .ok_or_else(|| {
-            ShkiError::schema(format!("CREATE INDEX has no column list: {statement}"))
-        })?;
-    let close_paren = find_matching_paren(statement, open_paren)?.ok_or_else(|| {
-        ShkiError::schema(format!(
-            "CREATE INDEX has an unclosed column list: {statement}"
-        ))
-    })?;
+fn default_index_name(create: &ast::CreateIndex) -> Option<String> {
+    let table = create
+        .table_relation_name()
+        .map(|relation| name_parts(relation.syntax()))?
+        .pop()
+        .map(|name| fold_identifier(&name))?;
 
-    // The relation between ON and the column list, minus any trailing
-    // `USING <method>`; the last name token is the (unqualified) table name.
-    let mut table = None;
-    for token in lex_sql(&statement[on_token.end..open_paren])? {
-        if token.is_keyword("USING") {
-            break;
-        }
-        if is_name_token(&token.kind) {
-            table = Some(fold_identifier(token.text));
-        }
-    }
-    let table = table
-        .ok_or_else(|| ShkiError::schema(format!("CREATE INDEX names no table: {statement}")))?;
-
-    let parts = split_top_level_commas(&statement[open_paren + 1..close_paren])?
-        .iter()
-        .map(|item| index_item_name_part(item))
-        .collect::<Vec<_>>()
-        .join("_");
+    let parts = create
+        .partition_item_list()
+        .map(|list| {
+            list.partition_items()
+                .map(|item| match item.expr() {
+                    Some(ast::Expr::NameRef(name)) => {
+                        fold_identifier(name.syntax().text().to_string().trim())
+                    }
+                    _ => "expr".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("_")
+        })
+        .unwrap_or_default();
 
     let mut name = format!("{table}_{parts}_idx");
     // Postgres truncates identifiers to 63 bytes.
@@ -354,223 +384,7 @@ fn default_index_name(statement: &str, on_token: &SqlToken<'_>) -> Result<String
         }
         name.truncate(end);
     }
-    Ok(name)
-}
-
-/// A plain column item (optionally with ordering/opclass) contributes its
-/// column name; anything expression-shaped contributes `expr`, like Postgres.
-fn index_item_name_part(item: &str) -> String {
-    let Ok(tokens) = lex_sql(item) else {
-        return "expr".to_string();
-    };
-    let Some(first) = tokens.first() else {
-        return "expr".to_string();
-    };
-    if !is_name_token(&first.kind)
-        || tokens
-            .get(1)
-            .is_some_and(|token| matches!(token.kind, TokenKind::OpenParen))
-    {
-        return "expr".to_string();
-    }
-    fold_identifier(first.text)
-}
-
-/// Fold an identifier the way Postgres stores it: quoted kept verbatim,
-/// unquoted lowercased.
-fn fold_identifier(text: &str) -> String {
-    if text.starts_with('"') {
-        unquote_identifier(text)
-    } else {
-        text.to_lowercase()
-    }
-}
-
-pub fn split_sql_statements(sql: &str) -> Result<Vec<String>> {
-    let tokens = lex_sql(sql)?;
-    let mut statements = Vec::new();
-    let mut start = 0;
-    for token in tokens {
-        if matches!(token.kind, squawk_lexer::TokenKind::Semi) {
-            let statement = sql[start..token.start].trim();
-            if !statement.is_empty() {
-                statements.push(statement.to_string());
-            }
-            start = token.end;
-        }
-    }
-
-    let statement = sql[start..].trim();
-    if !statement.is_empty() {
-        statements.push(statement.to_string());
-    }
-
-    Ok(statements)
-}
-
-fn split_top_level_commas(sql: &str) -> Result<Vec<String>> {
-    let tokens = lex_sql(sql)?;
-    let mut items = Vec::new();
-    let mut start = 0;
-    let mut depth = 0_i32;
-
-    for token in tokens {
-        match token.kind {
-            squawk_lexer::TokenKind::OpenParen => depth += 1,
-            squawk_lexer::TokenKind::CloseParen => depth -= 1,
-            squawk_lexer::TokenKind::Comma if depth == 0 => {
-                let item = sql[start..token.start].trim();
-                if !item.is_empty() {
-                    items.push(item.to_string());
-                }
-                start = token.end;
-            }
-            _ => {}
-        }
-    }
-
-    let item = sql[start..].trim();
-    if !item.is_empty() {
-        items.push(item.to_string());
-    }
-
-    Ok(items)
-}
-
-fn create_table_keyword_end(statement: &str) -> Option<usize> {
-    let tokens = lex_sql(statement).ok()?;
-    let mut tokens = SqlTokenIter::new(&tokens);
-    let first = tokens.next()?;
-    if !first.is_keyword("CREATE") {
-        return None;
-    }
-
-    let mut next = tokens.next()?;
-    while matches_any_keyword(&next, &["GLOBAL", "LOCAL", "TEMP", "TEMPORARY", "UNLOGGED"]) {
-        next = tokens.next()?;
-    }
-
-    next.is_keyword("TABLE").then_some(next.end)
-}
-
-fn create_table_name(statement: &str, table_keyword_end: usize, open_paren: usize) -> String {
-    let mut name = statement[table_keyword_end..open_paren].trim();
-    if let Some(rest) = strip_leading_keywords(name, &["IF", "NOT", "EXISTS"]) {
-        name = rest.trim();
-    }
-    name.to_string()
-}
-
-fn create_statement_object_kind(statement: &str) -> Option<String> {
-    let Ok(tokens) = lex_sql(statement) else {
-        return None;
-    };
-    let mut tokens = SqlTokenIter::new(&tokens);
-
-    let first = tokens.next()?;
-    if !first.is_keyword("CREATE") {
-        return None;
-    }
-
-    let mut next = tokens.next()?;
-    while matches_any_keyword(&next, &["OR", "REPLACE", "UNIQUE", "CONCURRENTLY"]) {
-        next = tokens.next()?;
-    }
-
-    if next.is_keyword("MATERIALIZED") {
-        return tokens
-            .next()
-            .filter(|token| token.is_keyword("VIEW"))
-            .map(|_| "MATERIALIZED VIEW".to_string());
-    }
-
-    next.keyword_text().map(str::to_ascii_uppercase)
-}
-
-fn strip_leading_keywords<'a>(value: &'a str, keywords: &[&str]) -> Option<&'a str> {
-    let tokens = lex_sql(value).ok()?;
-    let mut tokens = SqlTokenIter::new(&tokens);
-    let mut offset = 0;
-    for expected in keywords {
-        let token = tokens.next()?;
-        if !token.is_keyword(expected) {
-            return None;
-        }
-        offset = token.end;
-    }
-    Some(&value[offset..])
-}
-
-fn is_table_level_foreign_key(item: &str) -> bool {
-    let Ok(tokens) = lex_sql(item) else {
-        return false;
-    };
-    let mut tokens = SqlTokenIter::new(&tokens);
-    let Some(first) = tokens.next() else {
-        return false;
-    };
-
-    if first.is_keyword("FOREIGN") {
-        return tokens.next().is_some_and(|token| token.is_keyword("KEY"));
-    }
-
-    if !first.is_keyword("CONSTRAINT") {
-        return false;
-    }
-
-    tokens.next();
-    tokens
-        .next()
-        .is_some_and(|token| token.is_keyword("FOREIGN"))
-        && tokens.next().is_some_and(|token| token.is_keyword("KEY"))
-}
-
-pub fn is_alter_table_add_foreign_key(statement: &str) -> bool {
-    let Ok(tokens) = lex_sql(statement) else {
-        return false;
-    };
-    let tokens = SqlTokenIter::new(&tokens)
-        .filter_map(|token| token.keyword_text().map(str::to_ascii_uppercase))
-        .collect::<Vec<_>>();
-
-    tokens.first().is_some_and(|token| token == "ALTER")
-        && tokens.get(1).is_some_and(|token| token == "TABLE")
-        && tokens.iter().any(|token| token == "ADD")
-        && tokens.windows(2).any(|tokens| tokens == ["FOREIGN", "KEY"])
-}
-
-fn find_first_code_char(sql: &str, needle: TokenKind, start: usize) -> Option<usize> {
-    // let kind = match needle {
-    //     '(' => squawk_lexer::TokenKind::OpenParen,
-    //     ')' => squawk_lexer::TokenKind::CloseParen,
-    //     ',' => squawk_lexer::TokenKind::Comma,
-    //     ';' => squawk_lexer::TokenKind::Semi,
-    //     _ => return None,
-    // };
-    lex_sql(sql)
-        .ok()?
-        .into_iter()
-        .find(|token| token.start >= start && token.kind == needle)
-        .map(|token| token.start)
-}
-
-fn find_matching_paren(sql: &str, open_paren: usize) -> Result<Option<usize>> {
-    let tokens = lex_sql(sql)?;
-    let mut depth = 0_i32;
-    for token in tokens.into_iter().filter(|token| token.start >= open_paren) {
-        match token.kind {
-            squawk_lexer::TokenKind::OpenParen => depth += 1,
-            squawk_lexer::TokenKind::CloseParen => {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(Some(token.start));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(None)
+    Some(name)
 }
 
 pub fn join_sql_statements(statements: &[SqlStmt]) -> String {
@@ -579,121 +393,6 @@ pub fn join_sql_statements(statements: &[SqlStmt]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n")
-}
-#[derive(Debug, Clone)]
-struct SqlToken<'a> {
-    kind: squawk_lexer::TokenKind,
-    text: &'a str,
-    start: usize,
-    end: usize,
-}
-
-impl SqlToken<'_> {
-    fn is_keyword(&self, keyword: &str) -> bool {
-        matches!(self.kind, squawk_lexer::TokenKind::Ident)
-            && self.text.eq_ignore_ascii_case(keyword)
-    }
-
-    fn keyword_text(&self) -> Option<&str> {
-        matches!(self.kind, squawk_lexer::TokenKind::Ident).then_some(self.text)
-    }
-}
-
-struct SqlTokenIter<'a> {
-    tokens: &'a [SqlToken<'a>],
-    offset: usize,
-}
-
-impl<'a> SqlTokenIter<'a> {
-    fn new(tokens: &'a [SqlToken<'a>]) -> Self {
-        Self { tokens, offset: 0 }
-    }
-}
-
-impl<'a> Iterator for SqlTokenIter<'a> {
-    type Item = SqlToken<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.offset < self.tokens.len() {
-            let token = self.tokens[self.offset].clone();
-            self.offset += 1;
-            if is_name_token(&token.kind) {
-                return Some(token);
-            }
-        }
-        None
-    }
-}
-
-fn lex_sql(sql: &str) -> Result<Vec<SqlToken<'_>>> {
-    let mut tokens = Vec::new();
-    let mut offset = 0;
-    for token in squawk_lexer::tokenize(sql) {
-        let len = token.len as usize;
-        let end = offset + len;
-        let text = &sql[offset..end];
-        validate_sql_token(&token.kind)?;
-        if !is_trivia_token(&token.kind) && !matches!(token.kind, squawk_lexer::TokenKind::Eof) {
-            tokens.push(SqlToken {
-                kind: token.kind,
-                text,
-                start: offset,
-                end,
-            });
-        }
-        offset = end;
-    }
-    Ok(tokens)
-}
-
-fn validate_sql_token(kind: &squawk_lexer::TokenKind) -> Result<()> {
-    match kind {
-        squawk_lexer::TokenKind::BlockComment { terminated: false } => Err(ShkiError::schema(
-            "Unterminated block comment in Declarative Schema",
-        )),
-        squawk_lexer::TokenKind::QuotedIdent {
-            terminated: false,
-            uescape: _,
-        } => Err(ShkiError::schema(
-            "Unterminated quoted identifier in Declarative Schema",
-        )),
-        squawk_lexer::TokenKind::Literal { kind, .. } if literal_is_unterminated(kind) => Err(
-            ShkiError::schema("Unterminated string literal in Declarative Schema"),
-        ),
-        _ => Ok(()),
-    }
-}
-
-fn literal_is_unterminated(kind: &squawk_lexer::LiteralKind) -> bool {
-    match kind {
-        squawk_lexer::LiteralKind::Str { terminated }
-        | squawk_lexer::LiteralKind::ByteStr { terminated }
-        | squawk_lexer::LiteralKind::BitStr { terminated }
-        | squawk_lexer::LiteralKind::DollarQuotedString { terminated }
-        | squawk_lexer::LiteralKind::UnicodeEscStr { terminated }
-        | squawk_lexer::LiteralKind::EscStr { terminated } => !terminated,
-        _ => false,
-    }
-}
-
-fn is_trivia_token(kind: &squawk_lexer::TokenKind) -> bool {
-    matches!(
-        kind,
-        squawk_lexer::TokenKind::Whitespace
-            | squawk_lexer::TokenKind::LineComment
-            | squawk_lexer::TokenKind::BlockComment { .. }
-    )
-}
-
-fn is_name_token(kind: &squawk_lexer::TokenKind) -> bool {
-    matches!(
-        kind,
-        squawk_lexer::TokenKind::Ident | squawk_lexer::TokenKind::QuotedIdent { .. }
-    )
-}
-
-fn matches_any_keyword(token: &SqlToken<'_>, keywords: &[&str]) -> bool {
-    keywords.iter().any(|keyword| token.is_keyword(keyword))
 }
 
 #[cfg(test)]
@@ -765,5 +464,29 @@ mod tests {
             assert_eq!(rewritten.sql, sql);
             assert_eq!(rewritten.index_name, name);
         }
+    }
+
+    #[test]
+    fn splits_statements_respecting_literals_and_dollar_quotes() {
+        let statements = split_sql_statements(
+            "CREATE TABLE t (name text DEFAULT 'a;b');\n\
+             CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1; $$;\n\
+             SELECT 2",
+        )
+        .expect("should split");
+
+        assert_eq!(statements.len(), 3);
+        assert!(statements[0].contains("'a;b'"));
+        assert!(statements[1].contains("SELECT 1;"));
+        assert_eq!(statements[2], "SELECT 2");
+    }
+
+    #[test]
+    fn unparseable_statements_pass_through_verbatim() {
+        let statements = split_sql_statements("CREATE FLURB wibble (1);\nCREATE TABLE t (id int);")
+            .expect("should split");
+
+        assert!(statements.iter().any(|s| s.contains("FLURB")));
+        assert!(statements.iter().any(|s| s.contains("CREATE TABLE t")));
     }
 }
