@@ -78,19 +78,10 @@ Cardinality controls the return shape:
   per-query row struct named from the query (`active_users` → `ActiveUsersRow`).
   The generated module imports these types with a `use` path derived from your
   output layout (override with `models`).
-- **Schema-driven nullability.** `RowDescription` does not report nullability, so
-  it is inferred from the Declarative Schema: a column traced to a base-table
-  column honors its `NOT NULL` constraint (`T` vs `Option<T>`); anything the
-  schema cannot prove (expressions, function results, outer-join columns)
-  defaults to `Option<T>`. Where inference cannot reach — e.g. `UNION` output
-  columns, which lose their table origin — force it with an sqlx-style alias
-  marker: `AS "id!"` forces `T`, `AS "note?"` forces `Option<T>`; the marker is
-  stripped from the field name.
-
-  ```sql
-  -- name: all_account_ids :many
-  SELECT id AS "id!" FROM users UNION ALL SELECT id FROM service_accounts;
-  ```
+- **Schema-driven nullability.** Result columns and parameters get `T` vs
+  `Option<T>` from the Declarative Schema's `NOT NULL` constraints, with
+  explicit markers where inference cannot reach — see
+  [Nullability](#nullability).
 - **Named arguments.** A query may bind parameters as `$name` (e.g. `$email`)
   instead of positional `$1`, producing a self-documenting signature
   (`user_by_email(executor, email: String)`) rather than positional `arg1`. shki
@@ -131,44 +122,6 @@ Cardinality controls the return shape:
   string literal, comment, or dollar-quoted body is left alone — only real
   placeholders are rewritten.
 
-- **Nullable arguments.** A parameter written whole into a nullable column —
-  `INSERT INTO t (a) VALUES ($a)` or `UPDATE t SET a = $a`, including
-  `ON CONFLICT ... DO UPDATE SET` — is inferred nullable from the Declarative
-  Schema automatically: the generated argument is `Option<T>`, binding SQL
-  `NULL` when `None`.
-
-  ```sql
-  -- annotation is a nullable column, so this generates
-  -- upsert_annotation(executor, id: i64, name: String, annotation: Option<String>)
-  -- name: upsert_annotation :exec
-  INSERT INTO attributes (id, name, annotation)
-  VALUES ($id, $name, $annotation)
-  ON CONFLICT (id) DO UPDATE SET annotation = EXCLUDED.annotation;
-  ```
-
-  Inference only reaches parameters that are the entire value for a column;
-  everywhere else (comparisons, expressions, casts), writing a named parameter
-  with a `?` prefix (`?name` instead of `$name`) marks it nullable explicitly:
-  the generated argument becomes `Option<T>` and binds SQL `NULL` when `None`. Marking any occurrence
-  marks the parameter — `$status` and `?status` in one query are the same
-  (nullable) parameter. Write the SQL so `NULL` means what you want (e.g. an
-  optional filter):
-
-  ```sql
-  -- name: users_by_optional_status :many
-  SELECT * FROM users
-  WHERE status = ?status OR $status::user_status IS NULL;
-  ```
-
-  ```rust
-  users_by_optional_status(executor, status: Option<UserStatus>) -> Result<Vec<User>>
-  ```
-
-  Only plain arguments can be nullable — `?limit`/`?offset` and keyset cursor
-  parameters are rejected. Positional (`$1`) queries have no nullable form; use
-  named parameters. A `?` not directly followed by an identifier (like the
-  JSONB `data ? 'key'` operator) is left alone — but keep a space after
-  operator uses of `?` so they aren't read as a parameter.
 - **Transactions.** Add `:tx` to require a
   `&mut sqlx::Transaction<'_, sqlx::Postgres>` instead of a generic executor,
   e.g. `-- name: deactivate_user :exec :tx`. The generated wrapper executes only
@@ -184,6 +137,82 @@ Cardinality controls the return shape:
     takes a `cursor: &CursorPagination<K>` (where `K` is the keyset type, a tuple
     for multiple keys) and returns `KeysetPage<Row, K>` with the next cursor
     derived from the final row.
+
+## Nullability
+
+Postgres' describe output does not report nullability, so shki infers it from
+the Declarative Schema — its source of truth — falling back to sqlx's
+describe-time analysis, and gives you explicit markers for the cases neither
+can prove.
+
+| Where                                                | Rust type                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------- |
+| Result column traced to a schema column              | Schema `NOT NULL` → `T`; nullable (or outer join) → `Option<T>` |
+| Result column with no table origin (expression, `UNION`) | `Option<T>` unless proven; force with `AS "name!"` / `AS "name?"` |
+| Parameter written whole into a column (`VALUES` / `SET`) | Inferred from that column: nullable → `Option<T>`               |
+| Any other parameter                                  | `T`; mark `?name` for `Option<T>`                              |
+
+### Result columns
+
+A column traced to a base-table column honors the schema's `NOT NULL`
+constraint (`T` vs `Option<T>`); the schema is authoritative unless the query
+itself makes the column nullable (e.g. the outer side of a join). Anything the
+schema cannot speak to — expressions, function results — defaults to
+`Option<T>` unless sqlx proves otherwise.
+
+Where inference cannot reach — e.g. `UNION` output columns, which lose their
+table origin — force it with an sqlx-style alias marker: `AS "id!"` forces
+`T`, `AS "note?"` forces `Option<T>`. The marker is stripped from the field
+name.
+
+```sql
+-- name: all_account_ids :many
+SELECT id AS "id!" FROM users UNION ALL SELECT id FROM service_accounts;
+```
+
+### Parameters
+
+A parameter written whole into a nullable column — `INSERT INTO t (a) VALUES
+($a)` or `UPDATE t SET a = $a`, including `ON CONFLICT ... DO UPDATE SET` — is
+inferred nullable automatically: the generated argument is `Option<T>`,
+binding SQL `NULL` when `None`.
+
+```sql
+-- annotation is a nullable column, so this generates
+-- upsert_annotation(executor, id: i64, name: String, annotation: Option<String>)
+-- name: upsert_annotation :exec
+INSERT INTO attributes (id, name, annotation)
+VALUES ($id, $name, $annotation)
+ON CONFLICT (id) DO UPDATE SET annotation = EXCLUDED.annotation;
+```
+
+Inference only reaches parameters that are the entire value for a column.
+Everywhere else — comparisons, expressions, casts — a `?` prefix on a named
+parameter (`?name` instead of `$name`) marks it nullable explicitly. Marking
+any occurrence marks the parameter: `$status` and `?status` in one query are
+the same (nullable) argument. Write the SQL so `NULL` means what you want
+(e.g. an optional filter):
+
+```sql
+-- name: users_by_optional_status :many
+SELECT * FROM users
+WHERE status = ?status OR $status::user_status IS NULL;
+```
+
+```rust
+users_by_optional_status(executor, status: Option<UserStatus>) -> Result<Vec<User>>
+```
+
+Notes:
+
+- Only plain arguments can be nullable — `?limit`/`?offset` and keyset cursor
+  parameters are rejected.
+- Positional (`$1`) queries have no nullable form; use named parameters.
+- A `?` not directly followed by an identifier (like the JSONB `data ? 'key'`
+  operator) is left alone — keep a space after operator uses of `?` so they
+  aren't read as a parameter.
+- `INSERT` without an explicit column list is not inferred; add the column
+  list or use `?name`.
 
 ## Limitations
 

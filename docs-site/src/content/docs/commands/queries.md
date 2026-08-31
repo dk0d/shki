@@ -57,7 +57,12 @@ shki queries --sources db/queries --preview
 | `:keyset` | Modifier on `:batch`: cursor/keyset pagination   |
 
 Parameters can be positional (`$1`) or named (`$email`), but not both in one
-query.
+query. A `?` prefix (`?email`) makes a named parameter `Option<T>`; a parameter
+written whole into a nullable column (`INSERT ... VALUES` / `UPDATE ... SET`)
+becomes `Option<T>` automatically. Result nullability comes from the schema's
+`NOT NULL` constraints, with sqlx-style alias overrides (`AS "id!"` /
+`AS "note?"`) where inference cannot reach — see the
+[nullability section of the guide](/shki/guides/queries/#nullability).
 
 ## Notes
 

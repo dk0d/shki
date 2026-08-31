@@ -103,13 +103,24 @@ squirrel.
 - Column traces to a base table column (table OID + attnum) → look up the column
   in the `Snapshot` and honor its `NOT NULL` constraint → `T` vs `Option<T>`.
   The describe result OID and the schema agree on the base type; the schema
-  decides nullability.
+  decides nullability. The schema's `NOT NULL` is authoritative unless sqlx's
+  describe-time inference affirmatively proves the column nullable in this query
+  (e.g. the outer side of a join); "unknown" does not override the schema.
 - Where the schema cannot speak to a column — an expression, function result, or
-  a column made nullable by an outer join even though its base column is
-  `NOT NULL` — shki defaults to `Option<T>` rather than guessing non-null.
-- Per-column override annotations provide the escape hatch for the cases the
-  schema cannot prove (e.g. forcing non-null on an expression the author knows is
-  total).
+  a `UNION` output column (set operations lose the table origin) — shki defaults
+  to `Option<T>` rather than guessing non-null, unless sqlx proves it non-null.
+- Per-column alias markers are the escape hatch for what neither side can prove,
+  matching sqlx's macro convention: `AS "name!"` forces `T`, `AS "name?"` forces
+  `Option<T>`; the marker is stripped from the generated field name.
+
+**Parameter nullability** is inferred from the column a parameter feeds: when a
+parameter is the entire value written to a column — `INSERT ... (a) VALUES ($a)`
+or `UPDATE ... SET a = $a`, including `ON CONFLICT ... DO UPDATE SET` — and the
+`Snapshot` says that column is nullable, the generated argument is `Option<T>`
+(a token-level scan in `infer.rs`, not a SQL parser). Everywhere else a `?`
+prefix on a named parameter (`?name` instead of `$name`) marks it nullable
+explicitly; comparisons deliberately infer nothing, since `col = NULL` never
+matches. Pagination and keyset cursor parameters may not be nullable.
 
 ### 4. Query file convention and cardinality: sqlc-style annotations
 
@@ -281,8 +292,10 @@ Negative / risks:
 ## Current Limits
 
 - PostgreSQL and Rust/sqlx are the only supported query generation target.
-- Per-column nullability/type override annotations and named positional
-  placeholders are not implemented; use named `$name` placeholders when a
-  meaningful parameter name is required.
+- Parameter nullability inference only reaches parameters that are the entire
+  value for a column in `INSERT ... VALUES` / `UPDATE ... SET`; expressions,
+  casts, and `INSERT` without a column list fall back to the explicit `?name`
+  marker. Per-column type (as opposed to nullability) overrides are not
+  implemented.
 - Projections and joins always synthesize a row type unless the result covers a
   known table's full column set.
