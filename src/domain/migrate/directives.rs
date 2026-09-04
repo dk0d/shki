@@ -16,6 +16,11 @@ use crate::{Result, ShkiError};
 /// Marker that distinguishes a shki directive from an ordinary SQL comment.
 pub const DIRECTIVE_PREFIX: &str = "shki:";
 
+/// The directive line generators write to opt a migration out of the wrapping
+/// transaction. Kept next to [`Directives::parse`] so writer and reader can't
+/// drift; the round-trip is asserted in this module's tests.
+pub const NO_TRANSACTION_DIRECTIVE: &str = "-- shki:no-transaction";
+
 /// Execution options parsed from a migration file's comments.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Directives {
@@ -76,6 +81,12 @@ mod tests {
         let directives = Directives::parse("CREATE TABLE t (id INT);").expect("should parse");
         assert_eq!(directives, Directives::default());
         assert!(!directives.no_transaction);
+    }
+
+    #[test]
+    fn no_transaction_constant_round_trips_through_parse() {
+        let sql = format!("{NO_TRANSACTION_DIRECTIVE}\nCREATE INDEX CONCURRENTLY i ON t (c);");
+        assert!(Directives::parse(&sql).expect("should parse").no_transaction);
     }
 
     #[test]

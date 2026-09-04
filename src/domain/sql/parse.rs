@@ -80,15 +80,54 @@ fn unsupported_backslash_command(command: &str) -> ShkiError {
 /// blocks don't split; unparseable stretches survive as their raw text.
 pub fn split_sql_statements(sql: &str) -> Result<Vec<String>> {
     let parse = SourceFile::parse(sql);
-    Ok(parse
-        .syntax_node()
+    let root = parse.syntax_node();
+
+    // An unterminated block comment lexes the rest of the file as trivia, so
+    // it would never reach the Shadow Database — the statements it swallows
+    // silently vanish and a later `generate` would plan DROPs for them. This
+    // is the one lexical error the shadow can't catch, so it errors here.
+    for token in root
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+    {
+        if token.kind() == SyntaxKind::COMMENT {
+            let text = token.text();
+            if text.starts_with("/*") && text.matches("/*").count() > text.matches("*/").count() {
+                return Err(ShkiError::schema(
+                    "Unterminated block comment in Declarative Schema",
+                ));
+            }
+        }
+    }
+
+    Ok(root
         .children()
         .filter_map(|node| {
             let text = node.text().to_string();
             let text = text.trim().trim_end_matches(';').trim_end();
-            (!text.is_empty()).then(|| text.to_string())
+            if text.is_empty() {
+                return None;
+            }
+            let mut text = text.to_string();
+            // A statement ending in a line comment would swallow the `;`
+            // re-appended when statements are rendered back to SQL
+            // (`SqlStmt`'s Display); keep the terminator on its own line.
+            if ends_with_line_comment(&node) {
+                text.push('\n');
+            }
+            Some(text)
         })
         .collect())
+}
+
+/// Whether the statement's last code-or-comment token is a line comment (the
+/// trailing semicolon and whitespace don't count).
+fn ends_with_line_comment(node: &SyntaxNode) -> bool {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !matches!(token.kind(), SyntaxKind::WHITESPACE | SyntaxKind::SEMICOLON))
+        .last()
+        .is_some_and(|token| token.kind() == SyntaxKind::COMMENT && token.text().starts_with("--"))
 }
 
 /// The first statement of `statement`, if the grammar recognizes it.
@@ -98,14 +137,14 @@ fn first_stmt(statement: &str) -> Option<ast::Stmt> {
 
 /// The first statement of `statement` as a specific node type.
 fn typed_stmt<N: AstNode>(statement: &str) -> Option<N> {
-    SourceFile::parse(statement)
-        .syntax_node()
-        .children()
-        .find_map(N::cast)
+    first_stmt(statement).and_then(|stmt| N::cast(stmt.syntax().clone()))
 }
 
-pub fn create_statement_object_type(statement: &str) -> SqlObjectType {
-    match first_stmt(statement) {
+/// Classify a statement for planner ordering in one parse: what kind of object
+/// it creates, and whether it is a `CREATE` at all.
+pub fn classify_create_statement(statement: &str) -> (SqlObjectType, SqlOperation) {
+    let stmt = first_stmt(statement);
+    let object_type = match &stmt {
         Some(ast::Stmt::CreateSchema(_)) => SqlObjectType::Schema,
         Some(ast::Stmt::CreateExtension(_)) => SqlObjectType::Extension,
         Some(ast::Stmt::CreateType(_) | ast::Stmt::CreateDomain(_)) => SqlObjectType::Type,
@@ -119,18 +158,16 @@ pub fn create_statement_object_type(statement: &str) -> SqlObjectType {
         Some(ast::Stmt::CreateTrigger(_)) => SqlObjectType::Trigger,
         Some(ast::Stmt::CreatePolicy(_)) => SqlObjectType::Policy,
         _ => SqlObjectType::Other,
-    }
-}
-
-pub fn create_statement_operation(statement: &str) -> SqlOperation {
-    let is_create = first_stmt(statement).is_some_and(|stmt| {
+    };
+    let is_create = stmt.is_some_and(|stmt| {
         first_code_token(stmt.syntax()).is_some_and(|token| token.kind() == SyntaxKind::CREATE_KW)
     });
-    if is_create {
+    let operation = if is_create {
         SqlOperation::Create
     } else {
         SqlOperation::Raw
-    }
+    };
+    (object_type, operation)
 }
 
 fn first_code_token(node: &SyntaxNode) -> Option<SyntaxToken> {
@@ -139,12 +176,21 @@ fn first_code_token(node: &SyntaxNode) -> Option<SyntaxToken> {
         .find(|token| !token.kind().is_trivia())
 }
 
-/// Identifier tokens under `node`, unquoted, in source order.
+/// Whether a token can be an identifier in a name position. squawk lexes every
+/// Postgres keyword — including unreserved ones usable as names (`data`,
+/// `version`, `key`, ...) — to its own `*_KW` kind, never `IDENT`, so an
+/// IDENT-only filter silently loses keyword-named objects.
+fn is_identifier_like(kind: SyntaxKind) -> bool {
+    kind == SyntaxKind::IDENT || format!("{kind:?}").ends_with("_KW")
+}
+
+/// Identifier tokens under `node`, folded the way Postgres stores them, in
+/// source order.
 fn name_parts(node: &SyntaxNode) -> Vec<String> {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
-        .filter(|token| token.kind() == SyntaxKind::IDENT)
-        .map(|token| unquote_identifier(token.text()))
+        .filter(|token| is_identifier_like(token.kind()))
+        .map(|token| fold_identifier(token.text()))
         .collect()
 }
 
@@ -202,13 +248,21 @@ fn unquote_identifier(value: &str) -> String {
 }
 
 /// Fold an identifier the way Postgres stores it: quoted kept verbatim,
-/// unquoted lowercased.
+/// unquoted lowercased — ASCII letters only, matching Postgres's
+/// `downcase_identifier` in a UTF-8 database (a full-Unicode lowercase would
+/// fold `Übung` to `übung` while Postgres keeps the `Ü`).
 fn fold_identifier(text: &str) -> String {
     if text.starts_with('"') {
         unquote_identifier(text)
     } else {
-        text.to_lowercase()
+        text.to_ascii_lowercase()
     }
+}
+
+/// Quote an identifier for splicing into SQL, so Postgres stores it exactly as
+/// written instead of case-folding it.
+fn quote_identifier_sql(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,12 +284,26 @@ pub fn rewrite_create_table_foreign_keys(statement: &str) -> Result<Option<Rewri
         return Ok(None);
     };
 
+    // squawk error-recovers invalid bodies (e.g. a missing comma between two
+    // column definitions) into extra args; rebuilding the body would invent
+    // separators and silently "repair" SQL the Shadow Database — the authority
+    // on validity — should reject. Pass such statements through verbatim.
+    let args: Vec<ast::TableArg> = arg_list.args().collect();
+    let comma_count = arg_list
+        .syntax()
+        .children_with_tokens()
+        .filter(|element| element.kind() == SyntaxKind::COMMA)
+        .count();
+    if args.is_empty() || comma_count + 1 != args.len() {
+        return Ok(None);
+    }
+
     let table_name = table_name.syntax().text().to_string();
     let mut inline_items = Vec::new();
     let mut deferred_foreign_keys = Vec::new();
 
-    for arg in arg_list.args() {
-        match &arg {
+    for arg in &args {
+        match arg {
             ast::TableArg::TableConstraint(ast::TableConstraint::ForeignKeyConstraint(fk)) => {
                 deferred_foreign_keys.push(format!(
                     "ALTER TABLE {table_name} ADD {}",
@@ -285,6 +353,10 @@ pub struct RewrittenCreateIndex {
     /// The declared index name, folded the way Postgres stores it (unquoted
     /// identifiers lowercased) so it matches introspected names.
     pub index_name: String,
+    /// The table the index is declared on (folded), when the statement names
+    /// one. Index names are only unique per schema, so the compiler needs this
+    /// to re-mark the right index and not a same-named one elsewhere.
+    pub table: Option<Iden>,
 }
 
 /// Detect `CREATE [UNIQUE] INDEX CONCURRENTLY [IF NOT EXISTS] [<name>] ...`.
@@ -317,32 +389,34 @@ pub fn rewrite_create_index_concurrently(statement: &str) -> Result<Option<Rewri
         )
     };
 
+    let table = create
+        .table_relation_name()
+        .and_then(|relation| relation.table_name_ref())
+        .and_then(|name| node_iden(name.syntax()));
+
     match create.index() {
         Some(index) => {
-            let name_token = index
-                .syntax()
-                .descendants_with_tokens()
-                .filter_map(|element| element.into_token())
-                .filter(|token| token.kind() == SyntaxKind::IDENT)
-                .last()
-                .ok_or_else(|| {
-                    ShkiError::schema(format!("CREATE INDEX has an unreadable name: {statement}"))
-                })?;
+            let index_name = name_parts(index.syntax()).pop().ok_or_else(|| {
+                ShkiError::schema(format!("CREATE INDEX has an unreadable name: {statement}"))
+            })?;
             Ok(Some(RewrittenCreateIndex {
                 sql: stripped(""),
-                index_name: fold_identifier(name_token.text()),
+                index_name,
+                table,
             }))
         }
         None => {
             // Unnamed index: inject a Postgres-convention name so the
             // concurrent intent can be tracked (and the generated migration
-            // is explicit).
+            // is explicit). Injected quoted, so Postgres stores it exactly as
+            // recorded here even when a quoted column contributed case.
             let index_name = default_index_name(&create).ok_or_else(|| {
                 ShkiError::schema(format!("CREATE INDEX names no table: {statement}"))
             })?;
             Ok(Some(RewrittenCreateIndex {
-                sql: stripped(&format!("{index_name} ")),
+                sql: stripped(&format!("{} ", quote_identifier_sql(&index_name))),
                 index_name,
+                table,
             }))
         }
     }
@@ -356,9 +430,9 @@ pub fn rewrite_create_index_concurrently(statement: &str) -> Result<Option<Rewri
 fn default_index_name(create: &ast::CreateIndex) -> Option<String> {
     let table = create
         .table_relation_name()
-        .map(|relation| name_parts(relation.syntax()))?
-        .pop()
-        .map(|name| fold_identifier(&name))?;
+        .and_then(|relation| relation.table_name_ref())
+        .map(|name| name_parts(name.syntax()))?
+        .pop()?;
 
     let parts = create
         .partition_item_list()
@@ -445,16 +519,24 @@ mod tests {
 
     #[test]
     fn unnamed_concurrent_index_gets_a_postgres_convention_name() {
+        // The injected name is quoted so Postgres stores it byte-for-byte as
+        // recorded (a quoted column can contribute case the unquoted form
+        // would lose to folding).
         let cases = [
             (
                 "CREATE INDEX CONCURRENTLY ON hello (id)",
-                "CREATE INDEX hello_id_idx ON hello (id)",
+                "CREATE INDEX \"hello_id_idx\" ON hello (id)",
                 "hello_id_idx",
             ),
             (
                 "CREATE UNIQUE INDEX CONCURRENTLY ON app.users USING gin (email DESC, lower(name))",
-                "CREATE UNIQUE INDEX users_email_expr_idx ON app.users USING gin (email DESC, lower(name))",
+                "CREATE UNIQUE INDEX \"users_email_expr_idx\" ON app.users USING gin (email DESC, lower(name))",
                 "users_email_expr_idx",
+            ),
+            (
+                "CREATE INDEX CONCURRENTLY ON users (\"Email\")",
+                "CREATE INDEX \"users_Email_idx\" ON users (\"Email\")",
+                "users_Email_idx",
             ),
         ];
         for (input, sql, name) in cases {
@@ -464,6 +546,84 @@ mod tests {
             assert_eq!(rewritten.sql, sql);
             assert_eq!(rewritten.index_name, name);
         }
+    }
+
+    #[test]
+    fn keyword_named_objects_survive_the_pre_pass() {
+        // Unreserved Postgres keywords are valid identifiers; squawk lexes
+        // them as *_KW tokens, never IDENT, so the extraction must not filter
+        // on IDENT alone.
+        let rewritten = rewrite_create_index_concurrently(
+            "CREATE INDEX CONCURRENTLY version ON t (c)",
+        )
+        .expect("should parse")
+        .expect("should detect CONCURRENTLY");
+        assert_eq!(rewritten.index_name, "version");
+        assert_eq!(rewritten.sql, "CREATE INDEX version ON t (c)");
+
+        let rewritten =
+            rewrite_create_index_concurrently("CREATE INDEX CONCURRENTLY ON version (id)")
+                .expect("should parse")
+                .expect("should detect CONCURRENTLY");
+        assert_eq!(rewritten.index_name, "version_id_idx");
+        assert_eq!(rewritten.table, Some(Iden::new("version", None)));
+
+        let table = create_table_info("CREATE TABLE version (id int PRIMARY KEY)")
+            .expect("should parse")
+            .expect("should be a CREATE TABLE");
+        assert_eq!(table.name, "version");
+    }
+
+    #[test]
+    fn concurrent_index_rewrite_records_the_declared_table() {
+        let rewritten = rewrite_create_index_concurrently(
+            "CREATE INDEX CONCURRENTLY email_idx ON app.users (email)",
+        )
+        .expect("should parse")
+        .expect("should detect CONCURRENTLY");
+        assert_eq!(
+            rewritten.table,
+            Some(Iden::new("users", Some("app".to_string())))
+        );
+    }
+
+    #[test]
+    fn unterminated_block_comment_errors_instead_of_truncating() {
+        // The comment swallows every later statement as trivia, so it would
+        // never reach the Shadow Database — passing it through would make
+        // generate plan DROPs for the swallowed tables.
+        let error = split_sql_statements(
+            "CREATE TABLE a (id int);\n/* oops\nCREATE TABLE b (id int);",
+        )
+        .expect_err("should error");
+        assert!(error.to_string().contains("Unterminated block comment"));
+    }
+
+    #[test]
+    fn trailing_line_comment_does_not_swallow_the_reappended_semicolon() {
+        let statements = split_sql_statements(
+            "CREATE TABLE t (id int) -- note\n;\nCREATE TABLE u (id int);",
+        )
+        .expect("should split");
+
+        assert_eq!(statements.len(), 2);
+        // Rendering re-appends `;`; a statement ending in a line comment must
+        // keep it on its own line or the two statements merge.
+        assert!(statements[0].ends_with('\n'), "{:?}", statements[0]);
+        let rendered = join_sql_statements(&[SqlStmt::from(statements[0].clone())]);
+        assert!(rendered.contains("-- note\n;"), "{rendered:?}");
+    }
+
+    #[test]
+    fn invalid_table_body_is_not_repaired_by_the_fk_rewrite() {
+        // Missing comma between two column defs: squawk error-recovers into
+        // two args; rebuilding would invent the comma and "repair" SQL the
+        // Shadow Database should reject.
+        let rewritten = rewrite_create_table_foreign_keys(
+            "CREATE TABLE t (a int b text, CONSTRAINT fk FOREIGN KEY (a) REFERENCES p(id))",
+        )
+        .expect("should parse");
+        assert!(rewritten.is_none());
     }
 
     #[test]

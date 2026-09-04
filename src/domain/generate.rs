@@ -13,6 +13,7 @@ use crate::diff::{
     DiffStatement, SchemaDiff, apply_rename_decisions, detect_nested_renames, diff_preview,
     diff_snapshots,
 };
+use crate::migrate::directives::NO_TRANSACTION_DIRECTIVE;
 use crate::migrate::journal::MigrationKind;
 use crate::migrate::manager::MigrationManager;
 use crate::migrate::utils::sanitize_migration_name;
@@ -61,7 +62,8 @@ pub async fn cmd_generate(
     }
 
     let (main_diff, concurrent_diff) = split_concurrent_index_diff(&diff);
-    if !concurrent_diff.statements.is_empty() {
+    let has_concurrent = !concurrent_diff.statements.is_empty();
+    if has_concurrent {
         confirm_concurrent_index_split(concurrent_diff.statements.len()).await?;
     }
 
@@ -71,35 +73,38 @@ pub async fn cmd_generate(
     // Validate both migrations in one shadow pass. CONCURRENTLY is stripped
     // here because validation runs inside one implicit transaction; the
     // resulting schema shape is identical.
-    let validation_sql = if concurrent_diff.statements.is_empty() {
-        main_sql.clone()
-    } else {
-        let stripped: Vec<DiffStatement> = concurrent_diff
-            .statements
-            .iter()
-            .cloned()
-            .map(strip_concurrently)
-            .collect();
+    let validation_sql = if has_concurrent {
+        let mut stripped = concurrent_diff.statements.clone();
+        for stmt in &mut stripped {
+            if let DiffStatement::CreateIndex { index, .. } = stmt {
+                index.concurrently = false;
+            }
+        }
         let mut sql = main_sql.clone();
         if !sql.is_empty() && !sql.ends_with('\n') {
             sql.push('\n');
         }
         sql.push_str(&generator.generate_string(&stripped)?);
-        sql
+        Some(sql)
+    } else {
+        None
     };
     compiler
-        .validate_generated_diff_sql(config, &baseline, &validation_sql)
+        .validate_generated_diff_sql(
+            config,
+            &baseline,
+            validation_sql.as_deref().unwrap_or(&main_sql),
+        )
         .await?;
 
     let with_down = with_down || config.migrations.generate_down();
     let suffix = sanitize_migration_name(name);
-    let split = !main_diff.statements.is_empty() && !concurrent_diff.statements.is_empty();
     let mut desired = desired;
     let mut planned = Vec::new();
     if !main_diff.statements.is_empty() {
         // On a split, the main migration's Snapshot is the intermediate state:
         // desired minus the indexes the second migration hasn't built yet.
-        let snapshot = if split {
+        let snapshot = if has_concurrent {
             let intermediate =
                 snapshot_before_concurrent_indexes(&desired, &concurrent_diff.statements);
             desired.prev_id = Some(intermediate.id.clone());
@@ -116,7 +121,7 @@ pub async fn cmd_generate(
             snapshot,
         });
     }
-    if !concurrent_diff.statements.is_empty() {
+    if has_concurrent {
         // Concurrent index builds go into their own no-transaction migration:
         // CREATE INDEX CONCURRENTLY refuses to run inside a transaction block.
         let index_suffix = if planned.is_empty() {
@@ -220,36 +225,19 @@ fn split_concurrent_index_diff(diff: &SchemaDiff) -> (SchemaDiff, SchemaDiff) {
     )
 }
 
-fn strip_concurrently(stmt: DiffStatement) -> DiffStatement {
-    match stmt {
-        DiffStatement::CreateIndex {
-            table,
-            schema,
-            mut index,
-        } => {
-            index.concurrently = false;
-            DiffStatement::CreateIndex {
-                table,
-                schema,
-                index,
-            }
-        }
-        other => other,
-    }
-}
-
 /// Render statements as a no-transaction migration: directive header, one
 /// statement per split-marker segment so each runs as its own query.
 fn render_no_transaction_sql(
     generator: &SqlRenderer,
     statements: &[DiffStatement],
 ) -> Result<String> {
-    let rendered = statements
+    let rendered = generator
+        .generate(&statements.to_vec())?
         .iter()
-        .map(|stmt| generator.generate_string(&vec![stmt.clone()]))
-        .collect::<Result<Vec<_>>>()?;
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     Ok(format!(
-        "-- shki:no-transaction\n\n{}",
+        "{NO_TRANSACTION_DIRECTIVE}\n\n{}",
         rendered.join(&format!("\n{MIGRATION_SPLIT_MARKER}\n"))
     ))
 }
