@@ -21,7 +21,7 @@ and Drizzle-inspired:
 It also generates Rust/TypeScript/Protobuf types from that schema, and
 type-safe `sqlx` query functions from annotated SQL.
 
-**📖 Documentation: <https://dk0d.github.io/shki>**
+**📖 Documentation: <https://shki.sh>**
 
 ## Install
 
