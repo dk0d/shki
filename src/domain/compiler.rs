@@ -8,7 +8,7 @@ use sqlx::{AssertSqlSafe, Executor};
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::declarative::{load_declarative_schema, plan_declarative_apply_sql};
+use crate::declarative::{ConcurrentIndex, load_declarative_schema, plan_declarative_apply_sql};
 use crate::diff::{diff_snapshots, load_latest_snapshot, load_snapshot_by_name};
 use crate::engines::Engine;
 use crate::engines::pg::Postgres;
@@ -461,20 +461,15 @@ async fn backfill_pending_snapshots(config: &Config) -> Result<()> {
     .await
 }
 
-/// Apply the Declarative Schema to the Shadow Database and return the names of
-/// indexes the schema declared `CONCURRENTLY` (stripped for the apply — see
+/// Apply the Declarative Schema to the Shadow Database and return the indexes
+/// the schema declared `CONCURRENTLY` (stripped for the apply — see
 /// [`plan_declarative_apply_sql`]).
 async fn apply_declarative_schema_sql(
     pool: &sqlx::Pool<sqlx::Postgres>,
     schema_sql: &str,
-) -> Result<Vec<String>> {
+) -> Result<Vec<ConcurrentIndex>> {
     let plan = plan_declarative_apply_sql(schema_sql)?;
-    let apply_sql = [plan.setup_sql, plan.deferred_sql]
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    sqlx::raw_sql(AssertSqlSafe(apply_sql))
+    sqlx::raw_sql(AssertSqlSafe(plan.apply_sql()))
         .execute(pool)
         .await
         .map_err(|err| {
@@ -489,21 +484,23 @@ async fn apply_declarative_schema_sql(
 
 /// Re-mark introspected indexes that the Declarative Schema declared
 /// `CONCURRENTLY` — the flag is a creation strategy, not catalog state, so it
-/// only exists in the declared SQL.
-fn mark_concurrent_indexes(snapshot: &mut Snapshot, concurrent_indexes: &[String]) {
+/// only exists in the declared SQL. Matching is per table and schema: index
+/// names are only unique per schema, so a bare-name match would also mark a
+/// same-named plain index elsewhere.
+fn mark_concurrent_indexes(snapshot: &mut Snapshot, concurrent_indexes: &[ConcurrentIndex]) {
     if concurrent_indexes.is_empty() {
         return;
     }
-    for (id, mut table) in snapshot.tables() {
-        let mut changed = false;
-        for index in table.indexes.values_mut() {
-            if concurrent_indexes.contains(&index.name) {
-                index.concurrently = true;
-                changed = true;
+    for (schema_name, schema) in &mut snapshot.catalog.schemas {
+        for (table_name, table) in &mut schema.tables {
+            for index in table.indexes.values_mut() {
+                if concurrent_indexes
+                    .iter()
+                    .any(|declared| declared.matches(schema_name, table_name, &index.name))
+                {
+                    index.concurrently = true;
+                }
             }
-        }
-        if changed {
-            snapshot.insert_table(id, table);
         }
     }
 }

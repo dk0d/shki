@@ -8,9 +8,9 @@ use crate::sql::render::{SqlObjectType, SqlOperation, SqlStmt};
 use crate::{Result, ShkiError};
 
 use super::sql::parse::{
-    create_statement_object_type, create_statement_operation, create_table_info,
-    is_alter_table_add_foreign_key, join_sql_statements, parse_include_directive,
-    rewrite_create_index_concurrently, rewrite_create_table_foreign_keys, split_sql_statements,
+    classify_create_statement, create_table_info, is_alter_table_add_foreign_key,
+    join_sql_statements, parse_include_directive, rewrite_create_index_concurrently,
+    rewrite_create_table_foreign_keys, split_sql_statements,
 };
 
 pub const DIRECTORY_SCHEMA_ENTRYPOINT: &str = "main.sql";
@@ -25,20 +25,56 @@ pub struct DeclarativeSchema {
 pub struct DeclarativeApplySql {
     pub setup_sql: String,
     pub deferred_sql: String,
-    /// Names of indexes declared `CREATE INDEX CONCURRENTLY`. The keyword is
-    /// stripped from the apply SQL (it can't run in the Shadow Database's
-    /// transaction and isn't recorded in catalogs), so the declared intent is
-    /// carried here instead.
-    pub concurrent_indexes: Vec<String>,
+    /// Indexes declared `CREATE INDEX CONCURRENTLY`. The keyword is stripped
+    /// from the apply SQL (it can't run in the Shadow Database's transaction
+    /// and isn't recorded in catalogs), so the declared intent is carried here
+    /// instead.
+    pub concurrent_indexes: Vec<ConcurrentIndex>,
+}
+
+/// A `CREATE INDEX CONCURRENTLY` declaration: which index, on which table.
+/// Index names are only unique per schema, so the table identity is needed to
+/// re-mark the right introspected index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcurrentIndex {
+    /// Index name as Postgres stores it.
+    pub index: String,
+    /// Table the index is declared on (folded), when the statement names one.
+    pub table: Option<Iden>,
+}
+
+impl ConcurrentIndex {
+    /// Whether this declaration is for `index_name` on the table `table_name`
+    /// in catalog schema `schema_name` ("public" for the default schema).
+    pub fn matches(&self, schema_name: &str, table_name: &str, index_name: &str) -> bool {
+        if self.index != index_name {
+            return false;
+        }
+        match &self.table {
+            None => true,
+            Some(table) => {
+                table.name == table_name
+                    && table.schema.as_deref().unwrap_or("public") == schema_name
+            }
+        }
+    }
+}
+
+impl DeclarativeApplySql {
+    /// The SQL to run against the Shadow Database: setup first, deferred
+    /// foreign keys last.
+    pub fn apply_sql(&self) -> String {
+        [&self.setup_sql, &self.deferred_sql]
+            .into_iter()
+            .map(String::as_str)
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 pub fn normalize_declarative_apply_sql(sql: &str) -> Result<String> {
-    let plan = plan_declarative_apply_sql(sql)?;
-    Ok([plan.setup_sql, plan.deferred_sql]
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n"))
+    Ok(plan_declarative_apply_sql(sql)?.apply_sql())
 }
 
 pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
@@ -49,7 +85,10 @@ pub fn plan_declarative_apply_sql(sql: &str) -> Result<DeclarativeApplySql> {
     for (idx, statement) in split_sql_statements(sql)?.into_iter().enumerate() {
         let statement = match rewrite_create_index_concurrently(&statement)? {
             Some(rewritten) => {
-                concurrent_indexes.push(rewritten.index_name);
+                concurrent_indexes.push(ConcurrentIndex {
+                    index: rewritten.index_name,
+                    table: rewritten.table,
+                });
                 rewritten.sql
             }
             None => statement,
@@ -86,8 +125,7 @@ fn plan_setup_statement(idx: usize, statement: String) -> Result<SqlStmt> {
             .with_dependencies(table_dependencies(&table)));
     }
 
-    let object_type = create_statement_object_type(&statement);
-    let operation = create_statement_operation(&statement);
+    let (object_type, operation) = classify_create_statement(&statement);
     Ok(SqlStmt::from(statement).with_planning(object_type, operation, idx))
 }
 
@@ -213,7 +251,13 @@ CREATE INDEX users_id_idx ON users (id);
 
         let plan = plan_declarative_apply_sql(sql).expect("sql should normalize");
 
-        assert_eq!(plan.concurrent_indexes, vec!["users_email_idx".to_string()]);
+        assert_eq!(
+            plan.concurrent_indexes,
+            vec![ConcurrentIndex {
+                index: "users_email_idx".to_string(),
+                table: Some(Iden::new("users", None)),
+            }]
+        );
         assert!(!plan.setup_sql.contains("CONCURRENTLY"));
         assert!(plan.setup_sql.contains("CREATE INDEX users_email_idx"));
         assert!(plan.setup_sql.contains("CREATE INDEX users_id_idx"));
