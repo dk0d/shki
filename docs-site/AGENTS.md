@@ -4,7 +4,9 @@
   root-absolute — archived version copies (starlight-versions) rely on relative
   links to stay inside their version.
 - Never edit `src/content/docs/<version>/` or `src/content/versions/` by hand;
-  they are release archives created by `task docs:version`.
+  they are release archives created by the release flow (`task docs:version`)
+  or backfilled from tags (`task docs:archive-tag`). The unprefixed docs are
+  "Next" — they track `main`.
 - Svelte components are supported in `.mdx` pages; shadcn-svelte primitives
   live in `src/lib/components/ui/` (add via `bunx shadcn-svelte add <name>`),
   site components in `src/components/`. Tailwind runs without preflight so

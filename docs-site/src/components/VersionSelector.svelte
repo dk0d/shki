@@ -13,6 +13,7 @@
   let { options, label }: { options: VersionOption[]; label: string } =
     $props();
 
+  // svelte-ignore state_referenced_locally
   const selected = options.find((option) => option.current) ?? options[0];
 
   function navigate(url: string) {
@@ -23,7 +24,7 @@
 </script>
 
 <Select.Root type="single" value={selected.url} onValueChange={navigate}>
-  <Select.Trigger size="sm" aria-label={label} class="min-w-[6.5rem]">
+  <Select.Trigger size="sm" aria-label={label} class="min-w-26">
     {selected.label}
   </Select.Trigger>
   <Select.Content>

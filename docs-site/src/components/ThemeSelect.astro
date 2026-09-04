@@ -5,24 +5,34 @@
 // Select (VersionSelector.svelte) instead of the plugin's native <select>.
 import TerminalThemeSelect from "starlight-theme-terminal/overrides/ThemeSelect.astro";
 import VersionSelector from "./VersionSelector.svelte";
-import versions from "../../versions.json";
+import versionsFile from "../../versions.json";
 
-// Same-page URL per version: archived docs live under /<slug>/, latest at the
-// root (no i18n, no Astro base, no excluded pages in this site).
+const { latest, versions } = versionsFile;
+
+// Every served page lives under a version dir: /next/ tracks main, archived
+// releases live at /<X.Y.Z>/, and nginx serves the latest release's archive at
+// the site root. Root-built pages exist only as the archive source and are
+// pruned from the deployed image.
+const allVersions = [{ slug: "next", label: "Next" }, ...versions];
+
+// Same-page URL per version (no i18n, no Astro base, no excluded pages).
 const segments = Astro.url.pathname.split("/").filter(Boolean);
-const pageVersion = versions.find((version) => version.slug === segments[0]);
+const pageVersion = allVersions.find(
+  (version) => version.slug === segments[0],
+);
 const canonicalPath = pageVersion
   ? `/${segments.slice(1).join("/")}${segments.length > 1 ? "/" : ""}`
   : Astro.url.pathname;
 
-const options = [
-  { label: "Latest", url: canonicalPath, current: pageVersion === undefined },
-  ...versions.map((version) => ({
-    label: version.label ?? version.slug,
-    url: `/${version.slug}${canonicalPath === "/" ? "/" : canonicalPath}`,
-    current: version.slug === pageVersion?.slug,
-  })),
-];
+const options = allVersions.map((version) => ({
+  label:
+    version.slug === latest
+      ? `${version.label ?? version.slug} (latest)`
+      : (version.label ?? version.slug),
+  url: `/${version.slug}${canonicalPath === "/" ? "/" : canonicalPath}`,
+  // Pages served at the root are the latest release's archive.
+  current: (pageVersion?.slug ?? latest) === version.slug,
+}));
 ---
 
 <div class="version-theme-group">

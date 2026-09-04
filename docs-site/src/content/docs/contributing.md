@@ -54,8 +54,9 @@ Architecture decision records live in [`docs/adr/`](https://github.com/dk0d/shki
 ## Docs site
 
 This site is an [Astro Starlight](https://starlight.astro.build) project under
-`docs-site/`, deployed on stable release tags (`vX.Y.Z`) — pushes to `main`
-only build-check it.
+`docs-site/`, deployed on every push to `main`. The root docs are **Next**
+(tracking `main`); each released version is a static archive reachable from the
+version switcher, with the newest release marked `(latest)`.
 
 ```bash
 cd docs-site
@@ -69,8 +70,9 @@ in `docs-site/astro.config.mjs`. Internal links must be relative
 (`../../commands/...`) so versioned copies stay inside their version.
 
 Docs are versioned per release automatically: `task patch` / `minor` / `major`
-archives the current docs as the new version and folds the snapshot into the
-release commit (prereleases are not archived). See
+archives the release's docs as version X.Y.Z, marks it as the latest release,
+and folds the snapshot into the release commit (prereleases are not archived).
+See
 [`docs-site/README.md`](https://github.com/dk0d/shki/blob/main/docs-site/README.md)
 for the details, the deployment setup, and the recovery steps if the docs stage
 of a release fails.

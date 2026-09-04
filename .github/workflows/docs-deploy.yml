@@ -1,16 +1,9 @@
 name: Docs Deploy
 
-# Deploy the docs site to Dokploy on stable release tags only (created by
-# tag-release.yml; prereleases like v0.11.0-rc.1 do not deploy docs, matching
-# the release tasks which don't archive docs for prereleases). The webhook
-# triggers the Dokploy application to pull main and rebuild
-# docs-site/Dockerfile; by the time a release tag exists, main carries that
-# release's docs including the archived version snapshot from the release
-# commit.
+# Manual out-of-band docs redeploy. Normal deploys are Dokploy's auto-deploy
+# on pushes to main (the root docs are "Next", tracking main; release commits
+# carry their version archive, so a release merge deploys everything at once).
 on:
-  push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
 permissions:

@@ -6,7 +6,7 @@ import starlightVersions from "starlight-versions";
 import svelte from "@astrojs/svelte";
 import tailwindcss from "@tailwindcss/vite";
 import mermaid from "astro-mermaid";
-import versions from "./versions.json";
+import versionsFile from "./versions.json";
 import remarkPinReleaseUrls from "./scripts/remark-pin-release-urls.mjs";
 
 // https://astro.build/config
@@ -40,6 +40,9 @@ export default defineConfig({
         // theme's toggle; both plugins warn that the slot is taken — that's
         // expected, this override is the manual composition they ask for.
         ThemeSelect: "./src/components/ThemeSelect.astro",
+        // Version-aware banner: warns on superseded releases, notes /next/,
+        // stays silent on the latest release (also served at the site root).
+        Banner: "./src/components/Banner.astro",
       },
       sidebar: [
         {
@@ -100,10 +103,23 @@ export default defineConfig({
       ],
       plugins: [
         starlightThemeTerminalPlugin(),
-        // Versions live in versions.json (newest first); `task docs:version`
-        // adds one and archives the current docs. An empty list disables
-        // versioning until the first release is archived.
-        ...(versions.length > 0 ? [starlightVersions({ versions })] : []),
+        // The working docs (tracking main) are re-archived as the "next"
+        // version on every build (scripts/refresh-next.mjs), and nginx serves
+        // the latest release's archive at the site root — so / is the latest
+        // release and /next/ is main. versions.json lists the archived
+        // releases (newest first) and records which one is latest; the release
+        // flow maintains it (`task docs:archive-tag` for backfills).
+        ...(versionsFile.versions.length > 0
+          ? [
+              starlightVersions({
+                versions: [
+                  { slug: "next", label: "Next" },
+                  ...versionsFile.versions,
+                ],
+                current: { label: "Next" },
+              }),
+            ]
+          : []),
       ],
     }),
   ],

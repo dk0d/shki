@@ -13,13 +13,13 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
 }
 
 const path = new URL("../versions.json", import.meta.url);
-const versions = JSON.parse(readFileSync(path, "utf8"));
+const data = JSON.parse(readFileSync(path, "utf8"));
 
-if (versions.some((entry) => entry.slug === version)) {
+if (data.versions.some((entry) => entry.slug === version)) {
   console.log(`version ${version} already exists`);
   process.exit(0);
 }
 
-versions.unshift({ slug: version, label: `v${version}` });
-writeFileSync(path, `${JSON.stringify(versions, null, 2)}\n`);
+data.versions.unshift({ slug: version, label: `v${version}` });
+writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
 console.log(`added ${version}; running a build will archive the current docs`);

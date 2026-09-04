@@ -19,3 +19,8 @@ pnpm-debug.log*
 
 # macOS-specific files
 .DS_Store
+
+# generated "next" version snapshot (rebuilt from the working docs each build)
+src/content/docs/next/
+src/assets/next/
+src/content/versions/next.json

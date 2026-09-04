@@ -37,22 +37,36 @@ variant follows Starlight's `[data-theme]` attribute.
 
 Docs are archived per release with
 [starlight-versions](https://github.com/HiDeoo/starlight-versions). The
-unprefixed pages under `src/content/docs/` are always the latest; each released
-version is a static copy under `src/content/docs/<version>/`, listed in
-`versions.json` (newest first) and switchable from the site header.
+unprefixed pages under `src/content/docs/` are **Next** — whatever is on
+`main`, deployed on every push. Every released version is a static copy under
+`src/content/docs/<version>/`; the newest one is the stable "latest" release,
+shown in the switcher as `vX.Y.Z (latest)`.
 
-Archiving is part of the release flow: `task patch` / `minor` / `major` runs
-the version bump, archives the current docs as the new version, and folds the
-snapshot (`versions.json`, `src/content/docs/<version>/`,
-`src/content/versions/`) into the release commit. Prereleases (`task rc`) are
-not archived and do not deploy docs.
+`versions.json` is the source of truth: `latest` records which archived version
+is the most recent release, and `versions` lists all archived releases, newest
+first:
 
-To archive out-of-band (e.g. backfilling a historical version), run it
-directly and commit the result:
+```json
+{ "latest": "0.10.10", "versions": [{ "slug": "0.10.10", "label": "v0.10.10" }] }
+```
+
+Archiving is part of the release flow: when `task patch` / `minor` / `major`
+bumps to X.Y.Z, it archives the release's own docs as version X.Y.Z, marks it
+as `latest`, and folds the snapshot (`versions.json`,
+`src/content/docs/<version>/`, `src/content/versions/`) into the release
+commit. Prereleases (`task rc`) are not archived.
+
+To archive out-of-band (e.g. backfilling a historical release), run it
+directly with the release tag and commit the result:
 
 ```bash
-task docs:version VERSION=X.Y.Z
+task docs:archive-tag TAG=vX.Y.Z
 ```
+
+The script is idempotent (an already-archived version is a no-op), refuses
+prerelease tags, restores the working docs even on failure, and rewrites the
+root-absolute links that pre-`0.10.10` tags used so old archives stay inside
+their version.
 
 At build time, `scripts/remark-pin-release-urls.mjs` rewrites
 `releases/latest/download` URLs on versioned pages to that version's release
@@ -61,39 +75,41 @@ release they document.
 
 ### If the docs step of a release fails
 
-`task patch` / `minor` / `major` runs in two stages: cargo-release makes the
-`release: X.Y.Z` commit first, then the docs archive is created and amended
-into it. If the docs stage fails (bun/network trouble, a docs build error),
-you're left with a release commit that has **no docs snapshot**. The task exits
-non-zero, so this doesn't pass silently.
+`task patch` / `minor` / `major` runs in stages: cargo-release makes the
+`release: X.Y.Z` commit first, then the docs archive is created, `latest` is
+updated, and both are amended into it. If the docs stage fails (bun/network
+trouble, a docs build error), you're left with a release commit that has **no
+docs snapshot**. The task exits non-zero, so this doesn't pass silently.
 
 **Caught before pushing** (the normal case) — fix the cause, then re-run the
 docs stage and fold it into the same commit:
 
 ```bash
 task docs:version VERSION=X.Y.Z
+(cd docs-site && bun scripts/set-latest.mjs X.Y.Z)
 git add docs-site
 git commit --amend --no-edit
 ```
 
-Re-running is safe: if the version is already in `versions.json` the script
-no-ops, an existing archive is left alone, and an empty amend changes nothing.
-Verify with `git show --stat HEAD` — the release commit should include
+Re-running is safe: an already-archived version no-ops, `set-latest` no-ops
+when unchanged, and an empty amend changes nothing. Verify with
+`git show --stat HEAD` — the release commit should include
 `docs-site/versions.json` and `docs-site/src/content/docs/X.Y.Z/`.
 
-**Noticed after the release merged and tagged** — the site deployed, but the
-new version is missing from the switcher (the deploy itself is fine; latest
-docs are current). Don't amend published history; backfill on `main`:
+**Noticed after the release merged and tagged** — the site deployed Next fine,
+but the release is missing from the switcher. Don't amend published history;
+backfill from the tag on `main` (which also updates `latest` if needed):
 
 ```bash
-task docs:version VERSION=X.Y.Z
+task docs:archive-tag TAG=vX.Y.Z
+(cd docs-site && bun scripts/set-latest.mjs X.Y.Z)
 git add docs-site
 git commit -m "docs: backfill X.Y.Z version archive"
 git push
 ```
 
-then redeploy out-of-band: **Actions → Docs Deploy → Run workflow** (its
-`workflow_dispatch` trigger exists for exactly this).
+The push auto-deploys; **Actions → Docs Deploy → Run workflow** remains as a
+manual out-of-band redeploy.
 
 ## Deployment (Dokploy)
 
@@ -104,13 +120,10 @@ directory:
    build type **Dockerfile**, with Build Path / Docker Context `docs-site` and
    Dockerfile Path `docs-site/Dockerfile`.
 2. Set the build arg `DOCS_SITE` to the site's canonical URL (used for the
-   sitemap and social cards) and attach the docs domain.
-3. **Disable automatic deploy on push** — deploys are triggered per release
-   tag by GitHub Actions.
-4. Copy the application's deploy webhook URL into the repo secret
-   `DOCS_DEPLOY_HOOK_URL`.
-
-`docs-deploy.yml` then POSTs the webhook whenever a release tag is pushed, so
-the site only updates on releases. (The webhook redeploys `main`'s tip, which
-by then contains the tagged release and its archived docs; use
-`workflow_dispatch` on the workflow for an out-of-band redeploy.)
+   sitemap and social cards) and attach the docs domain (container port 80).
+3. **Enable automatic deploy on push** — the root docs are Next and track
+   `main`, and release merges carry their version archive, so every deploy is
+   complete.
+4. Optionally copy the application's deploy webhook URL into the repo secret
+   `DOCS_DEPLOY_HOOK_URL`; `docs-deploy.yml` (manual `workflow_dispatch` only)
+   uses it for out-of-band redeploys.

@@ -1,0 +1,55 @@
+---
+// Version-aware banner replacing starlight-versions' one-size-fits-all
+// "old version" banner: superseded releases warn and link to the same page in
+// the latest release; /next/ gets an in-development note; the latest release
+// (served at / and /<latest>/) gets no banner.
+import Default from "@astrojs/starlight/components/Banner.astro";
+import versionsFile from "../../versions.json";
+
+const { latest, versions } = versionsFile;
+
+const segments = Astro.url.pathname.split("/").filter(Boolean);
+const slug = segments[0];
+const rest = `/${segments.slice(1).join("/")}${segments.length > 1 ? "/" : ""}`;
+const isNext = slug === "next";
+const isSuperseded =
+  slug !== latest && versions.some((version) => version.slug === slug);
+const latestUrl = `/${latest}${rest === "/" ? "/" : rest}`;
+---
+
+{
+  isNext && (
+    <div class="version-banner next">
+      In-development docs for the next release — the latest release's docs are{" "}
+      <a href={latestUrl}>here</a>.
+    </div>
+  )
+}
+{
+  isSuperseded && (
+    <div class="version-banner old">
+      Docs for an older release (v{slug}) — see the{" "}
+      <a href={latestUrl}>latest release's docs</a>.
+    </div>
+  )
+}
+<Default {...Astro.props}><slot /></Default>
+
+<style>
+  .version-banner {
+    padding: 0.5rem 1rem;
+    text-align: center;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-text);
+    border-bottom: 1px solid var(--sl-color-hairline);
+  }
+  .version-banner.old {
+    background-color: var(--sl-color-orange-low, var(--sl-color-bg-nav));
+  }
+  .version-banner.next {
+    background-color: var(--sl-color-bg-nav);
+  }
+  .version-banner a {
+    color: var(--sl-color-text-accent);
+  }
+</style>

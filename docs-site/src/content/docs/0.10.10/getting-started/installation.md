@@ -4,10 +4,8 @@ description: Install shki as a prebuilt binary, with cargo binstall, or from sou
 slug: 0.10.10/getting-started/installation
 ---
 
-Install shki as a prebuilt binary — no Rust toolchain needed. The script
-detects your platform and downloads the matching build. On the latest docs the
-commands below install the newest release; on versioned docs they install the
-release the docs describe.
+Install the latest release as a prebuilt binary — no Rust toolchain needed. The
+script detects your platform and downloads the matching build.
 
 ## macOS and Linux
 
@@ -28,8 +26,8 @@ it is on your `PATH`), along with an updater:
 shki-update   # upgrade in place to the newest release
 ```
 
-To install a specific version, use `download/v<version>` as the path segment,
-e.g. `.../releases/download/v0.10.10/shki-installer.sh`.
+To pin a version, replace `latest/download` with `download/v<version>`, e.g.
+`.../releases/download/v0.9.6/shki-installer.sh`.
 
 ## With `cargo binstall`
 
