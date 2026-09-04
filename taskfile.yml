@@ -53,6 +53,20 @@ tasks:
     desc: Prepare a release commit; merge its PR with the `release` label to tag and publish
     cmds:
       - branch="$(git branch --show-current)" && cargo release {{.BUMP}} --workspace --no-publish --no-tag --allow-branch "$branch" --execute
+      # Archive the docs as the new version and fold the snapshot into the
+      # release commit, so every stable release ships matching versioned docs.
+      # Prereleases (0.11.0-rc.1, ...) are not archived.
+      # If this stage fails, the release commit exists WITHOUT its docs
+      # snapshot — see "If the docs step of a release fails" in
+      # docs-site/README.md for the recovery commands.
+      - |
+        version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
+        case "$version" in
+          *-*) echo "prerelease ${version}: skipping docs version archive"; exit 0 ;;
+        esac
+        task docs:version VERSION="$version"
+        git add docs-site
+        git commit --amend --no-edit
     requires:
       vars:
         - BUMP

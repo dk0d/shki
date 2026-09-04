@@ -41,20 +41,59 @@ unprefixed pages under `src/content/docs/` are always the latest; each released
 version is a static copy under `src/content/docs/<version>/`, listed in
 `versions.json` (newest first) and switchable from the site header.
 
-During release prep (in the release PR, alongside the `release: X.Y.Z` bump):
+Archiving is part of the release flow: `task patch` / `minor` / `major` runs
+the version bump, archives the current docs as the new version, and folds the
+snapshot (`versions.json`, `src/content/docs/<version>/`,
+`src/content/versions/`) into the release commit. Prereleases (`task rc`) are
+not archived and do not deploy docs.
+
+To archive out-of-band (e.g. backfilling a historical version), run it
+directly and commit the result:
 
 ```bash
 task docs:version VERSION=X.Y.Z
 ```
 
-This adds the version to `versions.json` and runs a build, which archives the
-current docs as that version. Commit everything it generates
-(`versions.json`, `src/content/docs/<version>/`, `src/content/versions/`).
-
 At build time, `scripts/remark-pin-release-urls.mjs` rewrites
 `releases/latest/download` URLs on versioned pages to that version's release
 (`releases/download/vX.Y.Z`), so archived install instructions install the
 release they document.
+
+### If the docs step of a release fails
+
+`task patch` / `minor` / `major` runs in two stages: cargo-release makes the
+`release: X.Y.Z` commit first, then the docs archive is created and amended
+into it. If the docs stage fails (bun/network trouble, a docs build error),
+you're left with a release commit that has **no docs snapshot**. The task exits
+non-zero, so this doesn't pass silently.
+
+**Caught before pushing** (the normal case) — fix the cause, then re-run the
+docs stage and fold it into the same commit:
+
+```bash
+task docs:version VERSION=X.Y.Z
+git add docs-site
+git commit --amend --no-edit
+```
+
+Re-running is safe: if the version is already in `versions.json` the script
+no-ops, an existing archive is left alone, and an empty amend changes nothing.
+Verify with `git show --stat HEAD` — the release commit should include
+`docs-site/versions.json` and `docs-site/src/content/docs/X.Y.Z/`.
+
+**Noticed after the release merged and tagged** — the site deployed, but the
+new version is missing from the switcher (the deploy itself is fine; latest
+docs are current). Don't amend published history; backfill on `main`:
+
+```bash
+task docs:version VERSION=X.Y.Z
+git add docs-site
+git commit -m "docs: backfill X.Y.Z version archive"
+git push
+```
+
+then redeploy out-of-band: **Actions → Docs Deploy → Run workflow** (its
+`workflow_dispatch` trigger exists for exactly this).
 
 ## Deployment (Dokploy)
 
@@ -69,7 +108,7 @@ directory:
 3. **Disable automatic deploy on push** — deploys are triggered per release
    tag by GitHub Actions.
 4. Copy the application's deploy webhook URL into the repo secret
-   `DOKPLOY_DOCS_WEBHOOK_URL`.
+   `DOCS_DEPLOY_HOOK_URL`.
 
 `docs-deploy.yml` then POSTs the webhook whenever a release tag is pushed, so
 the site only updates on releases. (The webhook redeploys `main`'s tip, which

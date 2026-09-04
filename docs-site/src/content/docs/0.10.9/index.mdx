@@ -1,0 +1,64 @@
+---
+title: shki
+description: SQL-first declarative schema management and migration tooling for
+  PostgreSQL, MySQL, and SQLite.
+template: splash
+hero:
+  tagline: Author your schema in SQL. Let shki work out the migration.
+  image:
+    file: ../../../assets/0.10.9/shki-logo.png
+  actions:
+    - text: Get started
+      link: getting-started/installation/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/dk0d/shki
+      icon: external
+      variant: minimal
+slug: 0.10.9
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+:::caution
+`shki` is still a work in progress. Declarative Schema support is active, but some
+deeper diff/render coverage and validation workflows are still being built.
+:::
+
+`shki` manages database schema change by comparing an intended database shape with
+recorded schema history and producing migration artifacts. The direction is
+SQL-first and Drizzle-inspired:
+
+* You author a **Declarative Schema** in SQL.
+* `shki` compiles it in a disposable **Shadow Database**.
+* The resulting **Snapshot** is compared with the latest recorded Snapshot from the **Journal**.
+* `shki diff` previews the **Migration Plan**.
+* `shki generate` writes migration SQL, a new Snapshot, and a Journal entry.
+* `shki migrate` applies migration artifacts to the live database.
+
+<CardGrid stagger>
+  <Card title="Quick start" icon="rocket">
+    Initialize a project, edit `schema/main.sql`, and generate your first migration. [Quick
+    start](getting-started/quick-start/)
+  </Card>
+
+  <Card title="How it works" icon="puzzle">
+    Shadow Database, Snapshots, and the Journal — what shki is actually doing. [How it
+    works](getting-started/how-it-works/)
+  </Card>
+
+  <Card title="Declarative Schema" icon="document">
+    Single file or directory, extensions, and Shadow Database setup. [Declarative
+    Schema](guides/declarative-schema/)
+  </Card>
+
+  <Card title="Migrations" icon="seti:db">
+    Preview, generate, hand-write, apply, adopt, and roll back.
+    [Migrations](guides/migrations/)
+  </Card>
+
+  <Card title="Codegen" icon="seti:rust">
+    Rust, TypeScript, and Protobuf types, plus type-safe sqlx query functions.
+    [Codegen](guides/codegen/) · [Typed queries](guides/queries/)
+  </Card>
+</CardGrid>

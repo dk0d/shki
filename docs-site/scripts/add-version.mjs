@@ -5,8 +5,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2]?.replace(/^v/, "");
-if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
-  console.error("usage: bun scripts/add-version.mjs <X.Y.Z>");
+if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+  console.error(
+    "usage: bun scripts/add-version.mjs <X.Y.Z> (stable versions only — prereleases are not archived)",
+  );
   process.exit(1);
 }
 

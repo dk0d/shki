@@ -1,6 +1,7 @@
 ---
 title: Contributing
 description: Dev setup, tests, and where the design decisions live.
+slug: 0.10.7/contributing
 ---
 
 Issues and pull requests are welcome:
@@ -49,13 +50,15 @@ cargo nextest run --test querygen -E 'test(generated_query_code_compiles)' --run
 
 ## Design decisions
 
-Architecture decision records live in [`docs/adr/`](https://github.com/dk0d/shki/tree/main/docs/adr) — start there before reworking a subsystem.
+Architecture decision records live in
+[`docs/adr/`](https://github.com/dk0d/shki/tree/main/docs/adr) — start there
+before reworking a subsystem. Typed query codegen is described in
+[ADR 0001](https://github.com/dk0d/shki/blob/main/docs/adr/0001-typed-query-codegen.md).
 
 ## Docs site
 
 This site is an [Astro Starlight](https://starlight.astro.build) project under
-`docs-site/`, deployed on stable release tags (`vX.Y.Z`) — pushes to `main`
-only build-check it.
+`docs-site/`, deployed to GitHub Pages on every push to `main` that touches it.
 
 ```bash
 cd docs-site
@@ -64,13 +67,5 @@ bun run dev      # local preview
 bun run build    # what CI runs
 ```
 
-Pages are Markdown under `docs-site/src/content/docs/`; the sidebar is defined
-in `docs-site/astro.config.mjs`. Internal links must be relative
-(`../../commands/...`) so versioned copies stay inside their version.
-
-Docs are versioned per release automatically: `task patch` / `minor` / `major`
-archives the current docs as the new version and folds the snapshot into the
-release commit (prereleases are not archived). See
-[`docs-site/README.md`](https://github.com/dk0d/shki/blob/main/docs-site/README.md)
-for the details, the deployment setup, and the recovery steps if the docs stage
-of a release fails.
+Pages are Markdown under `docs-site/src/content/docs/`; the sidebar is defined in
+`docs-site/astro.config.mjs`.
