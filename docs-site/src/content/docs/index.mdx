@@ -17,6 +17,7 @@ hero:
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
+import DialectSupport from "../../components/DialectSupport.svelte";
 
 :::caution
 `shki` is still a work in progress. Declarative Schema support is active, but some
@@ -33,6 +34,8 @@ SQL-first and Drizzle-inspired:
 - `shki diff` previews the **Migration Plan**.
 - `shki generate` writes migration SQL, a new Snapshot, and a Journal entry.
 - `shki migrate` applies migration artifacts to the live database.
+
+<DialectSupport />
 
 <CardGrid stagger>
   <Card title="Quick start" icon="rocket">

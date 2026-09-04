@@ -3,6 +3,8 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightThemeTerminalPlugin from "starlight-theme-terminal";
 import starlightVersions from "starlight-versions";
+import svelte from "@astrojs/svelte";
+import tailwindcss from "@tailwindcss/vite";
 import mermaid from "astro-mermaid";
 import versions from "./versions.json";
 import remarkPinReleaseUrls from "./scripts/remark-pin-release-urls.mjs";
@@ -12,9 +14,13 @@ export default defineConfig({
   markdown: {
     remarkPlugins: [remarkPinReleaseUrls],
   },
+  vite: {
+    plugins: [tailwindcss()],
+  },
   // Canonical site URL; set DOCS_SITE in the deploy environment.
-  site: process.env.DOCS_SITE ?? "https://dk0d.github.io",
+  site: process.env.DOCS_SITE || "https://dk0d.github.io",
   integrations: [
+    svelte(),
     mermaid({ theme: "dark", autoTheme: true }),
     starlight({
       title: "shki",
@@ -28,7 +34,7 @@ export default defineConfig({
           href: "https://github.com/dk0d/shki",
         },
       ],
-      customCss: ["./src/styles/custom.css"],
+      customCss: ["./src/styles/tailwind.css", "./src/styles/custom.css"],
       components: {
         // Renders the starlight-versions switcher next to the terminal
         // theme's toggle; both plugins warn that the slot is taken — that's

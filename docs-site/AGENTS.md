@@ -5,6 +5,11 @@
   links to stay inside their version.
 - Never edit `src/content/docs/<version>/` or `src/content/versions/` by hand;
   they are release archives created by `task docs:version`.
+- Svelte components are supported in `.mdx` pages; shadcn-svelte primitives
+  live in `src/lib/components/ui/` (add via `bunx shadcn-svelte add <name>`),
+  site components in `src/components/`. Tailwind runs without preflight so
+  Starlight styles stay intact; use the `not-content` class on component roots
+  and rely on `dark:` (wired to `[data-theme]`) for theming.
 
 ## Development
 

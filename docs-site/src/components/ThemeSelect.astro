@@ -1,13 +1,36 @@
 ---
 // Both starlight-theme-terminal and starlight-versions want the ThemeSelect
 // slot (the theme for its toggle, the versions plugin for its switcher), so
-// this override renders both side by side.
-import VersionSelect from "starlight-versions/components/VersionSelect.astro";
+// this override composes both — with the switcher UI as a shadcn-svelte
+// Select (VersionSelector.svelte) instead of the plugin's native <select>.
 import TerminalThemeSelect from "starlight-theme-terminal/overrides/ThemeSelect.astro";
+import VersionSelector from "./VersionSelector.svelte";
+import versions from "../../versions.json";
+
+// Same-page URL per version: archived docs live under /<slug>/, latest at the
+// root (no i18n, no Astro base, no excluded pages in this site).
+const segments = Astro.url.pathname.split("/").filter(Boolean);
+const pageVersion = versions.find((version) => version.slug === segments[0]);
+const canonicalPath = pageVersion
+  ? `/${segments.slice(1).join("/")}${segments.length > 1 ? "/" : ""}`
+  : Astro.url.pathname;
+
+const options = [
+  { label: "Latest", url: canonicalPath, current: pageVersion === undefined },
+  ...versions.map((version) => ({
+    label: version.label ?? version.slug,
+    url: `/${version.slug}${canonicalPath === "/" ? "/" : canonicalPath}`,
+    current: version.slug === pageVersion?.slug,
+  })),
+];
 ---
 
 <div class="version-theme-group">
-  <VersionSelect />
+  {
+    versions.length > 0 && (
+      <VersionSelector client:load options={options} label="Select version" />
+    )
+  }
   <TerminalThemeSelect />
 </div>
 

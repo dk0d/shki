@@ -15,6 +15,24 @@ Pages are Markdown under `src/content/docs/`; the sidebar lives in
 never root-absolute — versioned copies of a page rely on relative links to stay
 inside their version.
 
+## Svelte + shadcn-svelte components
+
+`.mdx` pages can embed Svelte components. [shadcn-svelte](https://shadcn-svelte.com)
+is set up (lyra preset, Tailwind v4) with components under
+`src/lib/components/ui/`; add more with:
+
+```bash
+bunx shadcn-svelte@latest add <component> -y --no-deps-install && bun install
+```
+
+Site-specific components live in `src/components/` (see
+`DialectSupport.svelte` on the landing page, and `VersionSelector.svelte` — the
+header version switcher, a shadcn Select fed per-page URLs by the
+`ThemeSelect.astro` override). Tailwind is configured
+without preflight so Starlight's styles stay intact — wrap component markup in
+`not-content` to opt out of Starlight's content styling, and note the `dark:`
+variant follows Starlight's `[data-theme]` attribute.
+
 ## Versioned docs
 
 Docs are archived per release with
