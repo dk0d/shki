@@ -54,9 +54,10 @@ Architecture decision records live in [`docs/adr/`](https://github.com/dk0d/shki
 ## Docs site
 
 This site is an [Astro Starlight](https://starlight.astro.build) project under
-`docs-site/`, deployed on every push to `main`. The root docs are **Next**
-(tracking `main`); each released version is a static archive reachable from the
-version switcher, with the newest release marked `(latest)`.
+`docs-site/`, deployed on every push to `main`. The site root serves the
+**latest release's** docs; **`/next/`** tracks `main`; each released version is
+a static archive reachable from the version switcher, with the newest release
+marked `(latest)`.
 
 ```bash
 cd docs-site

@@ -36,11 +36,22 @@ variant follows Starlight's `[data-theme]` attribute.
 ## Versioned docs
 
 Docs are archived per release with
-[starlight-versions](https://github.com/HiDeoo/starlight-versions). The
-unprefixed pages under `src/content/docs/` are **Next** — whatever is on
-`main`, deployed on every push. Every released version is a static copy under
-`src/content/docs/<version>/`; the newest one is the stable "latest" release,
-shown in the switcher as `vX.Y.Z (latest)`.
+[starlight-versions](https://github.com/HiDeoo/starlight-versions). Authoring
+happens in the unprefixed pages under `src/content/docs/` — whatever is on
+`main`. The served routes are:
+
+- **`/`** — the latest release's docs (the switcher shows `vX.Y.Z (latest)`)
+- **`/next/`** — the in-development docs tracking `main`
+- **`/<X.Y.Z>/`** — every archived release
+
+Two build steps produce that layout: `scripts/refresh-next.mjs` re-archives the
+working docs as the `next` version before each build, and
+`scripts/postbuild.mjs` prunes the root-built pages from `dist/` and symlinks
+the latest release's archive entries into their place (relative links, followed
+by nginx — nothing is duplicated) — so `dist/` is deploy-ready as-is and nginx
+is a plain static file server. Every released version is a static
+copy under `src/content/docs/<version>/` (the `next` snapshot is generated and
+gitignored).
 
 `versions.json` is the source of truth: `latest` records which archived version
 is the most recent release, and `versions` lists all archived releases, newest
@@ -96,8 +107,8 @@ when unchanged, and an empty amend changes nothing. Verify with
 `git show --stat HEAD` — the release commit should include
 `docs-site/versions.json` and `docs-site/src/content/docs/X.Y.Z/`.
 
-**Noticed after the release merged and tagged** — the site deployed Next fine,
-but the release is missing from the switcher. Don't amend published history;
+**Noticed after the release merged and tagged** — the site deployed, but the
+release is missing from the switcher and `/` still serves the previous one. Don't amend published history;
 backfill from the tag on `main` (which also updates `latest` if needed):
 
 ```bash
@@ -121,8 +132,8 @@ directory:
    Dockerfile Path `docs-site/Dockerfile`.
 2. Set the build arg `DOCS_SITE` to the site's canonical URL (used for the
    sitemap and social cards) and attach the docs domain (container port 80).
-3. **Enable automatic deploy on push** — the root docs are Next and track
-   `main`, and release merges carry their version archive, so every deploy is
+3. **Enable automatic deploy on push** — `/next/` tracks `main`, and release
+   merges carry their version archive and retarget `/`, so every deploy is
    complete.
 4. Optionally copy the application's deploy webhook URL into the repo secret
    `DOCS_DEPLOY_HOOK_URL`; `docs-deploy.yml` (manual `workflow_dispatch` only)
