@@ -95,5 +95,5 @@ jsonb = "serde_json::Value"
 | `exclude_tables`    | –                                 | Listed table names are skipped. Applied after `include_tables`.                                                                                                  |
 
 The same type mapping and naming config is reused by
-[typed queries](/shki/guides/queries/), so generated query functions return the
+[typed queries](../../guides/queries/), so generated query functions return the
 structs and enums defined here rather than parallel copies.

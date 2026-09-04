@@ -35,7 +35,7 @@ shki status -u postgres://user:pass@prod-host:5432/mydb
   can't say which are applied or validate checksums.
 - A checksum failure means the file changed after it was applied. Restore the
   original SQL and write a follow-up migration instead of editing history — see
-  [Troubleshooting](/shki/reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
+  [Troubleshooting](../../reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
 
-See also: [`shki migrate`](/shki/commands/migrate/),
-[`shki config`](/shki/commands/config/).
+See also: [`shki migrate`](../../commands/migrate/),
+[`shki config`](../../commands/config/).

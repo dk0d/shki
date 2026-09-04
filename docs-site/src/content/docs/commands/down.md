@@ -39,6 +39,6 @@ shki down 3            # roll back the newest three
   `shki create <name> --with-down`, or `[migrations] generate_down = true`.
 - Requires a database URL.
 
-See also: [`shki migrate`](/shki/commands/migrate/),
-[`shki drop`](/shki/commands/drop/) for removing a migration that was never
+See also: [`shki migrate`](../../commands/migrate/),
+[`shki drop`](../../commands/drop/) for removing a migration that was never
 applied.

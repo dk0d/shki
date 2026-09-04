@@ -74,7 +74,7 @@ CREATE INDEX CONCURRENTLY scan_captured_at_idx ON scan (captured_at);
 
 The keyword is a **creation strategy, not schema state**: PostgreSQL doesn't
 record it in its catalogs, and shki doesn't record it in Snapshots. It changes
-*how* [`shki generate`](/shki/commands/generate/#concurrent-indexes) writes the
+*how* [`shki generate`](../../commands/generate/#concurrent-indexes) writes the
 migration — the index build is split into its own `shki:no-transaction`
 migration, after a confirmation prompt — not what the schema *is*. Adding or
 removing `CONCURRENTLY` on an index that already exists diffs as no change.

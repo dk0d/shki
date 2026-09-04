@@ -26,4 +26,4 @@ shki config -c db/shki.toml              # for a specific config file
 shki config -u postgres://…/other        # what the run would look like with this URL
 ```
 
-See also: [Configuration reference](/shki/reference/configuration/).
+See also: [Configuration reference](../../reference/configuration/).

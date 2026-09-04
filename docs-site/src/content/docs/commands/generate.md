@@ -8,7 +8,7 @@ shki generate <NAME> [--down] [--custom]
 ```
 
 Alias: `shki gen`. Runs the same compile-and-diff as
-[`shki diff`](/shki/commands/diff/), then renders the Migration Plan to disk.
+[`shki diff`](../../commands/diff/), then renders the Migration Plan to disk.
 
 ## What it writes
 
@@ -20,14 +20,14 @@ migrations/_meta/_journal.json               # updated
 ```
 
 It prints the paths it wrote followed by a preview of the diff. Nothing is
-applied to the live database — that's [`shki migrate`](/shki/commands/migrate/).
+applied to the live database — that's [`shki migrate`](../../commands/migrate/).
 
 ## Options
 
 | Flag                                | Purpose                                                                              |
 | ----------------------------------- | ------------------------------------------------------------------------------------ |
 | `--down`                            | Also write a Down Migration.                                                         |
-| `--custom`                          | Create a Custom Migration instead (same as [`shki create`](/shki/commands/create/)). |
+| `--custom`                          | Create a Custom Migration instead (same as [`shki create`](../../commands/create/)). |
 | `-T, --table <NAME>`                | Migrations table name.                                                               |
 | `--prefix <index\|timestamp\|unix>` | File name prefix style. Default `index`.                                             |
 | `--generate-down`                   | Config-equivalent of `--down`.                                                       |
@@ -95,7 +95,7 @@ desired state, keeping the Snapshot chain complete.
 `CONCURRENTLY` is a creation strategy, not schema state — it isn't recorded in
 the Snapshot, and adding or removing the keyword on an already-existing index
 diffs as no change. See
-[Declarative Schema](/shki/guides/declarative-schema/#concurrent-index-builds).
+[Declarative Schema](../../guides/declarative-schema/#concurrent-index-builds).
 
 ## Renames
 
@@ -120,5 +120,5 @@ shki generate add_index --prefix timestamp
 - Commit the migration, its Snapshot, and the updated Journal together — the
   Snapshot is the baseline the next `generate` diffs against.
 
-See also: [Migrations guide](/shki/guides/migrations/),
-[`shki drop`](/shki/commands/drop/) to undo a generated migration locally.
+See also: [Migrations guide](../../guides/migrations/),
+[`shki drop`](../../commands/drop/) to undo a generated migration locally.

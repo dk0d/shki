@@ -75,8 +75,8 @@ dialect = "sqlite"
 database_url = "sqlite://db/app.db"
 ```
 
-See [Code Generation](/shki/guides/codegen/) for `[codegen]` and
-[Typed Queries](/shki/guides/queries/) for `[queries]`.
+See [Code Generation](../../guides/codegen/) for `[codegen]` and
+[Typed Queries](../../guides/queries/) for `[queries]`.
 
 ## Environment variables
 

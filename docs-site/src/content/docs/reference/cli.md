@@ -4,7 +4,7 @@ description: Global options and an index of every shki command.
 ---
 
 Run `shki <command> --help` for the authoritative list of flags. Each command
-has its own page under [Commands](/shki/commands/config/); this page covers what
+has its own page under [Commands](../../commands/config/); this page covers what
 they share.
 
 ## Global options
@@ -45,17 +45,17 @@ Commands that read or write migrations — `create`, `generate`, `migrate`,
 
 | Command                                         | Alias      | Purpose                                                        |
 | ----------------------------------------------- | ---------- | -------------------------------------------------------------- |
-| [`config`](/shki/commands/config/)              | `conf`     | Print the effective configuration                              |
-| [`init [path]`](/shki/commands/init/)           | `i`        | Scaffold a project: config, schema, migrations metadata        |
-| [`diff`](/shki/commands/diff/)                  | –          | Compile the Declarative Schema and preview the Migration Plan  |
-| [`generate <name>`](/shki/commands/generate/)   | `gen`      | Write migration SQL, a Snapshot, and a Journal entry           |
-| [`create <name>`](/shki/commands/create/)       | `new`      | Create a Custom Migration for hand-written SQL                 |
-| [`migrate [mode]`](/shki/commands/migrate/)     | `up`       | Apply pending migrations (`all`, `steps <N>`, `to <NAME>`)     |
-| [`status`](/shki/commands/status/)              | `s`        | List migrations, applied state, and checksum problems          |
-| [`down [count]`](/shki/commands/down/)          | –          | Roll back applied migrations using Down Migrations             |
-| [`drop [migration]`](/shki/commands/drop/)      | –          | Remove a local migration and its artifacts                     |
-| [`dump`](/shki/commands/dump/)                  | –          | Export live database shape as SQL, JSON, or a Directory Schema |
-| [`bootstrap [name]`](/shki/commands/bootstrap/) | `strap`    | Author a baseline migration from an existing database          |
-| [`adopt [name]`](/shki/commands/adopt/)         | `baseline` | Adopt an existing database at a committed baseline             |
-| [`codegen <lang>`](/shki/commands/codegen/)     | `code`     | Generate Rust, TypeScript, or Protobuf types from schema shape |
-| [`queries`](/shki/commands/queries/)            | `q`        | Generate type-safe Rust query functions from annotated SQL     |
+| [`config`](../../commands/config/)              | `conf`     | Print the effective configuration                              |
+| [`init [path]`](../../commands/init/)           | `i`        | Scaffold a project: config, schema, migrations metadata        |
+| [`diff`](../../commands/diff/)                  | –          | Compile the Declarative Schema and preview the Migration Plan  |
+| [`generate <name>`](../../commands/generate/)   | `gen`      | Write migration SQL, a Snapshot, and a Journal entry           |
+| [`create <name>`](../../commands/create/)       | `new`      | Create a Custom Migration for hand-written SQL                 |
+| [`migrate [mode]`](../../commands/migrate/)     | `up`       | Apply pending migrations (`all`, `steps <N>`, `to <NAME>`)     |
+| [`status`](../../commands/status/)              | `s`        | List migrations, applied state, and checksum problems          |
+| [`down [count]`](../../commands/down/)          | –          | Roll back applied migrations using Down Migrations             |
+| [`drop [migration]`](../../commands/drop/)      | –          | Remove a local migration and its artifacts                     |
+| [`dump`](../../commands/dump/)                  | –          | Export live database shape as SQL, JSON, or a Directory Schema |
+| [`bootstrap [name]`](../../commands/bootstrap/) | `strap`    | Author a baseline migration from an existing database          |
+| [`adopt [name]`](../../commands/adopt/)         | `baseline` | Adopt an existing database at a committed baseline             |
+| [`codegen <lang>`](../../commands/codegen/)     | `code`     | Generate Rust, TypeScript, or Protobuf types from schema shape |
+| [`queries`](../../commands/queries/)            | `q`        | Generate type-safe Rust query functions from annotated SQL     |

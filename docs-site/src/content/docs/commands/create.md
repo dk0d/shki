@@ -15,7 +15,7 @@ Database is started and no Snapshot is written — the SQL isn't final yet.
 
 For `CREATE INDEX CONCURRENTLY` you usually don't need a Custom Migration
 anymore: declare the index `CONCURRENTLY` in the Declarative Schema and
-[`shki generate`](/shki/commands/generate/#concurrent-indexes) writes the
+[`shki generate`](../../commands/generate/#concurrent-indexes) writes the
 no-transaction rollout for you.
 
 ## Options
@@ -60,7 +60,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scan_profile ON scan (profile_id);
 ```
 
 Such migrations must be idempotent — see
-[running outside a transaction](/shki/guides/migrations/#running-outside-a-transaction).
+[running outside a transaction](../../guides/migrations/#running-outside-a-transaction).
 
-See also: [`shki generate`](/shki/commands/generate/),
-[`shki migrate`](/shki/commands/migrate/).
+See also: [`shki generate`](../../commands/generate/),
+[`shki migrate`](../../commands/migrate/).

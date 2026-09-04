@@ -24,7 +24,7 @@ errors out:
 Cannot drop applied migration '0003_add_users'. Roll it back before dropping it.
 ```
 
-Roll it back with [`shki down`](/shki/commands/down/) first, or pass `--force` to
+Roll it back with [`shki down`](../../commands/down/) first, or pass `--force` to
 skip the database check entirely (nothing can be detected as applied, so nothing
 blocks the delete).
 
@@ -51,4 +51,4 @@ Dropping the newest generated migration also drops the Snapshot that the next
 regenerate: the following `diff`/`generate` compares against the previous
 Snapshot instead.
 
-See also: [`shki generate`](/shki/commands/generate/).
+See also: [`shki generate`](../../commands/generate/).

@@ -46,7 +46,7 @@ shki codegen --preview rust                     # look before writing
 Naming, derives, type overrides, and table filters live in `[codegen]` in
 `shki.toml`.
 
-**Full details: [Code Generation guide](/shki/guides/codegen/).**
+**Full details: [Code Generation guide](../../guides/codegen/).**
 
-See also: [`shki queries`](/shki/commands/queries/) for typed query functions
+See also: [`shki queries`](../../commands/queries/) for typed query functions
 that reuse these generated types.

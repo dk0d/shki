@@ -2,12 +2,18 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightThemeTerminalPlugin from "starlight-theme-terminal";
+import starlightVersions from "starlight-versions";
 import mermaid from "astro-mermaid";
+import versions from "./versions.json";
+import remarkPinReleaseUrls from "./scripts/remark-pin-release-urls.mjs";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://dk0d.github.io",
-  base: "/shki",
+  markdown: {
+    remarkPlugins: [remarkPinReleaseUrls],
+  },
+  // Canonical site URL; set DOCS_SITE in the deploy environment.
+  site: process.env.DOCS_SITE ?? "https://dk0d.github.io",
   integrations: [
     mermaid({ theme: "dark", autoTheme: true }),
     starlight({
@@ -23,6 +29,12 @@ export default defineConfig({
         },
       ],
       customCss: ["./src/styles/custom.css"],
+      components: {
+        // Renders the starlight-versions switcher next to the terminal
+        // theme's toggle; both plugins warn that the slot is taken — that's
+        // expected, this override is the manual composition they ask for.
+        ThemeSelect: "./src/components/ThemeSelect.astro",
+      },
       sidebar: [
         {
           label: "Getting Started",
@@ -80,7 +92,13 @@ export default defineConfig({
         { label: "Contributing", slug: "contributing" },
         { label: "Inspired By", slug: "inspired-by" },
       ],
-      plugins: [starlightThemeTerminalPlugin()],
+      plugins: [
+        starlightThemeTerminalPlugin(),
+        // Versions live in versions.json (newest first); `task docs:version`
+        // adds one and archives the current docs. An empty list disables
+        // versioning until the first release is archived.
+        ...(versions.length > 0 ? [starlightVersions({ versions })] : []),
+      ],
     }),
   ],
 });

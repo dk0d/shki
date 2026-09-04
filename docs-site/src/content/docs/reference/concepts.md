@@ -57,4 +57,4 @@ Still in progress:
 ## Related projects
 
 `shki` stands on the shoulders of projects that explored these ideas first —
-see [Inspired By](/shki/inspired-by/).
+see [Inspired By](../../inspired-by/).

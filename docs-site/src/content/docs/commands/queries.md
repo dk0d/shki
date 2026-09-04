@@ -23,7 +23,7 @@ SELECT * FROM users WHERE id = $1;
 ```
 
 becomes a function returning `Result<Option<User>>`, reusing the struct
-[`shki codegen`](/shki/commands/codegen/) generates for `users`.
+[`shki codegen`](../../commands/codegen/) generates for `users`.
 
 ## Options
 
@@ -62,7 +62,7 @@ written whole into a nullable column (`INSERT ... VALUES` / `UPDATE ... SET`)
 becomes `Option<T>` automatically. Result nullability comes from the schema's
 `NOT NULL` constraints, with sqlx-style alias overrides (`AS "id!"` /
 `AS "note?"`) where inference cannot reach — see the
-[nullability section of the guide](/shki/guides/queries/#nullability).
+[nullability section of the guide](../../guides/queries/#nullability).
 
 ## Notes
 
@@ -70,4 +70,4 @@ becomes `Option<T>` automatically. Result nullability comes from the schema's
   startup cost as `diff`/`generate`.
 - Rust/sqlx output only; TypeScript and Protobuf are schema-`codegen` targets.
 
-**Full details: [Typed Queries guide](/shki/guides/queries/).**
+**Full details: [Typed Queries guide](../../guides/queries/).**

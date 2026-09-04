@@ -39,9 +39,9 @@ shki diff --shadow-database-url postgres://user:pass@localhost:5432/shki_shadow
   Snapshot agree — nothing to generate.
 - An index declared `CREATE INDEX CONCURRENTLY` diffs exactly like a plain one:
   the keyword is a creation strategy, not schema state. It only changes what
-  [`shki generate`](/shki/commands/generate/#concurrent-indexes) writes.
+  [`shki generate`](../../commands/generate/#concurrent-indexes) writes.
 - PostgreSQL only: Declarative Schema compilation is not implemented for MySQL,
   and is planned for SQLite.
 
-See also: [`shki generate`](/shki/commands/generate/),
-[How It Works](/shki/getting-started/how-it-works/).
+See also: [`shki generate`](../../commands/generate/),
+[How It Works](../../getting-started/how-it-works/).

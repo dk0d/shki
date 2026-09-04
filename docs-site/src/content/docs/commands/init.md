@@ -50,7 +50,7 @@ shki init db --dialect sqlite      # migration-runner project, no Declarative Sc
 ## Next
 
 Set `database_url` in `shki.toml` or export `DATABASE_URL`, describe your
-schema in `schema/main.sql`, then run [`shki diff`](/shki/commands/diff/).
+schema in `schema/main.sql`, then run [`shki diff`](../../commands/diff/).
 
-See also: [Quick Start](/shki/getting-started/quick-start/),
-[Configuration](/shki/reference/configuration/).
+See also: [Quick Start](../../getting-started/quick-start/),
+[Configuration](../../reference/configuration/).

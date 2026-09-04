@@ -46,10 +46,10 @@ shki migrate to 0003_add_users  # through a specific migration
 - Requires a database URL; nothing else about the project has to be present
   beyond the migrations directory.
 - A checksum mismatch on an already-applied migration is reported rather than
-  ignored — see [Troubleshooting](/shki/reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
+  ignored — see [Troubleshooting](../../reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
 - On a brand-new environment, `migrate` runs the baseline migration like any
   other. On an environment that already has the baseline schema, use
-  [`shki adopt`](/shki/commands/adopt/) instead.
+  [`shki adopt`](../../commands/adopt/) instead.
 
-See also: [`shki status`](/shki/commands/status/),
-[`shki down`](/shki/commands/down/).
+See also: [`shki status`](../../commands/status/),
+[`shki down`](../../commands/down/).

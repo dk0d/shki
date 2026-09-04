@@ -37,6 +37,17 @@ tasks:
     cmds:
       - cargo llvm-cov nextest --open
 
+  docs:version:
+    desc: Archive the current docs as a release version (VERSION=X.Y.Z); run during release prep and commit the result
+    dir: docs-site
+    cmds:
+      - bun scripts/add-version.mjs {{.VERSION}}
+      - bun install --frozen-lockfile
+      - bun run build
+    requires:
+      vars:
+        - VERSION
+
   cargo-release:
     internal: true
     desc: Prepare a release commit; merge its PR with the `release` label to tag and publish

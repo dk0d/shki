@@ -1,3 +1,11 @@
+## Content rules
+
+- Internal doc links MUST be relative (`../../commands/generate/`), never
+  root-absolute — archived version copies (starlight-versions) rely on relative
+  links to stay inside their version.
+- Never edit `src/content/docs/<version>/` or `src/content/versions/` by hand;
+  they are release archives created by `task docs:version`.
+
 ## Development
 
 When starting the dev server, use background mode:

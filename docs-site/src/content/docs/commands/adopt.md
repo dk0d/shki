@@ -47,7 +47,7 @@ Reconcile the difference, or use `--force` once you're satisfied it's benign —
 `--force` marks the migration applied regardless, so shki will assume the
 difference away from then on.
 
-Use [`shki migrate`](/shki/commands/migrate/), not `adopt`, on empty databases.
+Use [`shki migrate`](../../commands/migrate/), not `adopt`, on empty databases.
 
-See also: [`shki bootstrap`](/shki/commands/bootstrap/),
-[Troubleshooting](/shki/reference/troubleshooting/#adopt-refuses-live-shape-differs-from-the-baseline).
+See also: [`shki bootstrap`](../../commands/bootstrap/),
+[Troubleshooting](../../reference/troubleshooting/#adopt-refuses-live-shape-differs-from-the-baseline).

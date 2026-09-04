@@ -38,8 +38,8 @@ shki bootstrap initial --schema billing  # name it, non-default schema
 ## After bootstrapping
 
 Commit everything it wrote. From then on the original database is no longer
-special — evolve the schema with [`shki generate`](/shki/commands/generate/) and
-[`shki create`](/shki/commands/create/) as normal.
+special — evolve the schema with [`shki generate`](../../commands/generate/) and
+[`shki create`](../../commands/create/) as normal.
 
 Deployment depends on the target environment's state:
 
@@ -48,5 +48,5 @@ shki adopt      # environment already has the baseline schema
 shki migrate    # brand-new/empty environment: runs the baseline like any migration
 ```
 
-See also: [`shki adopt`](/shki/commands/adopt/),
-[Adopt an existing database](/shki/guides/migrations/#adopt-an-existing-database).
+See also: [`shki adopt`](../../commands/adopt/),
+[Adopt an existing database](../../guides/migrations/#adopt-an-existing-database).

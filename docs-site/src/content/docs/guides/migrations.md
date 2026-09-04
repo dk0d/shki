@@ -81,7 +81,7 @@ Each migration runs inside a single transaction, so a failure rolls the whole
 file back. Some PostgreSQL statements refuse to run that way — most commonly
 `CREATE INDEX CONCURRENTLY`, the non-blocking way to add an index to a large,
 live table. Declare the index `CONCURRENTLY` in the Declarative Schema and
-[`shki generate`](/shki/commands/generate/#concurrent-indexes) writes this
+[`shki generate`](../../commands/generate/#concurrent-indexes) writes this
 rollout for you; for hand-written migrations, add the `shki:no-transaction`
 directive to opt a migration out:
 
@@ -147,7 +147,7 @@ shki status
 `status` lists every migration, whether it has been applied, and — when it can
 reach the database — whether an applied migration's file has changed since it
 ran (a checksum mismatch). See
-[Troubleshooting](/shki/reference/troubleshooting/#checksum-mismatch-on-an-applied-migration)
+[Troubleshooting](../../reference/troubleshooting/#checksum-mismatch-on-an-applied-migration)
 if one shows up.
 
 ## Adopt an existing database

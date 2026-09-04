@@ -219,7 +219,7 @@ Notes:
 - **PostgreSQL only.** Describe-based typing relies on PostgreSQL; MySQL/SQLite
   query codegen is not implemented.
 - **Rust/sqlx only.** TypeScript/Protobuf query output is not implemented (schema
-  [codegen](/shki/guides/codegen/) covers those for types).
+  [codegen](../../guides/codegen/) covers those for types).
 - **Generated query rows always derive `sqlx::FromRow`**, regardless of the
   `[codegen] sqlx` toggle, since they are decoded by sqlx.
 - **Unsupported runtime mappings fail generation.** Types that the Rust schema

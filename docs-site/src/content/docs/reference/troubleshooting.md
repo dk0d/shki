@@ -18,12 +18,12 @@ Checksums are computed on comment-stripped SQL, so adding or editing comments
 A failed concurrent index build leaves an `INVALID` index behind, and a re-run
 guarded by `IF NOT EXISTS` would silently keep it. Check `pg_index.indisvalid`,
 `DROP INDEX` the invalid one, then re-run the migration. See
-[running outside a transaction](/shki/guides/migrations/#running-outside-a-transaction).
+[running outside a transaction](../../guides/migrations/#running-outside-a-transaction).
 
 ## `generate` fails asking about CONCURRENTLY
 
 When the Declarative Schema declares `CREATE INDEX CONCURRENTLY`,
-[`shki generate`](/shki/commands/generate/#concurrent-indexes) writes a second,
+[`shki generate`](../../commands/generate/#concurrent-indexes) writes a second,
 no-transaction migration for the index builds — and asks for confirmation
 first, since the output changes shape. Declining, or running without a terminal
 (CI, scripts), fails the whole generation and writes nothing. Run `generate`

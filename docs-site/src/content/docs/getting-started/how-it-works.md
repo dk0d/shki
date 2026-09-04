@@ -86,5 +86,5 @@ report pending work and to warn when an applied migration's file has changed
 since it ran. `migrate` never edits local Snapshots or the Journal — generation
 and application are separate concerns.
 
-Next: [Quick Start](/shki/getting-started/quick-start/) to run the loop, or
-[Declarative Schema](/shki/guides/declarative-schema/) for the authoring rules.
+Next: [Quick Start](../../getting-started/quick-start/) to run the loop, or
+[Declarative Schema](../../guides/declarative-schema/) for the authoring rules.

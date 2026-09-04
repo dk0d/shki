@@ -1,0 +1,20 @@
+---
+// Both starlight-theme-terminal and starlight-versions want the ThemeSelect
+// slot (the theme for its toggle, the versions plugin for its switcher), so
+// this override renders both side by side.
+import VersionSelect from "starlight-versions/components/VersionSelect.astro";
+import TerminalThemeSelect from "starlight-theme-terminal/overrides/ThemeSelect.astro";
+---
+
+<div class="version-theme-group">
+  <VersionSelect />
+  <TerminalThemeSelect />
+</div>
+
+<style>
+  .version-theme-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+</style>
