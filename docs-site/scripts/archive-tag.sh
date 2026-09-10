@@ -67,13 +67,8 @@ if grep -rq '](/shki/' "$DOCS" --include='*.md' --include='*.mdx'; then
 fi
 
 # 3. Register the version; the build archives the (tag) docs under its slug.
-bun scripts/add-version.mjs "$SLUG"
 bun install --frozen-lockfile
-bun run build
-if [ ! -d "$DOCS/$SLUG" ]; then
-  echo "archive ${SLUG} was not created by the build" >&2
-  exit 1
-fi
+bun scripts/archive-version.mjs "$SLUG"
 
 # 4. Put the latest docs back, order versions newest-first, and rebuild so the
 #    switcher and dist reflect the final state.

@@ -41,9 +41,8 @@ tasks:
     desc: Archive the current docs as a release version (VERSION=X.Y.Z); the release flow runs this at bump time
     dir: docs-site
     cmds:
-      - bun scripts/add-version.mjs {{.VERSION}}
       - bun install --frozen-lockfile
-      - bun run build
+      - bun scripts/archive-version.mjs {{.VERSION}}
     requires:
       vars:
         - VERSION
@@ -69,6 +68,7 @@ tasks:
       # docs snapshot — see "If the docs step of a release fails" in
       # docs-site/README.md for the recovery commands.
       - |
+        set -e
         version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "shki") | .version')"
         case "$version" in
           *-*) echo "prerelease ${version}: skipping docs archive"; exit 0 ;;
