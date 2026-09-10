@@ -218,6 +218,17 @@ pub enum CodegenLanguage {
 // `Codegen` flattens the full `CodegenConfig` (one definition shared with the
 // `[codegen]` section), which is larger than the other variants. The enum is
 // built once per invocation, so the size variance is irrelevant, and a
+#[derive(Subcommand, Debug, Clone, Serialize)]
+pub enum ShadowCommand {
+    /// Install embedded PostgreSQL from a release archive downloaded by hand,
+    /// for machines that cannot reach the GitHub API
+    Install {
+        /// A `postgresql-<version>-<target>.tar.gz` asset from
+        /// https://github.com/theseus-rs/postgresql-binaries/releases
+        archive: PathBuf,
+    },
+}
+
 // `#[command(flatten)]` field can't be boxed.
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug, Serialize)]
@@ -237,6 +248,11 @@ pub enum Commands {
         /// Database dialect
         #[arg(long, value_enum)]
         dialect: Option<SqlDialect>,
+    },
+    /// Manage the embedded Shadow Database server
+    Shadow {
+        #[command(subcommand)]
+        command: ShadowCommand,
     },
     /// Generate a schema-derived migration from the current Declarative Schema
     #[command(visible_alias = "gen")]

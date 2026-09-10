@@ -110,8 +110,10 @@ fn first_start_message(timeout_seconds: u64) -> String {
 fn server_setup_failed_message(err: postgresql_embedded::Error) -> String {
     format!(
         r#"Failed to set up embedded Shadow Database: {}.
-On first use, shki may need to download/install PostgreSQL binaries and initialize a local data directory.
+On first use, shki may need to download/install PostgreSQL binaries from GitHub and initialize a local data directory.
 Try again after checking network access, or configure shadow_database_url to use your own disposable PostgreSQL database.
+A 403 from api.github.com usually means the unauthenticated GitHub API rate limit (shared by everyone behind the same proxy IP): set GITHUB_TOKEN to raise it.
+If GitHub is unreachable, download the release archive in a browser and run `shki shadow install <archive>`.
 "#,
         err
     )

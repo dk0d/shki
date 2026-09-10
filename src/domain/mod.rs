@@ -16,6 +16,7 @@ pub mod models;
 pub mod pool;
 pub mod queries;
 pub mod schema;
+pub mod shadow;
 pub mod snapshots;
 pub mod sql;
 pub mod status;

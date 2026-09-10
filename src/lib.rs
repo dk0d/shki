@@ -28,6 +28,10 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         Commands::Init { path, dialect } => init::cmd_init(&path, dialect).await,
 
+        Commands::Shadow {
+            command: ShadowCommand::Install { archive },
+        } => shadow::cmd_shadow_install(&archive).await,
+
         Commands::Create {
             migrations,
             name,

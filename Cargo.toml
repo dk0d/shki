@@ -88,6 +88,7 @@ async-trait = "0.1.89"
 inquire = { version = "0.9.4", features = ["chrono"] }
 bat = "0.26.1"
 postgresql_embedded = { version = "0.21.0", features = ["tokio"] }
+postgresql_archive = { version = "0.21.0", default-features = false }
 ariadne = "0.6.0"
 squawk-lexer = "2.63.0"
 rand = "0.10.1"

@@ -22,6 +22,12 @@ Supported embedded major versions are `14`, `15`, `16`, `17`, and `18`; the
 default is `18`. Match it to the version you run in production so the compiled
 shape reflects the same server behavior.
 
+On first use, the embedded server binaries are downloaded from the GitHub
+releases of `theseus-rs/postgresql-binaries`. That download honors the standard
+`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` environment variables
+(lowercase variants too). If the download is refused with a 403, see
+[Embedded PostgreSQL download fails](../../reference/troubleshooting/#embedded-postgresql-download-fails).
+
 For CI, locked-down environments, or teams that want explicit provisioning,
 configure an external Shadow Database:
 

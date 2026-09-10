@@ -74,6 +74,7 @@ export default defineConfig({
           items: [
             { label: "config", slug: "commands/config" },
             { label: "init", slug: "commands/init" },
+            { label: "shadow", slug: "commands/shadow" },
             { label: "diff", slug: "commands/diff" },
             { label: "generate", slug: "commands/generate" },
             { label: "create", slug: "commands/create" },

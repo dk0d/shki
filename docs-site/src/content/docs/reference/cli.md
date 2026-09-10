@@ -47,6 +47,7 @@ Commands that read or write migrations — `create`, `generate`, `migrate`,
 | ----------------------------------------------- | ---------- | -------------------------------------------------------------- |
 | [`config`](../../commands/config/)              | `conf`     | Print the effective configuration                              |
 | [`init [path]`](../../commands/init/)           | `i`        | Scaffold a project: config, schema, migrations metadata        |
+| [`shadow install`](../../commands/shadow/)      | –          | Install embedded PostgreSQL from a hand-downloaded archive     |
 | [`diff`](../../commands/diff/)                  | –          | Compile the Declarative Schema and preview the Migration Plan  |
 | [`generate <name>`](../../commands/generate/)   | `gen`      | Write migration SQL, a Snapshot, and a Journal entry           |
 | [`create <name>`](../../commands/create/)       | `new`      | Create a Custom Migration for hand-written SQL                 |
