@@ -513,6 +513,37 @@ mod tests {
     }
 
     #[test]
+    fn date_time_crate_config_and_cli_merge() {
+        use crate::codegen::DateTimeCrate;
+
+        let config = crate::config::Config {
+            codegen: toml::from_str("date_time_crate = 'jiff'").unwrap(),
+            ..Default::default()
+        };
+        let unchanged = config
+            .clone()
+            .with_codegen_args(&parse_codegen(&[]))
+            .unwrap();
+        assert_eq!(unchanged.codegen.date_time_crate(), DateTimeCrate::Jiff);
+        for (value, expected) in [
+            ("chrono", DateTimeCrate::Chrono),
+            ("jiff", DateTimeCrate::Jiff),
+            ("jiff-sqlx", DateTimeCrate::JiffSqlx),
+        ] {
+            let merged = config
+                .clone()
+                .with_codegen_args(&parse_codegen(&["--date-time-crate", value]))
+                .unwrap();
+            assert_eq!(merged.codegen.date_time_crate(), expected);
+        }
+        assert!(toml::from_str::<CodegenConfig>("date_time_crate = 'unknown'").is_err());
+        assert!(
+            Cli::try_parse_from(["shki", "codegen", "--date-time-crate", "unknown", "rust"])
+                .is_err()
+        );
+    }
+
+    #[test]
     fn cli_codegen_args_leave_config_only_fields_empty() {
         // CodegenArgs flattens the full CodegenConfig, so merge-safety depends on
         // clap filling the `#[arg(skip)]` config-only fields with their empty

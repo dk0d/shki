@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// This struct doubles as the `[codegen]` config section, the figment merge
 /// payload, and (flattened into the `codegen` command's args) the CLI flags —
 /// one definition, like [`QueriesConfig`](crate::codegen::queries::QueriesConfig).
-/// The overridable fields (`output`/`format`/`serde`/`sqlx`) carry `#[arg]`;
+/// The overridable fields (`output`/`format`/`serde`/`sqlx`/`date_time_crate`) carry `#[arg]`;
 /// the rest are `#[arg(skip)]` config-only fields. Every field is
 /// `skip_serializing_if`-guarded so a CLI-built instance (all config-only fields
 /// at their empty default) serializes to only what the user set and never
@@ -37,6 +37,11 @@ pub struct CodegenConfig {
     #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sqlx: Option<bool>,
+
+    /// Rust date/time types: chrono (default), jiff, or jiff-sqlx wrappers
+    #[arg(long, value_enum)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_time_crate: Option<DateTimeCrate>,
 
     /// Derives to add to generated structs
     #[arg(skip)]
@@ -98,6 +103,18 @@ pub struct CodegenConfig {
     #[arg(skip)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_tables: Vec<String>,
+}
+
+/// Library used for generated Rust date/time types.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum DateTimeCrate {
+    #[default]
+    Chrono,
+    /// Native Jiff types (no SQLx trait implementations).
+    Jiff,
+    /// Jiff wrappers implementing SQLx traits for PostgreSQL and SQLite.
+    JiffSqlx,
 }
 
 /// Output mode for generated code
@@ -170,6 +187,7 @@ impl Default for CodegenConfig {
             format: None,
             serde: None,
             sqlx: None,
+            date_time_crate: None,
             struct_derives: default_struct_derives(),
             struct_attributes: Vec::new(),
             enum_derives: default_enum_derives(),
@@ -209,6 +227,11 @@ impl CodegenConfig {
     /// Whether sqlx derives/attributes are enabled (defaults to on).
     pub fn sqlx(&self) -> bool {
         self.sqlx.unwrap_or(true)
+    }
+
+    /// Resolved Rust date/time library (defaults to chrono).
+    pub fn date_time_crate(&self) -> DateTimeCrate {
+        self.date_time_crate.unwrap_or_default()
     }
 
     /// Set the output directory

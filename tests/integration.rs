@@ -958,10 +958,7 @@ async fn cli_generate_custom_then_schema_migration_keeps_journal_order() {
 
     run(shki::Cli {
         config: config_path.clone(),
-        common: CommonArgs {
-            dialect: Some(shki::schema::SqlDialect::Postgres),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Generate {
             shadow: Default::default(),
             migrations: Default::default(),
@@ -1039,10 +1036,7 @@ async fn cli_generate_accounts_for_schema_changing_custom_migration() {
         shadow_database_url: Some(shadow.database_url.clone()),
         ..Default::default()
     };
-    let common = || CommonArgs {
-        dialect: Some(shki::schema::SqlDialect::Postgres),
-        ..CommonArgs::default()
-    };
+    let common = || ctx.common_args();
     run(shki::Cli {
         config: config_path.clone(),
         common: common(),
@@ -2514,10 +2508,7 @@ async fn cli_drop_removes_pending_schema_migration_snapshot_and_journal_entry() 
 
     run(shki::Cli {
         config: config_path,
-        common: CommonArgs {
-            dialect: Some(shki::schema::SqlDialect::Postgres),
-            ..CommonArgs::default()
-        },
+        common: ctx.common_args(),
         command: Commands::Drop {
             migration: Some("create-generated-users".to_string()),
             force: false,

@@ -82,6 +82,7 @@ jsonb = "serde_json::Value"
 | `format`            | `file`                            | Output layout: `file`, `module`, or `modules`.                                                                                                                   |
 | `serde`             | `false`                           | Injects `serde::Serialize`/`Deserialize` derives and `#[serde(rename)]` attributes. Kept out of the derive lists so it can be toggled.                           |
 | `sqlx`              | `true`                            | Injects `sqlx::FromRow` (structs) / `sqlx::Type` (enums) derives and `#[sqlx(...)]` attributes. Set `false` for plain types with no sqlx coupling.               |
+| `date_time_crate`   | `chrono`                          | Rust temporal types: `chrono`, `jiff`, or `jiff-sqlx`. Explicit `type_overrides` take precedence.                                                                |
 | `struct_derives`    | `["Debug", "Clone"]`              | Replaces the default derives attached to generated structs.                                                                                                      |
 | `struct_attributes` | –                                 | Extra raw attributes added above generated structs.                                                                                                              |
 | `enum_derives`      | `["Debug", "Clone", "PartialEq"]` | Replaces the default derives attached to generated enums.                                                                                                        |
@@ -97,3 +98,56 @@ jsonb = "serde_json::Value"
 The same type mapping and naming config is reused by
 [typed queries](../../guides/queries/), so generated query functions return the
 structs and enums defined here rather than parallel copies.
+
+## Jiff date/time types
+
+For native Jiff types:
+
+```toml
+[codegen]
+date_time_crate = "jiff"
+sqlx = false
+```
+
+Or run `shki codegen --date-time-crate jiff --sqlx=false --output src/schema rust`.
+Add `jiff = "0.2"` to the consuming application's dependencies; enable its
+`serde` feature if generating Serde derives.
+
+| SQL type                        | `jiff`                  | `jiff-sqlx`            |
+| ------------------------------- | ----------------------- | ---------------------- |
+| `date`                          | `jiff::civil::Date`     | `jiff_sqlx::Date`      |
+| `time` (without time zone)      | `jiff::civil::Time`     | `jiff_sqlx::Time`      |
+| `timestamp` (without time zone) | `jiff::civil::DateTime` | `jiff_sqlx::DateTime`  |
+| `timestamp with time zone`      | `jiff::Timestamp`       | `jiff_sqlx::Timestamp` |
+
+Nullable columns and arrays retain their `Option<T>` and `Vec<T>` wrappers.
+Timezone-aware timestamps represent instants, not named time zones. Other
+mappings, including intervals and ranges, retain their existing defaults.
+
+### With SQLx and typed queries
+
+SQLx does not implement its database traits directly for native Jiff types.
+Use `date_time_crate = "jiff-sqlx"` with SQLx derives or typed queries:
+
+```toml
+# shki.toml
+[codegen]
+date_time_crate = "jiff-sqlx"
+```
+
+Add the integration crate to the consuming application's `Cargo.toml`:
+
+```toml
+[dependencies]
+jiff = "0.2"
+jiff-sqlx = { version = "0.2", features = ["postgres"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "macros"] }
+```
+
+`jiff-sqlx` supports PostgreSQL and SQLite (select its `sqlite` feature for
+SQLite), but not MySQL. Version `0.2` targets SQLx `0.9`; applications using
+SQLx `0.8` need `jiff-sqlx` `0.1`. Convert wrappers to native Jiff values with
+`.to_jiff()` and native values to wrappers with `.into()`.
+
+The SQLx wrappers do not implement Serde traits. Keep `serde = false` (the
+default) for these database models; use native Jiff types in serializable models.

@@ -10,8 +10,8 @@ use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
-use crate::codegen::CodegenConfig;
 use crate::codegen::generator::CodeGenerator;
+use crate::codegen::{CodegenConfig, DateTimeCrate};
 use crate::models::iden::Iden;
 use crate::schema::{Column, CompositeType, DataType, DbEnum, Table};
 use crate::snapshots::Snapshot;
@@ -121,6 +121,12 @@ impl GeneratedRust {
 fn extract_imports(rust_type: &str, imports: &mut Vec<String>) {
     if rust_type.contains("chrono::") {
         imports.push("use chrono;".to_string());
+    }
+    if rust_type.contains("jiff::") {
+        imports.push("use jiff;".to_string());
+    }
+    if rust_type.contains("jiff_sqlx::") {
+        imports.push("use jiff_sqlx;".to_string());
     }
     if rust_type.contains("uuid::") {
         imports.push("use uuid;".to_string());
@@ -382,14 +388,28 @@ impl RustGenerator {
 
             DataType::Uuid => "uuid::Uuid".to_string(),
             DataType::Json | DataType::JsonB => "serde_json::Value".to_string(),
-            DataType::Date => "chrono::NaiveDate".to_string(),
-            DataType::Time { .. } => "chrono::NaiveTime".to_string(),
+            DataType::Date => match config.date_time_crate() {
+                DateTimeCrate::Chrono => "chrono::NaiveDate",
+                DateTimeCrate::Jiff => "jiff::civil::Date",
+                DateTimeCrate::JiffSqlx => "jiff_sqlx::Date",
+            }
+            .to_string(),
+            DataType::Time { .. } => match config.date_time_crate() {
+                DateTimeCrate::Chrono => "chrono::NaiveTime",
+                DateTimeCrate::Jiff => "jiff::civil::Time",
+                DateTimeCrate::JiffSqlx => "jiff_sqlx::Time",
+            }
+            .to_string(),
             DataType::Timestamp { with_timezone, .. } => {
-                if *with_timezone {
-                    "chrono::DateTime<chrono::Utc>".to_string()
-                } else {
-                    "chrono::NaiveDateTime".to_string()
+                match (config.date_time_crate(), with_timezone) {
+                    (DateTimeCrate::Chrono, true) => "chrono::DateTime<chrono::Utc>",
+                    (DateTimeCrate::Chrono, false) => "chrono::NaiveDateTime",
+                    (DateTimeCrate::Jiff, true) => "jiff::Timestamp",
+                    (DateTimeCrate::Jiff, false) => "jiff::civil::DateTime",
+                    (DateTimeCrate::JiffSqlx, true) => "jiff_sqlx::Timestamp",
+                    (DateTimeCrate::JiffSqlx, false) => "jiff_sqlx::DateTime",
                 }
+                .to_string()
             }
 
             DataType::Array { element_type } => {
@@ -669,6 +689,83 @@ mod tests {
             generator.sql_type_to_rust(&DataType::Uuid, false, &enums, &composites, &config),
             "uuid::Uuid"
         );
+    }
+
+    #[test]
+    fn temporal_libraries_preserve_nullability_arrays_and_overrides() {
+        let enums = IndexMap::new();
+        let composites = IndexMap::new();
+        let cases = [
+            (
+                DataType::Date,
+                ["chrono::NaiveDate", "jiff::civil::Date", "jiff_sqlx::Date"],
+            ),
+            (
+                DataType::Time {
+                    precision: None,
+                    with_timezone: false,
+                },
+                ["chrono::NaiveTime", "jiff::civil::Time", "jiff_sqlx::Time"],
+            ),
+            (
+                DataType::Timestamp {
+                    precision: Some(6),
+                    with_timezone: false,
+                },
+                [
+                    "chrono::NaiveDateTime",
+                    "jiff::civil::DateTime",
+                    "jiff_sqlx::DateTime",
+                ],
+            ),
+            (
+                DataType::Timestamp {
+                    precision: None,
+                    with_timezone: true,
+                },
+                [
+                    "chrono::DateTime<chrono::Utc>",
+                    "jiff::Timestamp",
+                    "jiff_sqlx::Timestamp",
+                ],
+            ),
+        ];
+        for (index, library) in [
+            None,
+            Some(DateTimeCrate::Jiff),
+            Some(DateTimeCrate::JiffSqlx),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let config = CodegenConfig {
+                date_time_crate: library,
+                ..Default::default()
+            };
+            for (data_type, expected) in &cases {
+                let expected = expected[index];
+                assert_eq!(
+                    RustGenerator.sql_type_to_rust(data_type, false, &enums, &composites, &config),
+                    expected
+                );
+                assert_eq!(
+                    RustGenerator.sql_type_to_rust(data_type, true, &enums, &composites, &config),
+                    format!("Option<{expected}>")
+                );
+                let array = DataType::Array {
+                    element_type: Box::new(data_type.clone()),
+                };
+                assert_eq!(
+                    RustGenerator.sql_type_to_rust(&array, true, &enums, &composites, &config),
+                    format!("Option<Vec<{expected}>>")
+                );
+            }
+            let config = config.type_override("date", "CustomDate");
+            assert_eq!(
+                RustGenerator.sql_type_to_rust(&DataType::Date, true, &enums, &composites, &config),
+                "Option<CustomDate>"
+            );
+        }
     }
 
     #[test]
