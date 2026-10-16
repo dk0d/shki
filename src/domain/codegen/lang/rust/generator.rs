@@ -553,6 +553,16 @@ impl RustStruct {
                 if f.name.starts_with("r#") && self.serde {
                     field_attrs.push(quote! { #[serde(rename = #db_name)] });
                 }
+                if self.serde {
+                    if let Some(adapter) = jiff_serde_adapter(&f.rust_type) {
+                        let adapter = format!("serde_with::As::<{adapter}>");
+                        field_attrs.push(quote! { #[serde(with = #adapter)] });
+                        // `with` bypasses Serde's implicit default for Option fields.
+                        if f.rust_type.starts_with("Option<") {
+                            field_attrs.push(quote! { #[serde(default)] });
+                        }
+                    }
+                }
 
                 let doc = f.comment.as_ref().map(|c| {
                     quote! { #[doc = #c] }
@@ -580,6 +590,27 @@ impl RustStruct {
     pub fn to_string_pretty(&self) -> String {
         format_tokens(self.to_tokens())
     }
+}
+
+/// Adapt only recognized SQLx wrappers, including generated nullable/array types.
+fn jiff_serde_adapter(rust_type: &str) -> Option<String> {
+    for container in ["Option", "Vec"] {
+        if let Some(inner) = rust_type
+            .strip_prefix(&format!("{container}<"))
+            .and_then(|ty| ty.strip_suffix('>'))
+        {
+            return jiff_serde_adapter(inner).map(|adapter| format!("{container}<{adapter}>"));
+        }
+    }
+    let native = match rust_type {
+        "jiff_sqlx::Date" => "jiff::civil::Date",
+        "jiff_sqlx::Time" => "jiff::civil::Time",
+        "jiff_sqlx::DateTime" => "jiff::civil::DateTime",
+        "jiff_sqlx::Timestamp" => "jiff::Timestamp",
+        "jiff_sqlx::Span" => "jiff::Span",
+        _ => return None,
+    };
+    Some(format!("serde_with::FromInto<{native}>"))
 }
 
 /// Render the `#[derive(...)]` line. `serde` injects the serde derives and
@@ -979,6 +1010,29 @@ mod tests {
         assert!(output.contains(
             "#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, sqlx::FromRow)]"
         ));
+    }
+
+    #[test]
+    fn jiff_wrappers_get_serde_adapters_only_when_enabled() {
+        let mut model = renamed_field_struct(true);
+        model.fields[0].rust_type = "Option<Vec<jiff_sqlx::Timestamp>>".into();
+        assert!(!model.to_string_pretty().contains("serde_with"));
+        model.serde = true;
+        let output = model.to_string_pretty();
+        assert!(
+            output.contains("serde_with::As::<Option<Vec<serde_with::FromInto<jiff::Timestamp>>>>")
+        );
+        assert!(output.contains("#[serde(default)]"));
+        assert!(output.contains("sqlx::FromRow"));
+        for ty in [
+            "jiff::Timestamp",
+            "chrono::NaiveDate",
+            "CustomDate",
+            "Option<Vec<CustomDate>>",
+        ] {
+            model.fields[0].rust_type = ty.into();
+            assert!(!model.to_string_pretty().contains("serde_with"));
+        }
     }
 
     #[test]
