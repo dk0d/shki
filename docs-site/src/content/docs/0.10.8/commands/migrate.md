@@ -20,7 +20,7 @@ Each migration runs inside a transaction unless it carries the
 
 | Mode             | Behavior                                              |
 | ---------------- | ----------------------------------------------------- |
-| *(none)* / `all` | Apply every pending migration.                        |
+| _(none)_ / `all` | Apply every pending migration.                        |
 | `steps <N>`      | Apply the next `N` pending migrations.                |
 | `to <NAME>`      | Apply through the named pending migration, inclusive. |
 
@@ -44,11 +44,11 @@ shki migrate to 0003_add_users  # through a specific migration
 
 ## Notes
 
-* Requires a database URL; nothing else about the project has to be present
+- Requires a database URL; nothing else about the project has to be present
   beyond the migrations directory.
-* A checksum mismatch on an already-applied migration is reported rather than
+- A checksum mismatch on an already-applied migration is reported rather than
   ignored — see [Troubleshooting](../../reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
-* On a brand-new environment, `migrate` runs the baseline migration like any
+- On a brand-new environment, `migrate` runs the baseline migration like any
   other. On an environment that already has the baseline schema, use
   [`shki adopt`](../../commands/adopt/) instead.
 

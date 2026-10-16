@@ -35,8 +35,8 @@ single plain migration.
 
 Two guards protect against pointing `shki` at a database it may reset:
 
-* `shadow_database_url` must not equal `database_url`.
-* An external Shadow Database must be marked as shki-owned:
+- `shadow_database_url` must not equal `database_url`.
+- An external Shadow Database must be marked as shki-owned:
 
   ```sql
   COMMENT ON DATABASE shki_shadow IS 'shki:shadow';
@@ -50,13 +50,13 @@ disposable and dedicated.
 On first use `shki` downloads PostgreSQL binaries through the GitHub API. The
 request honors `HTTPS_PROXY` / `NO_PROXY`, but two things still break it:
 
-* **403 from `api.github.com`.** GitHub rate-limits unauthenticated API calls
+- **403 from `api.github.com`.** GitHub rate-limits unauthenticated API calls
   per source IP, and everyone behind a corporate proxy shares one IP, so the
   limit is often already exhausted. Set `GITHUB_TOKEN` (any token, no scopes
   needed) and shki sends it as a bearer token, which raises the limit to
   5000/hour. A 403 can also come from a proxy that blocks non-browser
   user agents; the same token does not help there.
-* **No GitHub API access at all.** Download the release archive in a browser
+- **No GitHub API access at all.** Download the release archive in a browser
   (or on another machine) and install it with
   [`shki shadow install`](../../commands/shadow/). Once a matching version is
   installed, shki makes no network request.

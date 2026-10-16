@@ -75,8 +75,9 @@ dialect = "sqlite"
 database_url = "sqlite://db/app.db"
 ```
 
-See [Code Generation](../../guides/codegen/) for `[codegen]` and
-[Typed Queries](../../guides/queries/) for `[queries]`.
+See [`shki codegen`](../../commands/codegen/#configuration) for `[codegen]` and
+[`shki queries`](../../commands/queries/#configuration) for `[queries]`.
+Each command reference includes its CLI flags, TOML settings, and examples.
 
 ## Environment variables
 

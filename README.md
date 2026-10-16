@@ -72,8 +72,8 @@ embedded one by default. Full walkthrough:
 | [How it works](https://dk0d.github.io/shki/getting-started/how-it-works/)    | Declarative Schema, Shadow Database, Snapshots, Journal    |
 | [Declarative Schema](https://dk0d.github.io/shki/guides/declarative-schema/) | Shadow Database setup, extensions, multi-file schemas      |
 | [Migrations](https://dk0d.github.io/shki/guides/migrations/)                 | diff, generate, Custom Migrations, apply, adopt, roll back |
-| [Code generation](https://dk0d.github.io/shki/guides/codegen/)               | Rust, TypeScript, and Protobuf types from schema shape     |
-| [Typed queries](https://dk0d.github.io/shki/guides/queries/)                 | type-safe `sqlx` functions from annotated SQL              |
+| [Code generation](https://dk0d.github.io/shki/commands/codegen/)             | Rust, TypeScript, and Protobuf types from schema shape     |
+| [Typed queries](https://dk0d.github.io/shki/commands/queries/)               | type-safe `sqlx` functions from annotated SQL              |
 | [CLI reference](https://dk0d.github.io/shki/reference/cli/)                  | every command, flag, and alias                             |
 | [Configuration](https://dk0d.github.io/shki/reference/configuration/)        | `shki.toml` keys and environment variables                 |
 

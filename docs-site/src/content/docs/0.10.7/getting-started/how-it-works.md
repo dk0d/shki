@@ -5,8 +5,8 @@ description: The Declarative Schema, Shadow Database, Snapshot, and Journal
 slug: 0.10.7/getting-started/how-it-works
 ---
 
-Most migration tools ask you to write the *change*. `shki` asks you to write the
-*destination* — the schema you want — and works out the change by comparing that
+Most migration tools ask you to write the _change_. `shki` asks you to write the
+_destination_ — the schema you want — and works out the change by comparing that
 destination to what it already knows about your database's history.
 
 ## The pieces
@@ -44,10 +44,10 @@ flowchart TD
 
 Two things follow from this design:
 
-* **Your live database is never the source of truth for generation.** The
+- **Your live database is never the source of truth for generation.** The
   baseline is the last committed Snapshot, so `diff` and `generate` are
   deterministic and work offline, without touching production.
-* **The Shadow Database is disposable and reset before use.** It exists only to
+- **The Shadow Database is disposable and reset before use.** It exists only to
   turn SQL text into an introspectable shape. By default `shki` manages an
   embedded PostgreSQL, so there is nothing to install or provision.
 

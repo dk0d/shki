@@ -35,8 +35,8 @@ single plain migration.
 
 Two guards protect against pointing `shki` at a database it may reset:
 
-* `shadow_database_url` must not equal `database_url`.
-* An external Shadow Database must be marked as shki-owned:
+- `shadow_database_url` must not equal `database_url`.
+- An external Shadow Database must be marked as shki-owned:
 
   ```sql
   COMMENT ON DATABASE shki_shadow IS 'shki:shadow';

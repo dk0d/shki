@@ -23,9 +23,9 @@ shki generate add_users_table
 
 `generate` writes:
 
-* `migrations/<migration>.sql`
-* `migrations/_meta/<migration>.snapshot.json`
-* `migrations/_meta/_journal.json`
+- `migrations/<migration>.sql`
+- `migrations/_meta/<migration>.snapshot.json`
+- `migrations/_meta/_journal.json`
 
 Use `--down` (or `migrations.generate_down = true`) to write a Down Migration:
 
@@ -93,10 +93,10 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scan_profile ON scan (profile_id);
 Each `--> +statement` segment is then sent on its own, outside any transaction.
 Two consequences:
 
-* **The migration must be idempotent.** A failure part-way leaves earlier
+- **The migration must be idempotent.** A failure part-way leaves earlier
   segments committed and the migration unrecorded, so the next `shki migrate`
   replays the file from the top. Write `IF NOT EXISTS` and the like.
-* **A failed concurrent index build leaves an `INVALID` index behind**, which
+- **A failed concurrent index build leaves an `INVALID` index behind**, which
   `IF NOT EXISTS` would then silently keep. Check `pg_index.indisvalid`,
   `DROP INDEX` the invalid one, and re-run. Shki says so in the error when a
   `CONCURRENTLY` statement fails.
@@ -174,7 +174,7 @@ shki migrate              # runs the baseline like any other migration, then the
 
 `adopt` introspects the target, refuses if the live shape drifts from the
 committed baseline Snapshot (override with `--force`), records the baseline as
-applied *without executing* it, and then applies any newer migrations. Use
+applied _without executing_ it, and then applies any newer migrations. Use
 `--mark-only` to stop after marking, `--dry-run` to preview, or pass a migration
 name to adopt up to a specific point. `adopt` is idempotent — re-running it only
 applies what is still pending.

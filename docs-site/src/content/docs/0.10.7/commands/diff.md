@@ -34,11 +34,11 @@ shki diff --shadow-database-url postgres://user:pass@localhost:5432/shki_shadow
 
 ## Notes
 
-* If any Custom Migrations have no Snapshot yet, `diff` replays them on the
+- If any Custom Migrations have no Snapshot yet, `diff` replays them on the
   Shadow Database first so the baseline is complete.
-* "No schema changes detected" means the Declarative Schema and the latest
+- "No schema changes detected" means the Declarative Schema and the latest
   Snapshot agree — nothing to generate.
-* PostgreSQL only: Declarative Schema compilation is not implemented for MySQL,
+- PostgreSQL only: Declarative Schema compilation is not implemented for MySQL,
   and is planned for SQLite.
 
 See also: [`shki generate`](../../commands/generate/),

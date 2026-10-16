@@ -32,9 +32,9 @@ shki status -u postgres://user:pass@prod-host:5432/mydb
 
 ## Notes
 
-* Without a reachable database, `status` still lists local migrations; it just
+- Without a reachable database, `status` still lists local migrations; it just
   can't say which are applied or validate checksums.
-* A checksum failure means the file changed after it was applied. Restore the
+- A checksum failure means the file changed after it was applied. Restore the
   original SQL and write a follow-up migration instead of editing history — see
   [Troubleshooting](../../reference/troubleshooting/#checksum-mismatch-on-an-applied-migration).
 

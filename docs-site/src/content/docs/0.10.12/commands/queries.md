@@ -67,8 +67,8 @@ becomes `Option<T>` automatically. Result nullability comes from the schema's
 
 ## Notes
 
-* The Shadow Database starts for the describe step, so this pays the same
+- The Shadow Database starts for the describe step, so this pays the same
   startup cost as `diff`/`generate`.
-* Rust/sqlx output only; TypeScript and Protobuf are schema-`codegen` targets.
+- Rust/sqlx output only; TypeScript and Protobuf are schema-`codegen` targets.
 
 **Full details: [Typed Queries guide](../../guides/queries/).**

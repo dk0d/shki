@@ -33,12 +33,12 @@ shki down 3            # roll back the newest three
 
 ## Notes
 
-* Down Migrations are for local iteration. Rolling back in production is a data
+- Down Migrations are for local iteration. Rolling back in production is a data
   loss risk that a `DROP` in a down file will happily deliver; prefer a
   forward-fix migration there.
-* Generate Down Migrations with `shki generate <name> --down`,
+- Generate Down Migrations with `shki generate <name> --down`,
   `shki create <name> --with-down`, or `[migrations] generate_down = true`.
-* Requires a database URL.
+- Requires a database URL.
 
 See also: [`shki migrate`](../../commands/migrate/),
 [`shki drop`](../../commands/drop/) for removing a migration that was never

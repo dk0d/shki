@@ -57,8 +57,8 @@ shki generate add_index --prefix timestamp
 
 ## Notes
 
-* "No schema changes detected" means there is nothing to generate.
-* Commit the migration, its Snapshot, and the updated Journal together — the
+- "No schema changes detected" means there is nothing to generate.
+- Commit the migration, its Snapshot, and the updated Journal together — the
   Snapshot is the baseline the next `generate` diffs against.
 
 See also: [Migrations guide](../../guides/migrations/),

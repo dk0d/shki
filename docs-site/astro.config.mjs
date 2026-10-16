@@ -61,12 +61,6 @@ export default defineConfig({
           items: [
             { label: "Declarative Schema", slug: "guides/declarative-schema" },
             { label: "Migrations", slug: "guides/migrations" },
-            { label: "Code Generation", slug: "guides/codegen" },
-            {
-              label: "Typed Queries",
-              slug: "guides/queries",
-              badge: { text: "Alpha", variant: "caution" },
-            },
           ],
         },
         {
@@ -116,10 +110,7 @@ export default defineConfig({
         ...(versionsFile.versions.length > 0
           ? [
               starlightVersions({
-                versions: [
-                  { slug: "next", label: "Next" },
-                  ...versionsFile.versions,
-                ],
+                versions: [{ slug: "next", label: "Next" }, ...versionsFile.versions],
                 current: { label: "Next" },
               }),
             ]

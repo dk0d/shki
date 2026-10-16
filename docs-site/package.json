@@ -7,7 +7,8 @@
     "start": "astro dev",
     "build": "node scripts/refresh-next.mjs && astro build && node scripts/postbuild.mjs",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "format": "bun run oxfmt"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.7",

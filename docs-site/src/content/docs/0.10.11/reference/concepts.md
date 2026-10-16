@@ -38,23 +38,23 @@ remains dialect-aware for PostgreSQL, MySQL, and SQLite.
 
 Implemented or active:
 
-* SQL Declarative Schema loading from a single file or Directory Schema.
-* PostgreSQL Shadow Database compilation through embedded or external PostgreSQL.
-* Snapshot and Journal history for generated schema migrations.
-* `diff` previews based on Migration Plan summaries and rename candidates.
-* `generate` for schema-derived migrations.
-* Custom Migrations via `create` or `generate --custom`.
-* `dump` for SQL, JSON, and Directory Schema export.
-* `drop` for removing local migration artifacts and Journal entries.
-* Migration runner, status, checksum validation, and Down Migrations.
-* `bootstrap` to author a baseline from an existing database, and `adopt` to validate and adopt an existing environment against it.
-* Code generation from current Declarative Schema or Snapshot JSON for Rust, TypeScript, and Protobuf.
+- SQL Declarative Schema loading from a single file or Directory Schema.
+- PostgreSQL Shadow Database compilation through embedded or external PostgreSQL.
+- Snapshot and Journal history for generated schema migrations.
+- `diff` previews based on Migration Plan summaries and rename candidates.
+- `generate` for schema-derived migrations.
+- Custom Migrations via `create` or `generate --custom`.
+- `dump` for SQL, JSON, and Directory Schema export.
+- `drop` for removing local migration artifacts and Journal entries.
+- Migration runner, status, checksum validation, and Down Migrations.
+- `bootstrap` to author a baseline from an existing database, and `adopt` to validate and adopt an existing environment against it.
+- Code generation from current Declarative Schema or Snapshot JSON for Rust, TypeScript, and Protobuf.
 
 Still in progress:
 
-* Validation workflows for comparing Declarative Schema, Snapshot history, migration artifacts, and live database shape.
-* Full diff/render semantics for every PostgreSQL Catalog object represented by Dump.
-* Declarative Schema generation for MySQL and SQLite.
+- Validation workflows for comparing Declarative Schema, Snapshot history, migration artifacts, and live database shape.
+- Full diff/render semantics for every PostgreSQL Catalog object represented by Dump.
+- Declarative Schema generation for MySQL and SQLite.
 
 ## Related projects
 

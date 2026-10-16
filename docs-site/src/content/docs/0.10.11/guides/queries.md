@@ -72,7 +72,7 @@ Cardinality controls the return shape:
 
 ## Features
 
-* **Reuses schema types.** When a query's result columns map, in full and in
+- **Reuses schema types.** When a query's result columns map, in full and in
   order, to a known table, the function returns that table's generated struct
   (e.g. `Option<User>`) instead of a parallel row type; columns whose type is a
   known enum reuse the generated enum. Projections and joins get a synthesized
@@ -80,12 +80,12 @@ Cardinality controls the return shape:
   The generated module imports these types with a `use` path derived from your
   output layout (override with `models`).
 
-* **Schema-driven nullability.** Result columns and parameters get `T` vs
+- **Schema-driven nullability.** Result columns and parameters get `T` vs
   `Option<T>` from the Declarative Schema's `NOT NULL` constraints, with
   explicit markers where inference cannot reach — see
   [Nullability](#nullability).
 
-* **Named arguments.** A query may bind parameters as `$name` (e.g. `$email`)
+- **Named arguments.** A query may bind parameters as `$name` (e.g. `$email`)
   instead of positional `$1`, producing a self-documenting signature
   (`user_by_email(executor, email: String)`) rather than positional `arg1`. shki
   rewrites `$name` to `$n` before describing; the names exist only in the Rust
@@ -125,17 +125,17 @@ Cardinality controls the return shape:
   string literal, comment, or dollar-quoted body is left alone — only real
   placeholders are rewritten.
 
-* **Transactions.** Add `:tx` to require a
+- **Transactions.** Add `:tx` to require a
   `&mut sqlx::Transaction<'_, sqlx::Postgres>` instead of a generic executor,
   e.g. `-- name: deactivate_user :exec :tx`. The generated wrapper executes only
   through that transaction.
 
-* **Pagination (`:batch`).** Two explicit modes:
-  * **Limit/offset** — a query carrying a `LIMIT $limit OFFSET $offset`
+- **Pagination (`:batch`).** Two explicit modes:
+  - **Limit/offset** — a query carrying a `LIMIT $limit OFFSET $offset`
     placeholder takes a shared `Pagination { limit, offset }` by reference and
     returns `Result<Page<Row>>`. `Pagination`/`Page<T>` are emitted once and
     reused.
-  * **Cursor/keyset** — selected by a `:keyset` modifier mapping cursor bind
+  - **Cursor/keyset** — selected by a `:keyset` modifier mapping cursor bind
     parameters to selected fields (e.g.
     `-- name: events_after :batch :keyset $1=id $2=created_at`). The function
     takes a `cursor: &CursorPagination<K>` (where `K` is the keyset type, a tuple
@@ -149,12 +149,12 @@ the Declarative Schema — its source of truth — falling back to sqlx's
 describe-time analysis, and gives you explicit markers for the cases neither
 can prove.
 
-| Where                                                | Rust type                                                     |
-| ---------------------------------------------------- | ------------------------------------------------------------- |
-| Result column traced to a schema column              | Schema `NOT NULL` → `T`; nullable (or outer join) → `Option<T>` |
+| Where                                                    | Rust type                                                         |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| Result column traced to a schema column                  | Schema `NOT NULL` → `T`; nullable (or outer join) → `Option<T>`   |
 | Result column with no table origin (expression, `UNION`) | `Option<T>` unless proven; force with `AS "name!"` / `AS "name?"` |
-| Parameter written whole into a column (`VALUES` / `SET`) | Inferred from that column: nullable → `Option<T>`               |
-| Any other parameter                                  | `T`; mark `?name` for `Option<T>`                              |
+| Parameter written whole into a column (`VALUES` / `SET`) | Inferred from that column: nullable → `Option<T>`                 |
+| Any other parameter                                      | `T`; mark `?name` for `Option<T>`                                 |
 
 ### Result columns
 
@@ -209,28 +209,28 @@ users_by_optional_status(executor, status: Option<UserStatus>) -> Result<Vec<Use
 
 Notes:
 
-* Only plain arguments can be nullable — `?limit`/`?offset` and keyset cursor
+- Only plain arguments can be nullable — `?limit`/`?offset` and keyset cursor
   parameters are rejected.
-* Positional (`$1`) queries have no nullable form; use named parameters.
-* A `?` not directly followed by an identifier (like the JSONB `data ? 'key'`
+- Positional (`$1`) queries have no nullable form; use named parameters.
+- A `?` not directly followed by an identifier (like the JSONB `data ? 'key'`
   operator) is left alone — keep a space after operator uses of `?` so they
   aren't read as a parameter.
-* `INSERT` without an explicit column list is not inferred; add the column
+- `INSERT` without an explicit column list is not inferred; add the column
   list or use `?name`.
 
 ## Limitations
 
-* **PostgreSQL only.** Describe-based typing relies on PostgreSQL; MySQL/SQLite
+- **PostgreSQL only.** Describe-based typing relies on PostgreSQL; MySQL/SQLite
   query codegen is not implemented.
-* **Rust/sqlx only.** TypeScript/Protobuf query output is not implemented (schema
+- **Rust/sqlx only.** TypeScript/Protobuf query output is not implemented (schema
   [codegen](../../guides/codegen/) covers those for types).
-* **Generated query rows always derive `sqlx::FromRow`**, regardless of the
+- **Generated query rows always derive `sqlx::FromRow`**, regardless of the
   `[codegen] sqlx` toggle, since they are decoded by sqlx.
-* **Unsupported runtime mappings fail generation.** Types that the Rust schema
+- **Unsupported runtime mappings fail generation.** Types that the Rust schema
   generator renders as `String` but sqlx cannot decode as `String` (such as
   `NUMERIC`, ranges, network, geometric, and interval types) require a compatible
   `[codegen.type_overrides]` entry.
-* The Shadow Database is started for the describe step, so query codegen pays the
+- The Shadow Database is started for the describe step, so query codegen pays the
   same startup cost as `diff`/`generate`.
 
 ## Configuration

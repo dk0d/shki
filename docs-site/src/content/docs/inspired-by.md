@@ -21,7 +21,7 @@ them proved out.
   code generation from introspected queries, an ancestor of
   [`queries`](../commands/queries/).
 - **[sqlc](https://sqlc.dev)** — the `-- name: … :one` annotation style that
-  [typed queries](../guides/queries/) borrow wholesale.
+  [typed queries](../commands/queries/) borrow wholesale.
 - **[goose](https://github.com/pressly/goose)** — a database migration tool
   supporting SQL migrations and Go functions; the migration-runner behavior
   behind [`migrate`](../commands/migrate/) and [`status`](../commands/status/).

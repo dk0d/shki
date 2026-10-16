@@ -8,9 +8,7 @@ import { readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const dist = new URL("../dist/", import.meta.url);
-const { latest } = JSON.parse(
-  readFileSync(new URL("../versions.json", import.meta.url), "utf8"),
-);
+const { latest } = JSON.parse(readFileSync(new URL("../versions.json", import.meta.url), "utf8"));
 
 // Keep version dirs, shared assets, and site-level files; prune the rest
 // (the pages built from the working docs).
@@ -25,9 +23,7 @@ const keep = [
   /^sitemap/,
 ];
 for (const entry of readdirSync(dist)) {
-  const kept = keep.some((rule) =>
-    typeof rule === "string" ? rule === entry : rule.test(entry),
-  );
+  const kept = keep.some((rule) => (typeof rule === "string" ? rule === entry : rule.test(entry)));
   if (!kept) rmSync(new URL(entry, dist), { recursive: true });
 }
 

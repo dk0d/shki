@@ -29,12 +29,12 @@ deeper diff/render coverage and validation workflows are still being built.
 recorded schema history and producing migration artifacts. The direction is
 SQL-first and Drizzle-inspired:
 
-* You author a **Declarative Schema** in SQL.
-* `shki` compiles it in a disposable **Shadow Database**.
-* The resulting **Snapshot** is compared with the latest recorded Snapshot from the **Journal**.
-* `shki diff` previews the **Migration Plan**.
-* `shki generate` writes migration SQL, a new Snapshot, and a Journal entry.
-* `shki migrate` applies migration artifacts to the live database.
+- You author a **Declarative Schema** in SQL.
+- `shki` compiles it in a disposable **Shadow Database**.
+- The resulting **Snapshot** is compared with the latest recorded Snapshot from the **Journal**.
+- `shki diff` previews the **Migration Plan**.
+- `shki generate` writes migration SQL, a new Snapshot, and a Journal entry.
+- `shki migrate` applies migration artifacts to the live database.
 
 <CardGrid stagger>
   <Card title="Quick start" icon="rocket">
@@ -42,20 +42,19 @@ SQL-first and Drizzle-inspired:
     start](getting-started/quick-start/)
   </Card>
 
-  <Card title="How it works" icon="puzzle">
-    Shadow Database, Snapshots, and the Journal — what shki is actually doing. [How it
-    works](getting-started/how-it-works/)
-  </Card>
+<Card title="How it works" icon="puzzle">
+  Shadow Database, Snapshots, and the Journal — what shki is actually doing. [How it
+  works](getting-started/how-it-works/)
+</Card>
 
-  <Card title="Declarative Schema" icon="document">
-    Single file or directory, extensions, and Shadow Database setup. [Declarative
-    Schema](guides/declarative-schema/)
-  </Card>
+<Card title="Declarative Schema" icon="document">
+  Single file or directory, extensions, and Shadow Database setup. [Declarative
+  Schema](guides/declarative-schema/)
+</Card>
 
-  <Card title="Migrations" icon="seti:db">
-    Preview, generate, hand-write, apply, adopt, and roll back.
-    [Migrations](guides/migrations/)
-  </Card>
+<Card title="Migrations" icon="seti:db">
+  Preview, generate, hand-write, apply, adopt, and roll back. [Migrations](guides/migrations/)
+</Card>
 
   <Card title="Codegen" icon="seti:rust">
     Rust, TypeScript, and Protobuf types, plus type-safe sqlx query functions.

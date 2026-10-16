@@ -86,7 +86,7 @@ shki status
 
 Steps 3–6 are the loop: edit the schema, `diff`, `generate`, `migrate`.
 
-* [How It Works](../../getting-started/how-it-works/) — what the Shadow Database, Snapshots, and Journal are doing
-* [Declarative Schema](../../guides/declarative-schema/) — extensions, multi-file schemas, external Shadow Database
-* [Migrations](../../guides/migrations/) — hand-written SQL, rollback, adopting an existing database
-* Already have a database? [Adopt an existing database](../../guides/migrations/#adopt-an-existing-database) instead of starting from `init`.
+- [How It Works](../../getting-started/how-it-works/) — what the Shadow Database, Snapshots, and Journal are doing
+- [Declarative Schema](../../guides/declarative-schema/) — extensions, multi-file schemas, external Shadow Database
+- [Migrations](../../guides/migrations/) — hand-written SQL, rollback, adopting an existing database
+- Already have a database? [Adopt an existing database](../../guides/migrations/#adopt-an-existing-database) instead of starting from `init`.

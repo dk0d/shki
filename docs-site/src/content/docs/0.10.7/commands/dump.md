@@ -42,10 +42,10 @@ shki dump --schema billing                       # a non-public schema
 
 ## Notes
 
-* Works on PostgreSQL, MySQL, and SQLite; PostgreSQL has the richest catalog
+- Works on PostgreSQL, MySQL, and SQLite; PostgreSQL has the richest catalog
   coverage.
-* To adopt an existing database, prefer [`shki bootstrap`](../../commands/bootstrap/),
-  which writes the Directory Schema *and* the baseline migration, Snapshot, and
+- To adopt an existing database, prefer [`shki bootstrap`](../../commands/bootstrap/),
+  which writes the Directory Schema _and_ the baseline migration, Snapshot, and
   Journal entry in one step.
 
 See also: [Declarative Schema](../../guides/declarative-schema/).
