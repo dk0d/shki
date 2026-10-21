@@ -1,222 +1,295 @@
+@reference "./tailwind.css";
 @layer starlight, terminal;
 
-/* Dark mode theme variables */
-:root,
-::backdrop {
+/* shki workbench: warm ink, copper accents, and ruled surfaces. */
+:root {
   color-scheme: dark;
-
-  /* Base colors */
-  --sl-color-white: hsl(0, 0%, 100%);
-  --sl-color-black: hsl(224, 10%, 10%);
-
-  /* Brand colors */
-  --brand-primary: #77bbff;
-  --brand-secondary: #88aaff;
-
-  /* SL's main background and text color  */
-  /* --sl-color-text: #c1c3c8; */
-  --sl-color-text: #d0d0d5;
-  --sl-color-bg: #17181c;
-
-  /* Accent colors */
-  --sl-color-accent: hsl(228, 100%, 70%);
-  --sl-color-accent-low: hsl(228, 70%, 30%);
-  --sl-color-accent-high: #b6c4fb;
-
-  /* Gray scale */
-  --sl-color-gray-1: hsl(220, 20%, 98%);
-  --sl-color-gray-2: hsl(220, 15%, 95%);
-  --sl-color-gray-3: hsl(220, 10%, 88%);
-  --sl-color-gray-4: hsl(220, 8%, 65%);
-  --sl-color-gray-5: hsl(220, 6%, 45%);
-  --sl-color-gray-6: hsl(220, 8%, 25%);
-  --sl-color-gray-7: hsl(220, 10%, 15%);
-  --sl-color-gray-8: hsl(220, 10%, 5%);
-  --sl-color-gray-9: hsl(220, 10%, 1%);
-
-  /* Shadows */
-  --sl-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --sl-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --sl-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --sl-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
-
-  /* Layout colors */
-  --sl-color-hairline: #212929;
-  --sl-color-hairline-shade: var(--sl-color-hairline);
-  --sl-color-bg-sidebar: #0d1117;
+  --sl-color-white: #f5efe5;
+  --sl-color-black: #171918;
+  --sl-color-gray-1: #eee8de;
+  --sl-color-gray-2: #d4cec3;
+  --sl-color-gray-3: #b5b0a6;
+  --sl-color-gray-4: #8d8c82;
+  --sl-color-gray-5: #54574f;
+  --sl-color-gray-6: #363b35;
+  --sl-color-gray-7: #252a25;
+  --sl-color-gray-8: #1c201c;
+  --sl-color-gray-9: #141714;
+  --sl-color-bg: #171b18;
+  --sl-color-text: #d4cec3;
+  --sl-color-accent: #e5a072;
+  --sl-color-accent-low: #38291f;
+  --sl-color-accent-high: #f2c5a4;
+  --sl-color-bg-sidebar: #131713;
   --sl-color-bg-nav: var(--sl-color-bg-sidebar);
-  --sl-scrollbar-color: var(--sl-color-accent-high);
+  --sl-color-hairline: #363b35;
+  --shki-surface: #1e231e;
+  --shki-on-accent: #241b14;
 
-  /* Typography */
-  --sl-hue-blue: 222;
-  --sl-text-h3: var(--sl-text-2xl);
-  --sl-text-h4: 1.2rem;
+  --sl-font: "Geist Variable", system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --sl-text-h3: 1.4rem;
+  --sl-nav-height: 4rem;
+  --border-radius: 3px;
+  --sl-border-radius: 3px;
+  --sl-border-radius-sm: 2px;
+  --sl-border-radius-lg: 4px;
 
-  /* Component colors */
-  --badge-border-color: --sl-color-hairline;
-  --fb-blacks: 255, 255, 255;
-  --terminal-header-bg-color: transparent;
-  --fb-ec-caption-bg-color: #23262e;
-  --fb-code-block-bg-color: #272a32;
-  --fb-ec-caption-bb-color: #464747;
-  --fb-ec-language-color: #c1c2c9;
-  --fb-steps-bg-color: var(--sl-color-accent-high);
-  --fb-steps-text-color: #010319;
-  --starlight-image-zoom-backdrop-bg: oklch(0 0 0);
-  --fb-table-header-bg-color: hsl(240, 91%, 5%);
-  --fb-toc-color-current-bg: #0085f230;
-  --list-marker-color: var(--sl-color-gray-2);
-  --divider-color: var(--sl-color-gray-3);
-  --fb-table-border-color: var(--sl-color-gray-4);
-  --fb-sidebar-color-text-current: rgba(255, 255, 255, 1);
-  --fb-level-2-bg: #2c3139;
-  --fb-sidebar-color-current-bg: hsl(220, 12%, 20%);
-  --fb-sidebar-color-current-hover: hsl(220, 12%, 17%);
+  /* Keep the terminal theme's components on the same palette. */
+  --brand-primary: var(--sl-color-accent);
+  --brand-secondary: var(--sl-color-accent-high);
+  --sl-color-hairline-shade: var(--sl-color-hairline);
+  --sl-color-bg-inline-code: var(--sl-color-gray-7);
+  --sl-scrollbar-color: var(--sl-color-gray-5);
+  --terminal-header-bg-color: var(--sl-color-bg-nav);
+  --badge-border-color: var(--sl-color-hairline);
+  --fb-ec-caption-bg-color: var(--sl-color-bg-sidebar);
+  --fb-ec-caption-bb-color: var(--sl-color-hairline);
+  --fb-ec-language-color: var(--sl-color-gray-3);
+  --fb-code-block-bg-color: var(--shki-surface);
+  --fb-steps-bg-color: var(--sl-color-accent);
+  --fb-steps-text-color: var(--shki-on-accent);
+  --fb-toc-color-current-bg: var(--sl-color-accent-low);
+  --fb-toc-current-text-color: var(--sl-color-accent-high);
+  --fb-sidebar-color-text-current: var(--sl-color-accent-high);
+  --fb-table-border-color: var(--sl-color-hairline);
+  --fb-table-header-bg-color: var(--shki-surface);
+  --terminal-card-border-radius: 3px;
+  --terminal-button-border-radius: 3px;
+  --terminal-card-backdrop-filter: none;
 }
 
-/* Light mode theme variables */
 :root[data-theme="light"] {
   color-scheme: light;
-
-  --brand-primary: #2288ff;
-
-  /* Base colors */
-  --sl-color-white: hsl(224, 10%, 10%);
-  --sl-color-black: hsl(0, 0%, 100%);
-  /* --sl-color-bg: #f8f9fa; */
-  --sl-color-bg: #fbfcfc;
-  --sl-color-text: black;
-
-  /* Accent colors */
-  --sl-color-accent: hsl(222, 89%, 55%);
-  --sl-color-accent-low: hsl(222, 89%, 85%);
-  --sl-color-accent-high: hsl(222, 80%, 35%);
-
-  /* Gray scale */
-  --sl-color-gray-1: hsl(220, 15%, 8%);
-  --sl-color-gray-2: hsl(220, 13%, 12%);
-  --sl-color-gray-3: hsl(220, 10%, 18%);
-  --sl-color-gray-4: hsl(220, 8%, 35%);
-  --sl-color-gray-5: hsl(220, 6%, 55%);
-  --sl-color-gray-6: hsl(220, 8%, 75%);
-  --sl-color-gray-7: hsl(220, 10%, 85%);
-  --sl-color-gray-8: hsl(220, 10%, 95%);
-  --sl-color-gray-9: hsl(220, 10%, 98%);
-
-  /* Layout colors */
-  --sl-color-hairline: #edeef3;
-  --sl-color-bg-sidebar: #f8f9fa;
-  --sl-color-bg-nav: #eff1f1;
-  --sl-scrollbar-color: var(--sl-color-accent);
-
-  /* Typography */
-  --sl-text-h3: var(--sl-text-2xl);
-
-  /* Component colors */
-  --badge-border-color: lightgrey;
-  --fb-blacks: 0, 0, 0;
-  --terminal-header-bg-color: rgba(248, 252, 252, 0.95);
-  --purple-hsl: 215, 75%, 85%;
-  --fb-ec-caption-bg-color: #eff2f1;
-  --fb-ec-caption-bb-color: #dadde1;
-  --fb-code-block-bg-color: #f6f7f9;
-  --fb-ec-language-color: #636467;
-  --fb-steps-bg-color: #0069c2;
-  --fb-steps-text-color: #f6f6f4f9;
-  --fb-table-header-bg-color: #e8e7e7;
-  --starlight-image-zoom-backdrop-bg: oklch(95% 0 0);
-  --list-marker-color: var(--sl-color-gray-3);
-  --divider-color: var(--sl-color-gray-3);
-  --fb-table-border-color: rgba(0, 0, 0, 0.1);
-
-  /* Border utilities */
-  --border-xlight: rgb(0 0 0/5%);
-  --border-light: rgba(0, 0, 0, 0.1);
-  --border-medium: rgba(0, 0, 0, 0.15);
-  --border-heavy: rgba(0, 0, 0, 0.2);
-  --border-xheavy: rgba(0, 0, 0, 0.25);
-
-  /* Sidebar colors */
-  --fb-level-2-bg: #ffffff;
-  --fb-level-0-bg: #f5f7f8;
-  --fb-sidebar-color-text-current: rgba(38, 50, 56, 1);
-  --fb-toc-color-current-bg: #0085f230;
-  --fb-sidebar-color-current-bg: #ececf2;
-  --fb-sidebar-color-current-hover: var(--sl-color-gray-7);
+  --sl-color-white: #252b25;
+  --sl-color-black: #fffdf7;
+  --sl-color-gray-1: #252b25;
+  --sl-color-gray-2: #3e453d;
+  --sl-color-gray-3: #596053;
+  --sl-color-gray-4: #73796d;
+  --sl-color-gray-5: #a4a898;
+  --sl-color-gray-6: #d1d2c4;
+  --sl-color-gray-7: #e8e7db;
+  --sl-color-gray-8: #efeee4;
+  --sl-color-gray-9: #f7f5ec;
+  --sl-color-bg: #f7f5ec;
+  --sl-color-text: #3e453d;
+  --sl-color-accent: #9b4b27;
+  --sl-color-accent-low: #f0dfcd;
+  --sl-color-accent-high: #79371b;
+  --sl-color-bg-sidebar: #eeede2;
+  --sl-color-hairline: #d1d2c4;
+  --shki-surface: #fffdf7;
+  --shki-on-accent: #fffdf7;
 }
 
-/* Global design tokens and utilities */
-:root,
-::backdrop {
-  /* Typography */
-  --sl-font: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --sl-font-mono:
-    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, "Fira Code", monospace;
-  font-weight: 400;
+::selection {
+  @apply bg-primary text-primary-foreground;
+}
 
-  /* Typography Scale */
-  --sl-text-xs: 0.75rem;
-  --sl-text-sm: 0.875rem;
-  --sl-text-base: 1rem;
-  --sl-text-lg: 1.125rem;
-  --sl-text-xl: 1.25rem;
-  --sl-text-2xl: 1.5rem;
-  --sl-text-3xl: 1.875rem;
-  --sl-text-4xl: 2.25rem;
-  --sl-text-5xl: 2.25rem;
-  --sl-text-6xl: 3rem;
-  --sl-text-7xl: 3.5rem;
-  --sl-text-8xl: 4rem;
+/* Starlight owns this markup; apply the same utilities as our Svelte islands. */
+.site-title {
+  @apply gap-2 font-mono text-2xl font-bold tracking-tighter;
+}
 
-  /* Spacing System */
-  --sl-spacing-xs: 0.25rem;
-  --sl-spacing-sm: 0.5rem;
-  --sl-spacing-md: 1rem;
-  --sl-spacing-lg: 1.5rem;
-  --sl-spacing-xl: 2rem;
-  --sl-spacing-2xl: 3rem;
-  --sl-spacing-3xl: 4rem;
+.site-title::before {
+  @apply size-2.5 bg-primary shadow-[3px_3px_0_var(--accent)];
+  content: "";
+}
 
-  /* Border Radius System */
-  --border-radius: 8px;
-  --sl-border-radius-sm: 0.25rem;
-  --sl-border-radius: 0.5rem;
-  --sl-border-radius-lg: 0.75rem;
-  --sl-border-radius-xl: 1rem;
+.site-title,
+h1,
+.card .title,
+.sl-link-card .title,
+.pagination-links .link-title {
+  @apply bg-none text-[var(--sl-color-white)];
+  -webkit-text-fill-color: currentColor;
+}
 
-  /* Layout */
-  /* --sl-content-width: 47rem; */
-  /* --sl-sidebar-width: 20rem; */
-  --sl-nav-height: 4rem;
-  --space-xs: clamp(1rem, 0.75rem + 0vi, 0.75rem);
+.page > .header {
+  @apply border-b border-border shadow-[inset_0_2px_var(--primary)];
+}
 
-  /* Animation & Timing */
-  --duration-300: 300ms;
-  --duration-400: 400ms;
-  --duration-1200: 1200ms;
-  --duration-3000: 3000ms;
-  --ease: cubic-bezier(0.25, 0, 0.3, 1);
-  --ease-elastic: cubic-bezier(0.5, 1.25, 0.75, 1.25);
-  --ease-out: cubic-bezier(0, 0, 0, 1);
+.sidebar-content summary .large,
+.right-sidebar h2 {
+  @apply font-mono text-[0.7rem] font-semibold tracking-widest uppercase text-muted-foreground;
+}
 
-  /* UI utilities */
-  --purple-hsl: 205, 60%, 60%;
-  --overlay-blurple: hsla(var(--purple-hsl), 0.8);
-  --fb-scrollbar-height: 0.25rem;
-  --text-underline-offset: 0.25em;
-  --outline-offset: 2px;
-  --outline-offset-lg: 4px;
-  --outline-width: 2px;
-  --color-text-highlight: var(--sl-color-accent);
-  --fb-theme-btn-color-text: var(--sl-color-accent-high);
-  --rounded-full: 1e5px;
-  --header-button-size: 2rem;
-  --size-1: 0.25rem;
-  --size-npx: -1px;
-  --fb-toc-current-text-color: var(--sl-color-accent-high);
-  --fb-font-weight-semibold: 500;
-  --fb-h5-font-size: 0.875rem;
-  --steps-hairline-color: var(--sl-color-accent-high);
-  --paragraph-spacing: 1.5rem;
-  --fb-table-border-radius: 0.375rem;
+.sidebar-content li a {
+  @apply rounded-sm text-sm;
+}
+
+.sidebar-content li a:hover {
+  @apply transform-none;
+  font-weight: inherit;
+}
+
+.sidebar-content a[aria-current="page"] {
+  @apply bg-accent text-accent-foreground shadow-[inset_2px_0_var(--primary)];
+}
+
+.sidebar-content [aria-current="page"]::before {
+  @apply hidden;
+}
+
+.right-sidebar a[aria-current="true"] {
+  @apply bg-accent text-accent-foreground rounded-sm;
+}
+
+.right-sidebar a[aria-current="true"]::before,
+.right-sidebar a[aria-current="true"]::after {
+  @apply hidden;
+}
+
+/* Ruled headings and flatter panels keep long reference pages readable. */
+h1 {
+  @apply tracking-tighter leading-tight;
+}
+
+.sl-markdown-content h2::before {
+  @apply w-8 h-0.5 bg-primary;
+}
+
+.sl-markdown-content code:not(pre code) {
+  @apply text-[0.85em] border-border;
+}
+
+.sl-markdown-content table thead th {
+  @apply bg-none bg-secondary font-mono text-xs;
+}
+
+.expressive-code {
+  @apply shadow-[3px_3px_0_var(--secondary)];
+  --ec-brdCol: var(--border);
+  --ec-brdRad: 3px;
+  --ec-frm-frameBoxShdCssVal: none;
+}
+
+.expressive-code .ec-line.mark {
+  @apply bg-accent;
+}
+
+.starlight-aside {
+  @apply rounded-[3px] shadow-none backdrop-filter-none;
+}
+
+.starlight-aside:hover {
+  @apply shadow-none;
+}
+
+.starlight-aside__title {
+  @apply font-mono text-xs;
+}
+
+/* Important declarations in earlier layers beat the plugin's forced purple. */
+@layer starlight {
+  .expressive-code .ec-line.mark .code,
+  .expressive-code .ec-line.mark .code::before {
+    --ecLineBrdCol: var(--primary) !important;
+  }
+
+  [data-has-hero] .hero > img {
+    filter: none !important;
+  }
+}
+
+.card,
+.sl-link-card,
+.pagination-links a,
+.sl-banner,
+.sl-markdown-content blockquote {
+  @apply bg-none bg-card border border-border rounded-[3px] shadow-none backdrop-filter-none;
+}
+
+.sl-banner,
+.sl-markdown-content blockquote {
+  @apply border-s-[3px] border-s-primary;
+}
+
+.card:hover,
+.sl-link-card:hover,
+.pagination-links a:hover {
+  @apply bg-none bg-card border-primary shadow-[3px_3px_0_var(--accent)] transform-none;
+}
+
+.card::before,
+.sl-link-card::before {
+  @apply hidden;
+}
+
+.card .title {
+  @apply font-mono text-base;
+}
+
+.card-grid.stagger {
+  @apply items-stretch;
+}
+
+.card-grid.stagger .card {
+  @apply mt-0 animate-none opacity-100 transform-none;
+}
+
+.sl-link-button {
+  @apply font-mono;
+}
+
+.sl-link-button.primary,
+.sl-link-button.primary:hover {
+  @apply bg-none bg-primary text-primary-foreground shadow-[3px_3px_0_var(--accent)];
+}
+
+/* Shared hero styles reach release archives without editing their content. */
+[data-has-hero] .page {
+  @apply bg-none bg-background;
+}
+
+.hero {
+  @apply min-h-0 mt-8 mb-12 gap-8 border border-border border-t-[3px] border-t-primary bg-background;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 3rem 3rem;
+  background-blend-mode: soft-light;
+}
+
+.hero .stack,
+.hero .copy {
+  @apply items-start text-start;
+}
+
+.hero [data-page-title] {
+  @apply m-0 text-[clamp(4rem,10vw,7.5rem)] font-semibold tracking-[-0.09em] text-start animate-none;
+}
+
+.hero .tagline {
+  @apply max-w-[30ch] m-0 text-[clamp(1.1rem,2vw,1.4rem)] opacity-100;
+}
+
+.hero .actions {
+  @apply justify-start flex-wrap gap-3;
+}
+
+[data-has-hero] .hero > img {
+  @apply order-2 w-full max-w-76 my-0 mx-auto border border-border rounded-[3px] shadow-[8px_8px_0_var(--accent)] transform-none;
+}
+
+@media (min-width: 50rem) {
+  .hero {
+    @apply grid-cols-[1.3fr_1fr];
+  }
+}
+
+@media (max-width: 30rem) {
+  .main-pane {
+    @apply px-0;
+  }
+
+  .hero {
+    @apply mt-4;
+  }
+
+  [data-has-hero] .hero > img {
+    @apply max-w-52;
+  }
 }

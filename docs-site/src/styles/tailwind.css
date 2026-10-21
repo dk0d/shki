@@ -15,52 +15,37 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  /* lyra: boxy and sharp — pairs with the terminal theme. */
-  --radius: 0rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* Share the docs palette with islands and portalled controls in both themes. */
+  --radius: 0.25rem;
+  --background: var(--sl-color-bg);
+  --foreground: var(--sl-color-text);
+  --card: var(--shki-surface);
+  --card-foreground: var(--sl-color-text);
+  --popover: var(--shki-surface);
+  --popover-foreground: var(--sl-color-text);
+  --primary: var(--sl-color-accent);
+  --primary-foreground: var(--shki-on-accent);
+  --secondary: var(--sl-color-gray-7);
+  --secondary-foreground: var(--sl-color-gray-2);
+  --muted: var(--sl-color-gray-7);
+  --muted-foreground: var(--sl-color-gray-3);
+  --accent: var(--sl-color-accent-low);
+  --accent-foreground: var(--sl-color-accent-high);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: var(--sl-color-hairline);
+  --input: var(--sl-color-hairline);
+  --ring: var(--sl-color-accent);
 }
 
 [data-theme="dark"] {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
 }
 
 @theme inline {
+  --font-sans: var(--sl-font);
+  --font-mono: var(--sl-font-mono);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

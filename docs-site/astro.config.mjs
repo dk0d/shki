@@ -35,6 +35,58 @@ export default defineConfig({
         },
       ],
       customCss: ["./src/styles/tailwind.css", "./src/styles/custom.css"],
+      expressiveCode: {
+        themes: [
+          {
+            name: "shki-dark",
+            type: "dark",
+            colors: {
+              "editor.background": "#1e231e",
+              "editor.foreground": "#d4cec3",
+            },
+            tokenColors: [
+              {
+                scope: ["comment", "punctuation.definition.comment"],
+                settings: { foreground: "#b5b0a6" },
+              },
+              { scope: ["keyword", "storage"], settings: { foreground: "#e5a072" } },
+              { scope: ["string", "constant"], settings: { foreground: "#f2c5a4" } },
+              { scope: ["entity", "support", "variable"], settings: { foreground: "#eee8de" } },
+              { scope: "markup.inserted", settings: { foreground: "#b9c79b" } },
+              { scope: ["markup.deleted", "invalid"], settings: { foreground: "#e59a89" } },
+            ],
+          },
+          {
+            name: "shki-light",
+            type: "light",
+            colors: {
+              "editor.background": "#fffdf7",
+              "editor.foreground": "#3e453d",
+            },
+            tokenColors: [
+              {
+                scope: ["comment", "punctuation.definition.comment"],
+                settings: { foreground: "#596053" },
+              },
+              { scope: ["keyword", "storage"], settings: { foreground: "#9b4b27" } },
+              { scope: ["string", "constant"], settings: { foreground: "#79371b" } },
+              { scope: ["entity", "support", "variable"], settings: { foreground: "#252b25" } },
+              { scope: "markup.inserted", settings: { foreground: "#4b6336" } },
+              { scope: ["markup.deleted", "invalid"], settings: { foreground: "#9b3c2b" } },
+            ],
+          },
+        ],
+        styleOverrides: {
+          codeBackground: "var(--shki-surface)",
+          codeForeground: "var(--sl-color-text)",
+          codeFontFamily: "var(--sl-font-mono)",
+          borderColor: "var(--sl-color-hairline)",
+          frames: {
+            terminalBackground: "var(--shki-surface)",
+            terminalForeground: "var(--sl-color-text)",
+          },
+        },
+      },
       components: {
         // Renders the starlight-versions switcher next to the terminal
         // theme's toggle; both plugins warn that the slot is taken — that's
