@@ -56,6 +56,27 @@ pub struct MigrationRow {
     pub applied_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationState {
+    Applied,
+    Pending,
+    Missing,
+}
+
+#[derive(Debug)]
+pub struct MigrationStatusEntry {
+    pub name: String,
+    pub state: MigrationState,
+    pub applied: Option<MigrationRow>,
+    pub has_down: bool,
+}
+
+#[derive(Debug)]
+pub struct MigrationStatus {
+    pub entries: Vec<MigrationStatusEntry>,
+    pub database_available: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, tabled::Tabled)]
 #[serde(rename_all = "snake_case")]
 pub struct MigrationInfo {
@@ -332,6 +353,74 @@ impl MigrationManager {
         })
     }
 
+    /// Load local files and database history once, without creating the history table.
+    pub async fn migration_status(&self) -> Result<MigrationStatus> {
+        let local = self.list_up_migrations()?;
+        let database_available = !matches!(&self.engine, Engine::Detached(_));
+        let mut applied: indexmap::IndexMap<String, MigrationRow> = if database_available {
+            self.try_get_applied_migrations()
+                .await?
+                .into_iter()
+                .map(|row| (row.name.clone(), row))
+                .collect()
+        } else {
+            indexmap::IndexMap::new()
+        };
+        let mut entries = Vec::new();
+        for path in local {
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| ShkiError::migration("Invalid migration filename"))?
+                .to_string();
+            let row = applied.shift_remove(&name);
+            entries.push(MigrationStatusEntry {
+                state: if row.is_some() {
+                    MigrationState::Applied
+                } else {
+                    MigrationState::Pending
+                },
+                has_down: self.has_down_migration(&name),
+                name,
+                applied: row,
+            });
+        }
+        for (name, row) in applied {
+            entries.push(MigrationStatusEntry {
+                state: MigrationState::Missing,
+                has_down: self.has_down_migration(&name),
+                name,
+                applied: Some(row),
+            });
+        }
+        Ok(MigrationStatus {
+            entries,
+            database_available,
+        })
+    }
+
+    /// Validate a loaded status without querying database history again.
+    pub fn validate_migration_status(&self, status: &MigrationStatus) -> Result<()> {
+        if !status.database_available {
+            return Ok(());
+        }
+        if status
+            .entries
+            .iter()
+            .any(|entry| entry.state == MigrationState::Missing)
+        {
+            return Err(ShkiError::validation(
+                "Found applied migrations not found in local migrations",
+            ));
+        }
+        self.validate_applied_checksums(
+            status
+                .entries
+                .iter()
+                .filter_map(|entry| entry.applied.as_ref()),
+        )
+    }
+
     /// Get pending migrations
     pub async fn get_pending_migrations(&self) -> Result<Vec<PathBuf>> {
         let all_migrations = self.list_up_migrations()?;
@@ -361,7 +450,7 @@ impl MigrationManager {
     /// are skipped.
     pub async fn validate_checksums(&self) -> Result<()> {
         let applied = self.get_applied_migrations().await?;
-        self.validate_applied_checksums(applied)
+        self.validate_applied_checksums(&applied)
     }
 
     pub async fn validate_existing_checksums(&self) -> Result<()> {
@@ -369,12 +458,15 @@ impl MigrationManager {
             return Ok(());
         }
         let applied = self.engine.select_migrations().await?;
-        self.validate_applied_checksums(applied)
+        self.validate_applied_checksums(&applied)
     }
 
-    fn validate_applied_checksums(&self, applied: Vec<MigrationRow>) -> Result<()> {
+    fn validate_applied_checksums<'a>(
+        &self,
+        applied: impl IntoIterator<Item = &'a MigrationRow>,
+    ) -> Result<()> {
         for migration in applied {
-            let Some(stored_checksum) = migration.checksum else {
+            let Some(stored_checksum) = &migration.checksum else {
                 continue;
             };
 
@@ -386,10 +478,10 @@ impl MigrationManager {
             let sql = std::fs::read_to_string(&migration_path)?;
             let current_checksum = sql_checksum(&sql);
 
-            if stored_checksum != current_checksum {
+            if stored_checksum != &current_checksum {
                 return Err(ShkiError::checksum_mismatch(
                     &migration.name,
-                    &stored_checksum,
+                    stored_checksum,
                     &current_checksum,
                 ));
             }
@@ -796,6 +888,64 @@ mod tests {
             .into_iter()
             .map(|migration| migration.name)
             .collect()
+    }
+
+    #[tokio::test]
+    async fn migration_status_classifies_raw_entries_and_preserves_metadata() {
+        let (_temp_dir, manager) = sqlite_manager();
+        write_sqlite_migrations(&manager, &["0000_missing", "0001_applied", "0002_pending"]);
+        for name in ["0000_missing", "0001_applied"] {
+            manager
+                .mark_migration_applied(&manager.get_up_migration_path(name))
+                .await
+                .unwrap();
+            std::fs::write(manager.get_down_migration_path(name), "SELECT 1;").unwrap();
+        }
+        std::fs::remove_file(manager.get_up_migration_path("0000_missing")).unwrap();
+        let history = manager.try_get_applied_migrations().await.unwrap();
+
+        let status = manager.migration_status().await.unwrap();
+
+        assert!(status.database_available);
+        assert_eq!(status.entries.len(), 3);
+        for (name, state) in [
+            ("0000_missing", MigrationState::Missing),
+            ("0001_applied", MigrationState::Applied),
+            ("0002_pending", MigrationState::Pending),
+        ] {
+            let entry = status
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap();
+            assert_eq!(entry.state, state);
+            assert_eq!(entry.has_down, state != MigrationState::Pending);
+            if let Some(row) = history.iter().find(|row| row.name == name) {
+                let applied = entry.applied.as_ref().unwrap();
+                assert_eq!(applied.checksum, row.checksum);
+                assert_eq!(applied.applied_at, row.applied_at);
+            } else {
+                assert!(entry.applied.is_none());
+            }
+        }
+        assert!(manager.validate_migration_status(&status).is_err());
+    }
+
+    #[tokio::test]
+    async fn migration_status_distinguishes_offline_from_empty_database_history() {
+        let (_offline_dir, offline) = temp_manager();
+        let (_online_dir, online) = sqlite_manager();
+        for manager in [&offline, &online] {
+            write_sqlite_migrations(manager, &["0000_pending"]);
+            let status = manager.migration_status().await.unwrap();
+            assert_eq!(status.entries.len(), 1);
+            assert_eq!(status.entries[0].state, MigrationState::Pending);
+            assert!(status.entries[0].applied.is_none());
+            manager.validate_migration_status(&status).unwrap();
+        }
+        assert!(!offline.migration_status().await.unwrap().database_available);
+        assert!(online.migration_status().await.unwrap().database_available);
+        assert!(!online.engine.migrations_table_exists().await.unwrap());
     }
 
     #[test]

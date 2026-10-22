@@ -114,7 +114,7 @@ pub async fn cmd_adopt(
     }
 
     println!();
-    display_migrations(&manager, config).await?;
+    display_migrations(&manager.migration_status().await?);
 
     Ok(())
 }

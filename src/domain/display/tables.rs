@@ -1,8 +1,7 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::Result;
 use crate::config::Config;
-use crate::migrate::manager::{MigrationManager, MigrationRow};
+use crate::migrate::manager::{
+    MigrationRow, MigrationState, MigrationStatus, MigrationStatusEntry,
+};
 use owo_colors::OwoColorize;
 use tabled::Tabled;
 use tabled::settings::Alignment;
@@ -16,7 +15,7 @@ const DOWN_SYMBOL: &str = "↓";
 const NO_DOWN_SYMBOL: &str = "-";
 
 #[derive(Debug, Tabled)]
-pub struct MigrationState {
+struct MigrationDisplayRow {
     status: String,
     name: String,
     down: String,
@@ -24,76 +23,67 @@ pub struct MigrationState {
     checksum: String,
 }
 
-pub async fn display_migrations(manager: &MigrationManager, config: &Config) -> Result<()> {
-    let all_migrations = manager.list_up_migrations()?;
+fn has_down_display(has_down: bool) -> String {
+    if has_down {
+        format!(" {}", DOWN_SYMBOL.cyan())
+    } else {
+        format!(" {}", NO_DOWN_SYMBOL.dimmed())
+    }
+}
 
-    if all_migrations.is_empty() {
+pub fn display_migrations(status: &MigrationStatus) {
+    if status.entries.is_empty() {
         println!("{}", "No migrations found".yellow());
-        return Ok(());
+        return;
     }
 
-    let applied = if config.database_url().is_some() {
-        Some(manager.try_get_applied_migrations().await?)
-    } else {
-        None
-    };
-
-    let applied_set: HashSet<&str> = applied
-        .as_deref()
-        .map(|rows| rows.iter().map(|m| m.name.as_str()).collect())
-        .unwrap_or_default();
-
-    let applied_by_name: HashMap<&str, &MigrationRow> = applied
-        .as_deref()
-        .map(|rows| rows.iter().map(|m| (m.name.as_str(), m)).collect())
-        .unwrap_or_default();
-
-    let migrations = all_migrations
+    let (missing, defined): (Vec<_>, Vec<_>) = status
+        .entries
         .iter()
-        .map(|path| {
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown");
+        .partition(|entry| entry.state == MigrationState::Missing);
+    if !defined.is_empty() {
+        display_migration_status_table(&defined);
+    }
 
-            let status = if applied_set.contains(name) {
-                "✔".green().to_string()
-            } else {
-                "~".yellow().to_string()
-            };
+    if !missing.is_empty() {
+        println!(
+            "\n{}: DB has migrations that are not defined in local migrations",
+            "**WARNING**".yellow(),
+        );
+        display_migration_status_table(&missing);
+    }
+}
 
-            let has_down = manager.has_down_migration(name);
-
-            MigrationState {
-                status: status.to_string(),
-                name: name.bright_white().to_string(),
-                checksum: applied_by_name
-                    .get(name)
-                    .and_then(|m| m.checksum.clone())
-                    .unwrap_or_else(|| "-".dimmed().to_string()),
-                down: if has_down {
-                    format!(" {}", DOWN_SYMBOL.cyan())
-                } else {
-                    format!(" {}", NO_DOWN_SYMBOL.dimmed())
-                },
-                applied_at: applied_by_name
-                    .get(name)
-                    .map(|m| m.applied_at.clone())
-                    .unwrap_or_default(),
-            }
+fn display_migration_status_table(entries: &[&MigrationStatusEntry]) {
+    let rows: Vec<_> = entries
+        .iter()
+        .map(|entry| MigrationDisplayRow {
+            status: match entry.state {
+                MigrationState::Applied => "✔ applied".green().to_string(),
+                MigrationState::Pending => "~ pending".yellow().to_string(),
+                MigrationState::Missing => "x missing".red().to_string(),
+            },
+            name: entry.name.bright_white().to_string(),
+            down: has_down_display(entry.has_down),
+            applied_at: entry
+                .applied
+                .as_ref()
+                .map(|row| row.applied_at.clone())
+                .unwrap_or_default(),
+            checksum: entry
+                .applied
+                .as_ref()
+                .and_then(|row| row.checksum.clone())
+                .unwrap_or_else(|| "-".dimmed().to_string()),
         })
-        .collect::<Vec<_>>();
-
-    let mut table = Table::new(&migrations);
+        .collect();
+    let mut table = Table::new(rows);
     table
         .with(Style::psql())
         .modify(Rows::one(0), Color::BOLD)
         .modify(Columns::first(), Alignment::center())
         .modify(Columns::one(2), Alignment::center());
-
     println!("{}", table);
-
-    Ok(())
 }
 
 pub fn display_migration_rows(migrations: &[MigrationRow]) {

@@ -1,6 +1,5 @@
 use crate::Result;
 use crate::config::Config;
-use owo_colors::OwoColorize;
 
 use super::display::tables::display_migrations;
 use super::migrate::manager::MigrationManager;
@@ -11,29 +10,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
     let migration_manager = MigrationManager::from_config(config).await?;
 
-    display_migrations(&migration_manager, config).await?;
-
-    // Perform validation checks
-    let mut has_errors = false;
-    let has_warnings = false;
-
-    // Validate applied migration checksums if database is available
-    if config.database_url().is_some()
-        && let Err(e) = migration_manager.validate_existing_checksums().await
-    {
-        println!("{}", "Checksum Validation Failed".red().bold());
-        println!("{}", e);
-        has_errors = true;
-    }
-
-    if has_errors {
-        println!(
-            "{}",
-            "Validation errors found. Please resolve before running migrations.".red()
-        );
-    } else if has_warnings {
-        println!("{}", "Warnings found. Review the issues above.".yellow());
-    }
-
-    Ok(())
+    let status = migration_manager.migration_status().await?;
+    display_migrations(&status);
+    migration_manager.validate_migration_status(&status)
 }

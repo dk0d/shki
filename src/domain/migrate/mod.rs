@@ -22,7 +22,7 @@ pub async fn cmd_migrate(
     let manager = MigrationManager::from_config(config).await?;
 
     if dry_run {
-        display_migrations(&manager, config).await?;
+        display_migrations(&manager.migration_status().await?);
         println!("{}", "(dry run - no changes applied)".cyan());
         return Ok(());
     }
@@ -34,7 +34,7 @@ pub async fn cmd_migrate(
         applied.len().to_string().green()
     );
 
-    display_migrations(&manager, config).await?;
+    display_migrations(&manager.migration_status().await?);
 
     Ok(())
 }
